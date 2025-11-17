@@ -1,16 +1,12 @@
-/**
- * This file is the entry point for the React app, it sets up the root
- * element and renders the App component to the DOM.
- *
- * It is included in `src/index.html`.
- */
-
 import { createRoot } from "react-dom/client";
+
 import { App } from "./App";
+import { init } from "./client/init";
 
 function start() {
-  const root = createRoot(document.getElementById("root")!);
+  const root = createRoot(document.getElementById("ui")!);
   root.render(<App />);
+  init(document.getElementById("game")!);
 }
 
 if (document.readyState === "loading") {

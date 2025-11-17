@@ -1,12 +1,14 @@
 // description: This example demonstrates how to use a Container to group and manipulate multiple sprites
 import { Application, Assets, Container, Sprite } from "pixi.js";
 
+import player from "./assets/images/player.png";
+
 export const init = async (parent: HTMLElement) => {
   // Create a new application
   const app = new Application();
 
   // Initialize the application
-  await app.init({ background: "#1099bb", resizeTo: window });
+  await app.init({ background: "#000000", resizeTo: window });
 
   // Append the application canvas to the document body
   parent.appendChild(app.canvas);
@@ -17,7 +19,7 @@ export const init = async (parent: HTMLElement) => {
   app.stage.addChild(container);
 
   // Load the bunny texture
-  const texture = await Assets.load("https://pixijs.com/assets/bunny.png");
+  const texture = await Assets.load(player);
 
   // Create a 5x5 grid of bunnies in the container
   for (let i = 0; i < 25; i++) {

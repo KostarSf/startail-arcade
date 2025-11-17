@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
-import { init } from "./client/init";
+import { init } from "./engine";
 
 function start() {
   const root = createRoot(document.getElementById("ui")!);

@@ -277,7 +277,7 @@ export const init = async (parent: HTMLElement) => {
     app.canvas.width = window.innerWidth;
     app.canvas.height = window.innerHeight;
 
-    const targetCameraScale = 2 - inverseLerp(playerSpeed, 0, 250);
+    const targetCameraScale = 2 - inverseLerp(playerSpeed, 0, 350);
 
     const cameraScale = lerp(
       camera.scale.x,

@@ -42,6 +42,8 @@ export class Engine {
     this.#lastTime = this.#startTime;
     this.#accumulatedTime = 0;
 
+    this.#world.initialize(this);
+
     const loop = () => {
       if (!this.#running) return;
 

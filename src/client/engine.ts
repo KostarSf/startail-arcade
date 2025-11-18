@@ -1,13 +1,15 @@
 // description: This example demonstrates how to use a Container to group and manipulate multiple sprites
 import { Application, Assets, Container, Sprite, Ticker } from "pixi.js";
 
+import { lerp } from "@/shared/math/utils";
 import type { NetworkEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
-import { lerp } from "@/shared/math/utils";
+import { stats } from "./store";
+
+import asteroid from "./assets/images/asteroids/medium-01.png";
 import pirate from "./assets/images/pirate.png";
 import player from "./assets/images/player.png";
-import { stats } from "./store";
 
 export const init = async (parent: HTMLElement) => {
   // Create a new application
@@ -84,6 +86,7 @@ export const init = async (parent: HTMLElement) => {
   // Load the bunny texture
   const playerTexture = await Assets.load(player);
   const pirateTexture = await Assets.load(pirate);
+  const asteroidTexture = await Assets.load(asteroid);
 
   const objects = new Map<string, Container>();
 
@@ -207,6 +210,20 @@ export const init = async (parent: HTMLElement) => {
                 // console.log("spawned", entity.type, entity.id);
               }
             }
+
+            if (entity.type === "asteroid") {
+              const asteroid = objects.get(entity.id) || createAsteroid();
+
+              asteroid.x = entity.x;
+              asteroid.y = entity.y;
+              asteroid.rotation = entity.angle;
+
+              if (!objects.has(entity.id)) {
+                objects.set(entity.id, asteroid);
+                camera.addChild(asteroid);
+                // console.log("spawned", entity.type, entity.id);
+              }
+            }
           }
 
           for (const [id, object] of objects) {
@@ -235,6 +252,13 @@ export const init = async (parent: HTMLElement) => {
     }
     ship.addChild(sprite);
     return ship;
+  };
+  const createAsteroid = () => {
+    const asteroid = new Container();
+    const sprite = new Sprite({ texture: asteroidTexture, anchor: 0.5 });
+    sprite.tint = 0x808080;
+    asteroid.addChild(sprite);
+    return asteroid;
   };
 
   app.canvas.style.imageRendering = "pixelated";

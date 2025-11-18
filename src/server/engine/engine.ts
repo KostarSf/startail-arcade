@@ -9,6 +9,7 @@ export class Engine {
 
   #world = new World();
   #interval: NodeJS.Timeout | null = null;
+  #tick = 0;
 
   get world() {
     return this.#world;
@@ -24,15 +25,30 @@ export class Engine {
 
   start() {
     this.#interval = setInterval(() => {
-      this.#world.update(1 / TPS);
-      this.network.sendServerState();
+      this.#update(1 / TPS);
     }, 1000 / TPS);
+
+    console.log("engine started");
   }
 
   stop() {
     if (this.#interval) {
       clearInterval(this.#interval);
       this.#interval = null;
+    }
+    this.world.clear();
+    this.#tick = 0;
+
+    console.log("engine stopped");
+  }
+
+  #update(dt: number) {
+    this.#tick++;
+    this.#world.update(dt);
+    this.network.sendServerState();
+
+    if (this.network.playerCount === 0) {
+      this.stop();
     }
   }
 }
@@ -44,6 +60,14 @@ class EngineNetwork {
 
   get engine() {
     return this.#engine;
+  }
+
+  get players() {
+    return Array.from(this.#players.values());
+  }
+
+  get playerCount() {
+    return this.#players.size;
   }
 
   constructor(engine: Engine) {
@@ -71,16 +95,23 @@ class EngineNetwork {
   }
 
   disconnectPlayer(ws: Bun.ServerWebSocket) {
+    ws.close();
+
     const player = this.#players.get(ws);
     if (!player) return;
 
     player.ship.remove();
     this.#players.delete(ws);
+
+    console.log(`player disconnected: ${player.id}`);
   }
 
   onMessage(ws: Bun.ServerWebSocket, message: NetworkEvent) {
     const player = this.#players.get(ws);
-    if (!player) return;
+    if (!player) {
+      ws.close();
+      return;
+    }
 
     switch (message.type) {
       case "player:input":
@@ -92,7 +123,7 @@ class EngineNetwork {
         if (message.input.angle !== undefined) {
           player.ship.angle = message.input.angle;
         }
-        if (message.input.fire !== undefined) {
+        if (message.input.fire) {
           player.ship.fire();
         }
 
@@ -125,8 +156,6 @@ class EngineNetwork {
     for (const player of this.#players.values()) {
       this.disconnectPlayer(player.ws);
     }
-    this.engine.stop();
-    this.engine.world.clear();
   }
 }
 

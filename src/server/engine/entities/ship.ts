@@ -12,6 +12,7 @@ export class Ship extends BaseEntity {
 
   constructor(ship: Partial<IShip>) {
     super(ship);
+    this.type = "ship";
     this.thrust = ship.thrust ?? false;
   }
 
@@ -55,7 +56,6 @@ export class Ship extends BaseEntity {
   override toJSON() {
     return {
       ...super.toJSON(),
-      type: "ship",
       thrust: this.thrust,
     };
   }

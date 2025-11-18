@@ -1,6 +1,7 @@
 import type { World } from "../world/world";
 
 export interface IBaseEntity {
+  type: string;
   id: string;
   x: number;
   y: number;
@@ -11,6 +12,7 @@ export interface IBaseEntity {
 }
 
 export abstract class BaseEntity {
+  type: string;
   id: string;
 
   x: number;
@@ -38,6 +40,7 @@ export abstract class BaseEntity {
   }
 
   constructor(entity: Partial<IBaseEntity>) {
+    this.type = entity.type ?? "entity";
     this.id = entity.id ?? crypto.randomUUID();
     this.x = entity.x ?? 0;
     this.y = entity.y ?? 0;
@@ -83,7 +86,7 @@ export abstract class BaseEntity {
 
   toJSON() {
     return {
-      type: "entity",
+      type: this.type,
       id: this.id,
       x: this.x,
       y: this.y,

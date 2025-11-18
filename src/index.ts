@@ -6,6 +6,18 @@ import type { NetworkEvent } from "./shared/network/events";
 
 const engine = new Engine();
 
+declare global {
+  var game: { engine: Engine } | undefined;
+}
+
+if (process.env.NODE_ENV !== "production") {
+  if (globalThis.game) {
+    globalThis.game.engine.network.disconnectAllPlayers();
+    globalThis.game.engine.stop();
+  }
+  globalThis.game = { engine };
+}
+
 const server = serve({
   routes: {
     "/ws": (req, server) => {

@@ -39,6 +39,8 @@ export const init = async (parent: HTMLElement) => {
     fire: false,
   };
 
+  let ws: WebSocket | null = null;
+
   const sendInputEventsTicker = new Ticker();
   sendInputEventsTicker.add(() => {
     if (
@@ -47,7 +49,7 @@ export const init = async (parent: HTMLElement) => {
       lastPlayerInput.thrust !== lastSentPlayerInput.thrust ||
       lastPlayerInput.fire !== lastSentPlayerInput.fire
     ) {
-      ws.send(
+      ws?.send(
         event({
           type: "player:input",
           sequence: lastSequence++,
@@ -63,6 +65,14 @@ export const init = async (parent: HTMLElement) => {
       lastSentPlayerInput.fire = lastPlayerInput.fire = false;
     }
   });
+
+  // Load the bunny texture
+  const playerTexture = await Assets.load(player);
+  const pirateTexture = await Assets.load(pirate);
+
+  let playerId: string | null = null;
+  let playerObject: Container | null = null;
+  const objects = new Map<string, Container>();
 
   const mousePos = { x: 0, y: 0 };
   app.stage.on("pointermove", (e) => {
@@ -80,15 +90,69 @@ export const init = async (parent: HTMLElement) => {
     }
   });
 
-  // Load the bunny texture
-  const playerTexture = await Assets.load(player);
-  const pirateTexture = await Assets.load(pirate);
+  const connectToServer = () => {
+    ws = new WebSocket("ws://localhost:3000/ws");
 
-  let playerId: string | null = null;
-  let playerObject: Container | null = null;
-  const objects = new Map<string, Container>();
+    ws.onclose = () => {
+      console.log("Disconnected from server");
+      sendInputEventsTicker.stop();
+      objects.forEach((object) => {
+        camera.removeChild(object);
+      });
+      objects.clear();
+      ws = null;
 
-  const ws = new WebSocket("ws://localhost:3000/ws");
+      setTimeout(() => connectToServer(), 500);
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data) as NetworkEvent;
+      switch (message.type) {
+        case "server:player-initialize":
+          playerId = message.playerId;
+          sendInputEventsTicker.maxFPS = message.tps * 2;
+          sendInputEventsTicker.start();
+          break;
+        case "server:state":
+          const currentObjectsIds = new Set(
+            message.entities.map((entity) => entity.id)
+          );
+
+          for (const entity of message.entities) {
+            if (entity.type === "ship") {
+              const ship =
+                objects.get(entity.id) || createShip(entity.id === playerId);
+
+              if (entity.id === playerId) {
+                playerObject = ship;
+              }
+
+              ship.x = Math.round(entity.x);
+              ship.y = Math.round(entity.y);
+              ship.rotation = entity.angle;
+
+              if (!objects.has(entity.id)) {
+                objects.set(entity.id, ship);
+                camera.addChild(ship);
+                // console.log("spawned", entity.type, entity.id);
+              }
+            }
+          }
+
+          for (const [id, object] of objects) {
+            if (!currentObjectsIds.has(id)) {
+              objects.delete(id);
+              camera.removeChild(object);
+              console.log("despawned", id);
+            }
+          }
+
+          break;
+      }
+    };
+  };
+
+  connectToServer();
 
   const createShip = (isPlayer: boolean) => {
     const ship = new Container();
@@ -99,52 +163,6 @@ export const init = async (parent: HTMLElement) => {
     }
     ship.addChild(sprite);
     return ship;
-  };
-
-  ws.onmessage = (event) => {
-    const message = JSON.parse(event.data) as NetworkEvent;
-    switch (message.type) {
-      case "server:player-initialize":
-        playerId = message.playerId;
-        sendInputEventsTicker.maxFPS = message.tps * 2;
-        sendInputEventsTicker.start();
-        break;
-      case "server:state":
-        const currentObjectsIds = new Set(
-          message.entities.map((entity) => entity.id)
-        );
-
-        for (const entity of message.entities) {
-          if (entity.type === "ship") {
-            const ship =
-              objects.get(entity.id) || createShip(entity.id === playerId);
-
-            if (entity.id === playerId) {
-              playerObject = ship;
-            }
-
-            ship.x = Math.round(entity.x);
-            ship.y = Math.round(entity.y);
-            ship.rotation = entity.angle;
-
-            if (!objects.has(entity.id)) {
-              objects.set(entity.id, ship);
-              camera.addChild(ship);
-              console.log("spawned", entity.id);
-            }
-          }
-        }
-
-        for (const [id, object] of objects) {
-          if (!currentObjectsIds.has(id)) {
-            objects.delete(id);
-            camera.removeChild(object);
-            console.log("despawned", id);
-          }
-        }
-
-        break;
-    }
   };
 
   app.canvas.style.imageRendering = "pixelated";

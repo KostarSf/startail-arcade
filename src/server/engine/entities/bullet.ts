@@ -11,6 +11,7 @@ export class Bullet extends BaseEntity {
 
   constructor(bullet: Partial<IBullet>) {
     super(bullet);
+    this.type = "bullet";
     this.life = bullet.life ?? Bullet.lifeSpan;
   }
 
@@ -23,7 +24,6 @@ export class Bullet extends BaseEntity {
   override toJSON() {
     return {
       ...super.toJSON(),
-      type: "bullet",
       life: this.life,
     };
   }

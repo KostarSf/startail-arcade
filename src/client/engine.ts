@@ -1,10 +1,11 @@
 // description: This example demonstrates how to use a Container to group and manipulate multiple sprites
 import { Application, Assets, Container, Sprite, Ticker } from "pixi.js";
 
-import { lerp } from "@/shared/math/utils";
+import { inverseLerp, lerp } from "@/shared/math/utils";
 import type { NetworkEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
+import { Starfield } from "./starfield";
 import { stats } from "./store";
 
 import asteroid from "./assets/images/asteroids/medium-01.png";
@@ -23,6 +24,10 @@ export const init = async (parent: HTMLElement) => {
 
   // Append the application canvas to the document body
   parent.appendChild(app.canvas);
+
+  // Создаем звездное поле (добавляем ПЕРЕД камерой, чтобы было за ней)
+  const starfield = new Starfield(500, 10000, 10000, 0.3);
+  app.stage.addChild(starfield.getContainer());
 
   const camera = new Container();
   app.stage.addChild(camera);
@@ -120,6 +125,8 @@ export const init = async (parent: HTMLElement) => {
     }
   });
 
+  let playerSpeed = 0;
+
   const connectToServer = () => {
     ws = new WebSocket("ws://192.168.0.107:3000/ws");
 
@@ -198,6 +205,7 @@ export const init = async (parent: HTMLElement) => {
 
               if (entity.id === playerId) {
                 setPlayerObject(ship);
+                playerSpeed = Math.sqrt(entity.vx ** 2 + entity.vy ** 2);
               }
 
               ship.x = entity.x;
@@ -269,7 +277,13 @@ export const init = async (parent: HTMLElement) => {
     app.canvas.width = window.innerWidth;
     app.canvas.height = window.innerHeight;
 
-    const cameraScale = lerp(camera.scale.x, 2, time.deltaTime * 0.05);
+    const targetCameraScale = 2 - inverseLerp(playerSpeed, 0, 250);
+
+    const cameraScale = lerp(
+      camera.scale.x,
+      targetCameraScale,
+      time.deltaTime * 0.05
+    );
 
     const { playerObject } = stats();
 
@@ -281,5 +295,15 @@ export const init = async (parent: HTMLElement) => {
     }
 
     camera.scale.set(cameraScale);
+
+    // Обновляем звездное поле с учетом позиции камеры и параллакса
+    starfield.update(
+      time.deltaMS,
+      camera.x,
+      camera.y,
+      cameraScale,
+      app.screen.width,
+      app.screen.height
+    );
   });
 };

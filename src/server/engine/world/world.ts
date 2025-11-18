@@ -5,7 +5,7 @@ import type { BaseEntity } from "../entities/base-entity";
 export class World {
   #entities = new Map<string, BaseEntity>();
 
-  #borderRadius = 500;
+  #borderRadius = 2000;
 
   get entities() {
     return Array.from(this.#entities.values());

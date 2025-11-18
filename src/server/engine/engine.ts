@@ -51,10 +51,7 @@ class EngineNetwork {
 
   connectPlayer(ws: Bun.ServerWebSocket) {
     const player = new ServerPlayer(ws);
-    player.ship.setPosition(
-      Math.random() * 1000 - 500,
-      Math.random() * 1000 - 500
-    );
+    player.ship.setPosition(Math.random() * 200, Math.random() * 200);
     this.#players.set(ws, player);
     this.engine.world.spawn(player.ship);
 
@@ -87,9 +84,13 @@ class EngineNetwork {
       case "player:input":
         if (player.ship.removed) break;
 
-        player.ship.accelerating = message.input.accelerating;
-        player.ship.angle = message.input.angle;
-        if (message.input.firing) {
+        if (message.input.accelerating !== undefined) {
+          player.ship.accelerating = !!message.input.accelerating;
+        }
+        if (message.input.angle !== undefined) {
+          player.ship.angle = message.input.angle;
+        }
+        if (message.input.firing !== undefined) {
           player.ship.fire();
         }
 
@@ -119,6 +120,14 @@ class EngineNetwork {
         entities,
       })
     );
+  }
+
+  disconnectAllPlayers() {
+    for (const player of this.#players.values()) {
+      this.disconnectPlayer(player.ws);
+    }
+    this.engine.stop();
+    this.engine.world.clear();
   }
 }
 

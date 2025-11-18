@@ -1,6 +1,8 @@
 // description: This example demonstrates how to use a Container to group and manipulate multiple sprites
 import { Application, Assets, Container, Sprite } from "pixi.js";
 
+import type { NetworkEvent } from "@/shared/network/events";
+import pirate from "./assets/images/pirate.png";
 import player from "./assets/images/player.png";
 
 export const init = async (parent: HTMLElement) => {
@@ -8,40 +10,131 @@ export const init = async (parent: HTMLElement) => {
   const app = new Application();
 
   // Initialize the application
-  await app.init({ background: "#000000", resizeTo: window });
+  await app.init({
+    background: "#000000",
+    resizeTo: window,
+  });
 
   // Append the application canvas to the document body
   parent.appendChild(app.canvas);
 
-  // Create and add a container to the stage
-  const container = new Container();
+  const camera = new Container();
+  app.stage.addChild(camera);
 
-  app.stage.addChild(container);
+  app.stage.eventMode = "static";
+  app.stage.hitArea = app.screen;
+
+  const mousePos = { x: 0, y: 0 };
+  app.stage.on("pointermove", (event) => {
+    mousePos.x = Math.floor((event.global.x - camera.x) / camera.scale.x);
+    mousePos.y = Math.floor((event.global.y - camera.y) / camera.scale.y);
+
+    if (playerObject) {
+      // get angle between mousePos and playerObject
+      const angle = Math.atan2(
+        mousePos.y - playerObject.y,
+        mousePos.x - playerObject.x
+      );
+
+      playerObject.rotation = angle;
+
+      // send angle to server
+      ws.send(
+        JSON.stringify({
+          type: "player:input",
+          input: { angle },
+        } as NetworkEvent)
+      );
+    }
+  });
 
   // Load the bunny texture
-  const texture = await Assets.load(player);
+  const playerTexture = await Assets.load(player);
+  const pirateTexture = await Assets.load(pirate);
 
-  // Create a 5x5 grid of bunnies in the container
-  for (let i = 0; i < 25; i++) {
-    const bunny = new Sprite(texture);
+  let playerId: string | null = null;
+  let playerObject: Container | null = null;
 
-    bunny.x = (i % 5) * 40;
-    bunny.y = Math.floor(i / 5) * 40;
-    container.addChild(bunny);
-  }
+  const objects = new Map<string, Container>();
 
-  // Move the container to the center
-  container.x = app.screen.width / 2;
-  container.y = app.screen.height / 2;
+  const ws = new WebSocket("ws://localhost:3000/ws");
 
-  // Center the bunny sprites in local container coordinates
-  container.pivot.x = container.width / 2;
-  container.pivot.y = container.height / 2;
+  const createShip = (isPlayer: boolean) => {
+    const ship = new Container();
+    const texture = isPlayer ? playerTexture : pirateTexture;
+    const sprite = new Sprite({ texture, anchor: 0.5 });
+    if (!isPlayer) {
+      sprite.tint = 0xa0a0a0;
+    }
+    ship.addChild(sprite);
+    return ship;
+  };
 
-  // Listen for animate update
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data) as NetworkEvent;
+    switch (message.type) {
+      case "player:set-id":
+        playerId = message.id;
+        break;
+      case "server:state":
+        const currentObjectsIds = new Set(
+          message.entities.map((entity) => entity.id)
+        );
+
+        for (const entity of message.entities) {
+          if (entity.type === "ship") {
+            const ship =
+              objects.get(entity.id) || createShip(entity.id === playerId);
+
+            if (entity.id === playerId) {
+              playerObject = ship;
+            }
+
+            ship.x = Math.round(entity.x);
+            ship.y = Math.round(entity.y);
+            ship.rotation = entity.angle;
+
+            if (!objects.has(entity.id)) {
+              objects.set(entity.id, ship);
+              camera.addChild(ship);
+              console.log("spawned", entity.id);
+            }
+          }
+        }
+
+        for (const [id, object] of objects) {
+          if (!currentObjectsIds.has(id)) {
+            objects.delete(id);
+            camera.removeChild(object);
+            console.log("despawned", id);
+          }
+        }
+
+        break;
+    }
+  };
+
+  app.canvas.style.imageRendering = "pixelated";
+
+  camera.scale.set(1);
+
   app.ticker.add((time) => {
-    // Continuously rotate the container!
-    // * use delta to create frame-independent transform *
-    container.rotation -= 0.01 * time.deltaTime;
+    app.canvas.width = window.innerWidth;
+    app.canvas.height = window.innerHeight;
+
+    const cameraScale = lerp(camera.scale.x, 2, time.deltaTime * 0.05);
+
+    if (playerObject) {
+      const targetX = playerObject.x * cameraScale - app.screen.width / 2;
+      const targetY = playerObject.y * cameraScale - app.screen.height / 2;
+      camera.x = -lerp(-camera.x, targetX, time.deltaTime * 0.1);
+      camera.y = -lerp(-camera.y, targetY, time.deltaTime * 0.1);
+    }
+
+    camera.scale.set(cameraScale);
   });
 };
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}

@@ -15,12 +15,14 @@ function PlayerStats() {
   const predictedServerTime = Math.floor(performance.now() + stats.offset);
 
   return (
-    <div>
+    <div className="font-mono">
       <p className="text-sm">Player ID: {stats.playerId}</p>
-      <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p>
       <p className="text-sm">
-        Position: {stats.playerObject?.x}, {stats.playerObject?.y}
+        Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
+        {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
       </p>
+      <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p>
+      <p className="text-sm">Objects: {stats.objectsCount}</p>
       {stats.hasTimeSync ? (
         <>
           <p className="text-xs text-gray-500">

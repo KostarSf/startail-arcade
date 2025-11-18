@@ -28,13 +28,6 @@ export class Ship extends BaseEntity {
       // Нормализуем разницу в диапазон [0, π] с учетом цикличности углов
       angleDiff = Math.min(angleDiff, 2 * Math.PI - angleDiff);
       drift = inverseLerp(angleDiff, 0, Math.PI);
-
-      console.log(
-        "speed",
-        Math.round(speed),
-        "drift",
-        Math.round(drift * 100) / 100
-      );
     }
 
     if (this.thrust) {

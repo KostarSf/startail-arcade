@@ -129,6 +129,9 @@ export const init = async (parent: HTMLElement) => {
       });
       objects.clear();
       ws = null;
+      stats().setLatency(0);
+      stats().setOffset(0);
+      stats().setHasTimeSync(false);
 
       setTimeout(() => connectToServer(), 500);
     };
@@ -213,6 +216,8 @@ export const init = async (parent: HTMLElement) => {
               console.log("despawned", id);
             }
           }
+
+          stats().setObjectsCount(objects.size);
 
           break;
       }

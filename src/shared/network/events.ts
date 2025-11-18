@@ -8,11 +8,6 @@ export interface PlayerInputEvent {
   };
 }
 
-export interface PlayerFiringEvent {
-  type: "player:firing";
-  sequence: number;
-}
-
 export interface PlayerSetIdEvent {
   type: "server:player-initialize";
   playerId: string;
@@ -50,4 +45,6 @@ export interface ServerStateEvent {
 export type NetworkEvent =
   | PlayerInputEvent
   | ServerStateEvent
-  | PlayerSetIdEvent;
+  | PlayerSetIdEvent
+  | PlayerPingEvent
+  | ServerPongEvent;

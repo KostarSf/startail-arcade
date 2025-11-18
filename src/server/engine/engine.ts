@@ -1,6 +1,6 @@
 import type { NetworkEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
-import { TPS } from "./constants";
+import { DT_MS, TPS } from "./constants";
 import { Ship } from "./entities/ship";
 import { World } from "./world/world";
 
@@ -8,15 +8,26 @@ export class Engine {
   network: EngineNetwork;
 
   #world = new World();
-  #interval: NodeJS.Timeout | null = null;
+  #running = false;
   #tick = 0;
+  #startTime = 0;
+  #lastTime = 0;
+  #accumulatedTime = 0;
+
+  get tick() {
+    return this.#tick;
+  }
 
   get world() {
     return this.#world;
   }
 
   get running() {
-    return !!this.#interval;
+    return this.#running;
+  }
+
+  get serverTime() {
+    return performance.now() - this.#startTime;
   }
 
   constructor() {
@@ -24,18 +35,39 @@ export class Engine {
   }
 
   start() {
-    this.#interval = setInterval(() => {
-      this.#update(1 / TPS);
-    }, 1000 / TPS);
+    if (this.#running) return;
+    this.#running = true;
+
+    this.#startTime = performance.now();
+    this.#lastTime = this.#startTime;
+    this.#accumulatedTime = 0;
+
+    const loop = () => {
+      if (!this.#running) return;
+
+      const now = performance.now();
+      let frameTime = now - this.#lastTime;
+      this.#lastTime = now;
+
+      const MAX_FRAME_TIME = 250; //ms
+      if (frameTime > MAX_FRAME_TIME) frameTime = MAX_FRAME_TIME;
+
+      this.#accumulatedTime += frameTime;
+
+      while (this.#accumulatedTime >= DT_MS) {
+        this.#update(DT_MS);
+        this.#accumulatedTime -= DT_MS;
+      }
+
+      setImmediate(loop);
+    };
 
     console.log("engine started");
+    loop();
   }
 
   stop() {
-    if (this.#interval) {
-      clearInterval(this.#interval);
-      this.#interval = null;
-    }
+    this.#running = false;
     this.world.clear();
     this.#tick = 0;
 
@@ -126,6 +158,18 @@ class EngineNetwork {
         if (message.input.fire) {
           player.ship.fire();
         }
+
+        break;
+
+      case "player:ping":
+        ws.send(
+          event({
+            type: "server:pong",
+            sequence: message.sequence,
+            clientTime: message.clientTime,
+            serverTime: this.engine.serverTime,
+          }).serialize()
+        );
 
         break;
     }

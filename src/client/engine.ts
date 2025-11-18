@@ -1,7 +1,10 @@
 // description: This example demonstrates how to use a Container to group and manipulate multiple sprites
-import { Application, Assets, Container, Sprite } from "pixi.js";
+import { Application, Assets, Container, Sprite, Ticker } from "pixi.js";
 
 import type { NetworkEvent } from "@/shared/network/events";
+import { event } from "@/shared/network/utils";
+
+import { lerp } from "@/shared/math/utils";
 import pirate from "./assets/images/pirate.png";
 import player from "./assets/images/player.png";
 
@@ -24,27 +27,56 @@ export const init = async (parent: HTMLElement) => {
   app.stage.eventMode = "static";
   app.stage.hitArea = app.screen;
 
+  let lastSequence = 0;
+  const lastPlayerInput = {
+    angle: 0,
+    thrust: false,
+    fire: false,
+  };
+  const lastSentPlayerInput = {
+    angle: 0,
+    thrust: false,
+    fire: false,
+  };
+
+  const sendInputEventsTicker = new Ticker();
+  sendInputEventsTicker.add(() => {
+    if (
+      Math.round(lastPlayerInput.angle * 100) !==
+        Math.round(lastSentPlayerInput.angle * 100) ||
+      lastPlayerInput.thrust !== lastSentPlayerInput.thrust ||
+      lastPlayerInput.fire !== lastSentPlayerInput.fire
+    ) {
+      ws.send(
+        event({
+          type: "player:input",
+          sequence: lastSequence++,
+          input: {
+            angle: lastPlayerInput.angle,
+            thrust: lastPlayerInput.thrust,
+            fire: lastPlayerInput.fire,
+          },
+        }).serialize()
+      );
+      lastSentPlayerInput.angle = lastPlayerInput.angle;
+      lastSentPlayerInput.thrust = lastPlayerInput.thrust;
+      lastSentPlayerInput.fire = lastPlayerInput.fire = false;
+    }
+  });
+
   const mousePos = { x: 0, y: 0 };
-  app.stage.on("pointermove", (event) => {
-    mousePos.x = Math.floor((event.global.x - camera.x) / camera.scale.x);
-    mousePos.y = Math.floor((event.global.y - camera.y) / camera.scale.y);
+  app.stage.on("pointermove", (e) => {
+    mousePos.x = Math.floor((e.global.x - camera.x) / camera.scale.x);
+    mousePos.y = Math.floor((e.global.y - camera.y) / camera.scale.y);
 
     if (playerObject) {
-      // get angle between mousePos and playerObject
       const angle = Math.atan2(
         mousePos.y - playerObject.y,
         mousePos.x - playerObject.x
       );
 
       playerObject.rotation = angle;
-
-      // send angle to server
-      ws.send(
-        JSON.stringify({
-          type: "player:input",
-          input: { angle },
-        } as NetworkEvent)
-      );
+      lastPlayerInput.angle = angle;
     }
   });
 
@@ -54,7 +86,6 @@ export const init = async (parent: HTMLElement) => {
 
   let playerId: string | null = null;
   let playerObject: Container | null = null;
-
   const objects = new Map<string, Container>();
 
   const ws = new WebSocket("ws://localhost:3000/ws");
@@ -73,8 +104,10 @@ export const init = async (parent: HTMLElement) => {
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data) as NetworkEvent;
     switch (message.type) {
-      case "player:set-id":
-        playerId = message.id;
+      case "server:player-initialize":
+        playerId = message.playerId;
+        sendInputEventsTicker.maxFPS = message.tps * 2;
+        sendInputEventsTicker.start();
         break;
       case "server:state":
         const currentObjectsIds = new Set(
@@ -134,7 +167,3 @@ export const init = async (parent: HTMLElement) => {
     camera.scale.set(cameraScale);
   });
 };
-
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}

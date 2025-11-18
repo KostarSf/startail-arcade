@@ -1,15 +1,35 @@
 export interface PlayerInputEvent {
   type: "player:input";
+  sequence: number;
   input: {
-    accelerating?: boolean;
-    firing?: boolean;
+    thrust?: boolean;
     angle?: number;
+    fire?: boolean;
   };
 }
 
+export interface PlayerFiringEvent {
+  type: "player:firing";
+  sequence: number;
+}
+
 export interface PlayerSetIdEvent {
-  type: "player:set-id";
-  id: string;
+  type: "server:player-initialize";
+  playerId: string;
+  tps: number;
+}
+
+export interface PlayerPingEvent {
+  type: "player:ping";
+  sequence: number;
+  clientTime: number;
+}
+
+export interface ServerPongEvent {
+  type: "server:pong";
+  sequence: number;
+  clientTime: number;
+  serverTime: number;
 }
 
 export interface ServerStateEvent {

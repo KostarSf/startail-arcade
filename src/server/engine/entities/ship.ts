@@ -2,23 +2,23 @@ import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { Bullet } from "./bullet";
 
 export interface IShip extends IBaseEntity {
-  accelerating: boolean;
+  thrust: boolean;
 }
 
 export class Ship extends BaseEntity {
-  accelerating = false;
+  thrust = false;
 
   #firing = false;
 
   constructor(ship: Partial<IShip>) {
     super(ship);
-    this.accelerating = ship.accelerating ?? false;
+    this.thrust = ship.thrust ?? false;
   }
 
   override update(delta: number) {
     super.update(delta);
 
-    if (this.accelerating) {
+    if (this.thrust) {
       const ACCELERATION = 50;
       const ax = Math.cos(this.angle) * ACCELERATION * delta;
       const ay = Math.sin(this.angle) * ACCELERATION * delta;
@@ -56,7 +56,7 @@ export class Ship extends BaseEntity {
     return {
       ...super.toJSON(),
       type: "ship",
-      accelerating: this.accelerating,
+      thrust: this.thrust,
     };
   }
 }

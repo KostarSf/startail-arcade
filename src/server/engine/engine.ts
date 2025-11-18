@@ -1,4 +1,5 @@
 import type { NetworkEvent } from "@/shared/network/events";
+import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
 import { Ship } from "./entities/ship";
 import { World } from "./world/world";
@@ -61,10 +62,11 @@ class EngineNetwork {
 
     ws.subscribe("server:state");
     ws.send(
-      JSON.stringify({
-        type: "player:set-id",
-        id: player.id,
-      })
+      event({
+        type: "server:player-initialize",
+        playerId: player.id,
+        tps: TPS,
+      }).serialize()
     );
   }
 
@@ -84,13 +86,13 @@ class EngineNetwork {
       case "player:input":
         if (player.ship.removed) break;
 
-        if (message.input.accelerating !== undefined) {
-          player.ship.accelerating = !!message.input.accelerating;
+        if (message.input.thrust !== undefined) {
+          player.ship.thrust = !!message.input.thrust;
         }
         if (message.input.angle !== undefined) {
           player.ship.angle = message.input.angle;
         }
-        if (message.input.firing !== undefined) {
+        if (message.input.fire !== undefined) {
           player.ship.fire();
         }
 
@@ -115,10 +117,7 @@ class EngineNetwork {
 
     this.#bunServer.publish(
       "server:state",
-      JSON.stringify({
-        type: "server:state",
-        entities,
-      })
+      event({ type: "server:state", entities }).serialize()
     );
   }
 

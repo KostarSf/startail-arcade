@@ -7,6 +7,7 @@ import { event } from "@/shared/network/utils";
 import { lerp } from "@/shared/math/utils";
 import pirate from "./assets/images/pirate.png";
 import player from "./assets/images/player.png";
+import { stats } from "./store";
 
 export const init = async (parent: HTMLElement) => {
   // Create a new application
@@ -66,18 +67,32 @@ export const init = async (parent: HTMLElement) => {
     }
   });
 
+  let lastPingSeq = 0;
+  const sendPingTicker = new Ticker();
+  sendPingTicker.minFPS = 0;
+  sendPingTicker.maxFPS = 1;
+  sendPingTicker.add(() => {
+    ws?.send(
+      event({
+        type: "player:ping",
+        sequence: lastPingSeq++,
+        clientTime: performance.now(),
+      }).serialize()
+    );
+  });
+
   // Load the bunny texture
   const playerTexture = await Assets.load(player);
   const pirateTexture = await Assets.load(pirate);
 
-  let playerId: string | null = null;
-  let playerObject: Container | null = null;
   const objects = new Map<string, Container>();
 
   const mousePos = { x: 0, y: 0 };
   app.stage.on("pointermove", (e) => {
     mousePos.x = Math.floor((e.global.x - camera.x) / camera.scale.x);
     mousePos.y = Math.floor((e.global.y - camera.y) / camera.scale.y);
+
+    const { playerObject, setPlayerObject } = stats();
 
     if (playerObject) {
       const angle = Math.atan2(
@@ -87,15 +102,18 @@ export const init = async (parent: HTMLElement) => {
 
       playerObject.rotation = angle;
       lastPlayerInput.angle = angle;
+
+      setPlayerObject(playerObject);
     }
   });
 
   const connectToServer = () => {
-    ws = new WebSocket("ws://localhost:3000/ws");
+    ws = new WebSocket("ws://192.168.0.107:3000/ws");
 
     ws.onclose = () => {
       console.log("Disconnected from server");
       sendInputEventsTicker.stop();
+      sendPingTicker.stop();
       objects.forEach((object) => {
         camera.removeChild(object);
       });
@@ -108,15 +126,54 @@ export const init = async (parent: HTMLElement) => {
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data) as NetworkEvent;
       switch (message.type) {
+        case "server:pong":
+          const clientReceive = performance.now();
+          const clientSend = message.clientTime;
+          const serverSend = message.serverTime;
+
+          const rttSample = clientReceive - clientSend;
+          const oneWay = rttSample / 2;
+
+          const serverAtReceiveApprox = serverSend + oneWay;
+
+          const offsetSample = serverAtReceiveApprox - clientReceive;
+
+          const alpha = 0.1;
+          const {
+            latency,
+            offset,
+            hasTimeSync,
+            setLatency,
+            setOffset,
+            setHasTimeSync,
+          } = stats();
+
+          if (!hasTimeSync) {
+            setLatency(rttSample);
+            setOffset(offsetSample);
+            setHasTimeSync(true);
+          } else {
+            setLatency(lerp(latency, rttSample, alpha));
+            setOffset(lerp(offset, offsetSample, alpha));
+          }
+
+          break;
+
         case "server:player-initialize":
-          playerId = message.playerId;
+          stats().setPlayerId(message.playerId);
+          sendInputEventsTicker.minFPS = message.tps;
           sendInputEventsTicker.maxFPS = message.tps * 2;
           sendInputEventsTicker.start();
+          sendPingTicker.start();
+
           break;
+
         case "server:state":
           const currentObjectsIds = new Set(
             message.entities.map((entity) => entity.id)
           );
+
+          const { playerId, setPlayerObject } = stats();
 
           for (const entity of message.entities) {
             if (entity.type === "ship") {
@@ -124,7 +181,7 @@ export const init = async (parent: HTMLElement) => {
                 objects.get(entity.id) || createShip(entity.id === playerId);
 
               if (entity.id === playerId) {
-                playerObject = ship;
+                setPlayerObject(ship);
               }
 
               ship.x = Math.round(entity.x);
@@ -174,6 +231,8 @@ export const init = async (parent: HTMLElement) => {
     app.canvas.height = window.innerHeight;
 
     const cameraScale = lerp(camera.scale.x, 2, time.deltaTime * 0.05);
+
+    const { playerObject } = stats();
 
     if (playerObject) {
       const targetX = playerObject.x * cameraScale - app.screen.width / 2;

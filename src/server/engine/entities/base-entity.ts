@@ -58,6 +58,7 @@ export abstract class BaseEntity {
     this.x += this.vx * delta;
     this.y += this.vy * delta;
     this.angle += this.va * delta;
+    this.angle = ((this.angle + Math.PI) % (2 * Math.PI)) - Math.PI;
   }
 
   remove() {

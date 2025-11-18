@@ -30,7 +30,7 @@ function PlayerStats() {
             Offset: {Math.floor(stats.offset * 100) / 100}
           </p>
           <p className="text-xs text-gray-500">
-            Server Time Prediction: {predictedServerTime}
+            Server Time Estimated: {predictedServerTime}
           </p>
         </>
       ) : null}

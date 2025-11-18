@@ -70,7 +70,7 @@ export const init = async (parent: HTMLElement) => {
   let lastPingSeq = 0;
   const sendPingTicker = new Ticker();
   sendPingTicker.minFPS = 0;
-  sendPingTicker.maxFPS = 1;
+  sendPingTicker.maxFPS = 2;
   sendPingTicker.add(() => {
     ws?.send(
       event({
@@ -104,6 +104,16 @@ export const init = async (parent: HTMLElement) => {
       lastPlayerInput.angle = angle;
 
       setPlayerObject(playerObject);
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "KeyW") {
+      lastPlayerInput.thrust = true;
+    }
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.code === "KeyW") {
+      lastPlayerInput.thrust = false;
     }
   });
 
@@ -184,8 +194,8 @@ export const init = async (parent: HTMLElement) => {
                 setPlayerObject(ship);
               }
 
-              ship.x = Math.round(entity.x);
-              ship.y = Math.round(entity.y);
+              ship.x = entity.x;
+              ship.y = entity.y;
               ship.rotation = entity.angle;
 
               if (!objects.has(entity.id)) {

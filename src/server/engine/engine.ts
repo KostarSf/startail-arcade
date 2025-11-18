@@ -55,7 +55,7 @@ export class Engine {
       this.#accumulatedTime += frameTime;
 
       while (this.#accumulatedTime >= DT_MS) {
-        this.#update(DT_MS);
+        this.#update(1 / TPS);
         this.#accumulatedTime -= DT_MS;
       }
 

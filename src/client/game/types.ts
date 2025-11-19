@@ -15,6 +15,7 @@ import type { ShipInputCommand } from "@/shared/ecs/components";
 import type { Starfield } from "../starfield";
 import type { SnapshotBuffer } from "./network/snapshot-buffer";
 import type { InputBuffer } from "./network/input-buffer";
+import type { CameraShake } from "./systems/camera-shake";
 
 type StatsStore = ReturnType<typeof import("../store").stats>;
 
@@ -30,6 +31,7 @@ export interface ClientServices extends Record<string, unknown> {
   controls: ControlState;
   snapshotBuffer: SnapshotBuffer;
   inputBuffer: InputBuffer;
+  cameraShake: CameraShake;
   entityIndex: Map<string, EntityId>;
   stores: {
     transform: ComponentStore<TransformComponent>;

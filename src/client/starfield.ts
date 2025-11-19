@@ -193,12 +193,15 @@ export class Starfield {
     cameraY: number,
     cameraScale: number,
     screenWidth: number,
-    screenHeight: number
+    screenHeight: number,
+    shakeOffsetX: number = 0,
+    shakeOffsetY: number = 0
   ) {
     // Перемещаем контейнер звезд так, чтобы его центр следовал за камерой
     // Позиция камеры в экранных координатах - это центр экрана
-    this.container.x = screenWidth / 2;
-    this.container.y = screenHeight / 2;
+    // Добавляем shake offset для синхронизации с тряской камеры
+    this.container.x = screenWidth / 2 + shakeOffsetX;
+    this.container.y = screenHeight / 2 + shakeOffsetY;
 
     // Обновляем звезды и удаляем истекшие
     const expiredIndices: number[] = [];

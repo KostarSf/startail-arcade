@@ -49,6 +49,9 @@ const clampPointToRadius = (
 const MAX_CAMERA_TARGET_RADIUS = 100;
 const MOVING_SPEED_THRESHOLD = 10;
 
+// Speed threshold for continuous shake (from 50)
+const SPEED_SHAKE_THRESHOLD = 50;
+
 /**
  * Smoothly follows the player ship, applies auto-zoom, and drives parallax
  * starfield updates based on the active camera transform.
@@ -63,6 +66,7 @@ export const CameraSystem: System<ClientServices> = {
       player,
       stores,
       controls,
+      cameraShake,
     } = services;
 
     app.canvas.width = window.innerWidth;
@@ -72,6 +76,7 @@ export const CameraSystem: System<ClientServices> = {
 
     const transform = stores.transform.get(player.entityId);
     const velocity = stores.velocity.get(player.entityId);
+    const shipControl = stores.shipControl.get(player.entityId);
     if (!transform || !velocity) return;
 
     const speed = Math.hypot(velocity.vx, velocity.vy);
@@ -85,6 +90,47 @@ export const CameraSystem: System<ClientServices> = {
     );
     const currentScale = camera.scale.x;
     const newScale = lerp(currentScale, targetScale, dt * 5);
+
+    // Continuous shake when moving fast (speed >= 50)
+    // Amplitude scales with speed from 0 (at 50) to very small (at max speed)
+    if (speed >= SPEED_SHAKE_THRESHOLD) {
+      const speedShakeAmplitude = inverseLerp(
+        speed,
+        SPEED_SHAKE_THRESHOLD,
+        MAX_PLAYER_SPEED
+      ) * 0.2; // Almost completely removed, max 0.2 pixels
+      cameraShake.setContinuousShake(speedShakeAmplitude);
+    } else {
+      cameraShake.setContinuousShake(0);
+    }
+
+    // Continuous shake while accelerating (thrust is active)
+    // Amplitude depends on speed and drift
+    if (shipControl && shipControl.thrust) {
+      // Calculate drift (angle difference between ship facing and velocity direction)
+      let drift = 0;
+      if (speed > 0.01) {
+        const velocityAngle = Math.atan2(velocity.vy, velocity.vx);
+        let angleDiff = Math.abs(transform.angle - velocityAngle);
+        angleDiff = Math.min(angleDiff, Math.PI * 2 - angleDiff);
+        drift = inverseLerp(angleDiff, 0, Math.PI); // 0 = aligned, 1 = perpendicular
+      }
+
+      // Base amplitude scales with speed (smaller at low speed)
+      const MAX_ACCELERATION_SHAKE_AMPLITUDE = 2; // Max amplitude at high speed
+      const MIN_SPEED_FOR_SHAKE = 10; // Minimum speed to start feeling shake
+      const speedFactor = inverseLerp(speed, MIN_SPEED_FOR_SHAKE, MAX_PLAYER_SPEED);
+
+      // Drift factor: higher drift = more shake (1.0 base + up to 1.0 from drift)
+      const driftFactor = 1.0 + drift; // Range: 1.0 (no drift) to 2.0 (max drift)
+
+      // Final amplitude = base * speed factor * drift factor
+      const accelerationShakeAmplitude = MAX_ACCELERATION_SHAKE_AMPLITUDE * speedFactor * driftFactor;
+
+      cameraShake.setAccelerationShake(accelerationShakeAmplitude);
+    } else {
+      cameraShake.setAccelerationShake(0);
+    }
 
     const cursorWorld =
       controls.cursorWorld ?? {
@@ -122,8 +168,11 @@ export const CameraSystem: System<ClientServices> = {
     const targetX = clampedTarget.x * newScale - renderWidth / 2;
     const targetY = clampedTarget.y * newScale - renderHeight / 2;
 
-    camera.x = -lerp(-camera.x, targetX, dt * 6);
-    camera.y = -lerp(-camera.y, targetY, dt * 6);
+    // Update shake and get offset
+    const shakeOffset = cameraShake.update(dt);
+
+    camera.x = -lerp(-camera.x, targetX, dt * 6) + shakeOffset.x;
+    camera.y = -lerp(-camera.y, targetY, dt * 6) + shakeOffset.y;
     camera.scale.set(newScale);
 
     starfield.update(
@@ -132,7 +181,9 @@ export const CameraSystem: System<ClientServices> = {
       camera.y,
       newScale,
       renderWidth,
-      renderHeight
+      renderHeight,
+      shakeOffset.x * 0.5,
+      shakeOffset.y * 0.5
     );
   },
 };

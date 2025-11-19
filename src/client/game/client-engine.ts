@@ -35,6 +35,7 @@ import { Starfield } from "../starfield";
 import { stats } from "../store";
 import { InputBuffer } from "./network/input-buffer";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
+import { CameraShake } from "./systems/camera-shake";
 import { CameraSystem } from "./systems/camera-system";
 import { GridSystem } from "./systems/grid-system";
 import { InputSystem } from "./systems/input-system";
@@ -74,6 +75,7 @@ export class ClientEngine {
 
   #snapshotBuffer = new SnapshotBuffer();
   #inputBuffer = new InputBuffer();
+  #cameraShake = new CameraShake();
   #entityIndex = new Map<string, EntityId>();
   #controls: ControlState = {
     angle: 0,
@@ -314,6 +316,7 @@ export class ClientEngine {
       controls: this.#controls,
       snapshotBuffer: this.#snapshotBuffer,
       inputBuffer: this.#inputBuffer,
+      cameraShake: this.#cameraShake,
       entityIndex: this.#entityIndex,
       stores: {
         transform: this.#transformStore,

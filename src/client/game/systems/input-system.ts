@@ -11,6 +11,10 @@ const defaultControl = (): ShipControlComponent => ({
   pendingInputs: [],
 });
 
+// Shake parameters
+const FIRE_SHAKE_AMPLITUDE = 6; // Increased amplitude for more noticeable fire shake
+const FIRE_SHAKE_DURATION = 0.20; // Slightly longer duration (150ms)
+
 /**
  * Captures local controls, mutates the player's ship component immediately,
  * and emits buffered commands to the network layer for reconciliation.
@@ -19,7 +23,7 @@ export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",
   tick({ services }) {
-    const { player, controls, stores, network, inputBuffer, pixi } = services;
+    const { player, controls, stores, network, inputBuffer, pixi, cameraShake } = services;
     if (!player.id || player.entityId === null) return;
 
     const screenCursor =
@@ -47,6 +51,7 @@ export const InputSystem: System<ClientServices> = {
     }
 
     let dirty = false;
+
     if (Math.abs(shipControl.angle - controls.angle) > 0.001) {
       shipControl.angle = controls.angle;
       dirty = true;
@@ -58,6 +63,9 @@ export const InputSystem: System<ClientServices> = {
     if (controls.fire) {
       shipControl.fire = true;
       dirty = true;
+
+      // Trigger shake when player fires
+      cameraShake.add(FIRE_SHAKE_AMPLITUDE, FIRE_SHAKE_DURATION);
     }
 
     if (!dirty) return;

@@ -19,13 +19,30 @@ export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",
   tick({ services }) {
-    const { player, controls, stores, network, inputBuffer } = services;
+    const { player, controls, stores, network, inputBuffer, pixi } = services;
     if (!player.id || player.entityId === null) return;
+
+    const screenCursor =
+      controls.cursorScreen ?? {
+        x: pixi.app.screen.width / 2,
+        y: pixi.app.screen.height / 2,
+      };
+
+    const cursorWorld = {
+      x: (screenCursor.x - pixi.camera.x) / pixi.camera.scale.x,
+      y: (screenCursor.y - pixi.camera.y) / pixi.camera.scale.y,
+    };
+
+    controls.cursorWorld = cursorWorld;
 
     const shipControl = stores.shipControl.ensure(player.entityId, defaultControl);
     const transform = stores.transform.get(player.entityId);
 
     if (transform) {
+      controls.angle = Math.atan2(
+        cursorWorld.y - transform.y,
+        cursorWorld.x - transform.x
+      );
       transform.angle = controls.angle;
     }
 

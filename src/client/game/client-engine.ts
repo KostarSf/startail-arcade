@@ -65,7 +65,13 @@ export class ClientEngine {
   #snapshotBuffer = new SnapshotBuffer();
   #inputBuffer = new InputBuffer();
   #entityIndex = new Map<string, EntityId>();
-  #controls: ControlState = { angle: 0, thrust: false, fire: false };
+  #controls: ControlState = {
+    angle: 0,
+    thrust: false,
+    fire: false,
+    cursorScreen: null,
+    cursorWorld: null,
+  };
 
   #services: ClientServices | null = null;
 
@@ -97,6 +103,10 @@ export class ClientEngine {
     this.#app.stage.addChild(this.#camera);
     this.#app.stage.eventMode = "static";
     this.#app.stage.hitArea = this.#app.screen;
+    this.#controls.cursorScreen = {
+      x: this.#app.screen.width / 2,
+      y: this.#app.screen.height / 2,
+    };
 
     await this.#loadTextures();
     this.#setupServices();
@@ -169,19 +179,11 @@ export class ClientEngine {
   }
 
   #setupInputListeners() {
-    this.#app.stage.on("pointermove", (e) => {
-      if (!this.#services) return;
-      const worldX = (e.global.x - this.#camera.x) / this.#camera.scale.x;
-      const worldY = (e.global.y - this.#camera.y) / this.#camera.scale.y;
-      const playerId = this.#services.player.entityId;
-      if (playerId === null) return;
-      const playerTransform = this.#transformStore.get(playerId);
-      if (!playerTransform) return;
-      this.#controls.angle = Math.atan2(
-        worldY - playerTransform.y,
-        worldX - playerTransform.x
-      );
-    });
+    const updateCursor = (e: import("pixi.js").FederatedPointerEvent) => {
+      this.#controls.cursorScreen = { x: e.global.x, y: e.global.y };
+    };
+    this.#app.stage.on("pointermove", updateCursor);
+    this.#app.stage.on("pointerdown", updateCursor);
 
     window.addEventListener("keydown", (e) => {
       if (e.code === "KeyW") {

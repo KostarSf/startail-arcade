@@ -22,6 +22,8 @@ export interface ControlState {
   angle: number;
   thrust: boolean;
   fire: boolean;
+  cursorScreen: { x: number; y: number } | null;
+  cursorWorld: { x: number; y: number } | null;
 }
 
 export interface ClientServices extends Record<string, unknown> {

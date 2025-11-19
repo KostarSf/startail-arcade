@@ -85,15 +85,21 @@ export function updateShipPhysics(
     return { fired: false };
   }
 
+  const bullet = createBulletSpawnFromShip(ship);
+
+  return { fired: true, bullet };
+}
+
+export function createBulletSpawnFromShip(
+  ship: ShipState
+): BulletSpawnState {
   const cos = Math.cos(ship.angle);
   const sin = Math.sin(ship.angle);
-  const bullet: BulletSpawnState = {
+  return {
     x: ship.x + cos * SHIP_CONSTANTS.bulletOffset,
     y: ship.y + sin * SHIP_CONSTANTS.bulletOffset,
     angle: ship.angle,
     vx: cos * SHIP_CONSTANTS.bulletSpeed + ship.vx,
     vy: sin * SHIP_CONSTANTS.bulletSpeed + ship.vy,
   };
-
-  return { fired: true, bullet };
 }

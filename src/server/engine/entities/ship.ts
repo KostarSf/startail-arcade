@@ -29,7 +29,12 @@ export class Ship extends BaseEntity {
     });
 
     if (result.bullet) {
-      this.world.spawn(new Bullet(result.bullet));
+      this.world.spawn(
+        new Bullet({
+          ...result.bullet,
+          ownerId: this.id,
+        })
+      );
     }
   }
 

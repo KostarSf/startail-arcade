@@ -38,89 +38,123 @@ const simulateUntil = (
 };
 
 /**
- * Replays buffered player inputs on top of the latest authoritative snapshot
- * so the local ship stays responsive while converging to server truth.
+ * Reconciles the local player's ship state by replaying inputs over the latest authoritative server snapshot.
+ * This ensures the client remains responsive (predictive) while correcting for server-side truth.
+ * Also handles client-side prediction and extrapolation for local projectiles (both linked and unlinked).
  */
 export const ReconciliationSystem: System<ClientServices> = {
   id: "reconciliation-system",
   stage: "prediction",
   priority: 1,
-  tick({ services }) {
+  tick({ services, dt }) {
     const { player, stores, inputBuffer, network } = services;
-    if (player.entityId === null) return;
 
-    const transform = stores.transform.get(player.entityId);
-    const velocity = stores.velocity.get(player.entityId);
-    const networkState = stores.networkState.get(player.entityId);
-    const shipControl = stores.shipControl.get(player.entityId);
+    // 1. Predict Player Ship
+    if (player.entityId !== null) {
+      const transform = stores.transform.get(player.entityId);
+      const velocity = stores.velocity.get(player.entityId);
+      const networkState = stores.networkState.get(player.entityId);
+      const shipControl = stores.shipControl.get(player.entityId);
 
-    if (!transform || !velocity || !networkState || !shipControl) return;
+      if (transform && velocity && networkState && shipControl) {
+        inputBuffer.acknowledge(shipControl.lastServerSequence);
 
-    inputBuffer.acknowledge(shipControl.lastServerSequence);
+        const latestServerState = networkState.state as
+          | Partial<ShipState>
+          | undefined;
 
-    const latestServerState = networkState.state as
-      | Partial<ShipState>
-      | undefined;
+        let baseline = inputBuffer.baseline;
+        if (!baseline) {
+          baseline = {
+            sequence: shipControl.lastServerSequence,
+            thrust: shipControl.thrust,
+            angle: shipControl.angle,
+            fire: false,
+            timestamp: networkState.lastServerTime,
+          };
+          inputBuffer.setBaseline(baseline);
+        }
 
-    let baseline = inputBuffer.baseline;
-    if (!baseline) {
-      baseline = {
-        sequence: shipControl.lastServerSequence,
-        thrust: shipControl.thrust,
-        angle: shipControl.angle,
-        fire: false,
-        timestamp: networkState.lastServerTime,
-      };
-      inputBuffer.setBaseline(baseline);
-    }
+        baseline.thrust = shipControl.thrust;
+        baseline.angle = shipControl.angle;
+        baseline.timestamp = Math.max(
+          baseline.timestamp,
+          networkState.lastServerTime
+        );
 
-    baseline.thrust = shipControl.thrust;
-    baseline.angle = shipControl.angle;
-    baseline.timestamp = Math.max(
-      baseline.timestamp,
-      networkState.lastServerTime
-    );
-
-    const authoritative = cloneShipState({
-      ...latestServerState,
-      x: latestServerState?.x ?? transform.x,
-      y: latestServerState?.y ?? transform.y,
-      angle: latestServerState?.angle ?? transform.angle,
-      vx: latestServerState?.vx ?? velocity.vx,
-      vy: latestServerState?.vy ?? velocity.vy,
-      va: latestServerState?.va ?? velocity.va,
-      thrust: latestServerState?.thrust ?? shipControl.thrust,
-    });
-
-    authoritative.angle = baseline.angle;
-
-    let currentInput = baseline;
-    let currentTime = baseline.timestamp;
-    const predictedTime = network.predictedServerTime();
-
-    for (const command of inputBuffer.pending) {
-      authoritative.angle = currentInput.angle;
-      currentTime = simulateUntil(authoritative, currentInput, currentTime, command.timestamp);
-      currentInput = command;
-      authoritative.angle = currentInput.angle;
-      if (command.fire) {
-        updateShipPhysics(authoritative, {
-          thrust: currentInput.thrust,
-          fire: true,
-          delta: 0,
+        const authoritative = cloneShipState({
+          ...latestServerState,
+          x: latestServerState?.x ?? transform.x,
+          y: latestServerState?.y ?? transform.y,
+          angle: latestServerState?.angle ?? transform.angle,
+          vx: latestServerState?.vx ?? velocity.vx,
+          vy: latestServerState?.vy ?? velocity.vy,
+          va: latestServerState?.va ?? velocity.va,
+          thrust: latestServerState?.thrust ?? shipControl.thrust,
         });
+
+        authoritative.angle = baseline.angle;
+
+        let currentInput = baseline;
+        let currentTime = baseline.timestamp;
+        const predictedTime = network.predictedServerTime();
+
+        for (const command of inputBuffer.pending) {
+          authoritative.angle = currentInput.angle;
+          currentTime = simulateUntil(authoritative, currentInput, currentTime, command.timestamp);
+          currentInput = command;
+          authoritative.angle = currentInput.angle;
+          if (command.fire) {
+            updateShipPhysics(authoritative, {
+              thrust: currentInput.thrust,
+              fire: true,
+              delta: 0,
+            });
+          }
+        }
+
+        authoritative.angle = currentInput.angle;
+        currentTime = simulateUntil(authoritative, currentInput, currentTime, predictedTime);
+
+        transform.x = authoritative.x;
+        transform.y = authoritative.y;
+        transform.angle = authoritative.angle;
+
+        velocity.vx = authoritative.vx;
+        velocity.vy = authoritative.vy;
+        velocity.va = authoritative.va;
       }
     }
 
-    authoritative.angle = currentInput.angle;
-    currentTime = simulateUntil(authoritative, currentInput, currentTime, predictedTime);
+    // 2. Predict Projectiles (Linked and Unlinked)
+    const predictedTime = network.predictedServerTime();
+    stores.localProjectile.forEach((projectile, entityId) => {
+      const transform = stores.transform.get(entityId);
+      const velocity = stores.velocity.get(entityId);
+      if (!transform || !velocity) return;
 
-    transform.x = authoritative.x;
-    transform.y = authoritative.y;
-    transform.angle = authoritative.angle;
+      const networkState = stores.networkState.get(entityId);
 
-    velocity.vx = authoritative.vx;
-    velocity.vy = authoritative.vy;
-    velocity.va = authoritative.va;
+      if (networkState && networkState.state) {
+        // Linked: Extrapolate from server state
+        const state = networkState.state;
+        const deltaMs = Math.max(0, predictedTime - networkState.lastServerTime);
+        const deltaSeconds = deltaMs / 1000;
+
+        // Reset to server state then integrate
+        transform.x = state.x + state.vx * deltaSeconds;
+        transform.y = state.y + state.vy * deltaSeconds;
+        transform.angle = state.angle;
+
+        velocity.vx = state.vx;
+        velocity.vy = state.vy;
+      } else {
+        // Unlinked: Integrate locally from previous frame
+        // We apply integration directly to the components
+        transform.x += velocity.vx * dt;
+        transform.y += velocity.vy * dt;
+        transform.angle += velocity.va * dt;
+      }
+    });
   },
 };

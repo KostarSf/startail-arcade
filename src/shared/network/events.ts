@@ -29,6 +29,7 @@ export interface ServerPongEvent {
 
 export interface ServerStateEvent {
   type: "server:state";
+  serverTime: number;
   entities: {
     type: string;
     id: string;

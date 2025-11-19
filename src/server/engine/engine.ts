@@ -194,7 +194,11 @@ class EngineNetwork {
 
     this.#bunServer.publish(
       "server:state",
-      event({ type: "server:state", entities }).serialize()
+      event({
+        type: "server:state",
+        serverTime: this.engine.serverTime,
+        entities,
+      }).serialize()
     );
   }
 

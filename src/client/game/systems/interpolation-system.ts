@@ -22,9 +22,6 @@ interface EntityPair {
   to?: TimedEntity;
 }
 
-/**
- * Ensures a renderable component exists for the given entity based on its type.
- */
 const ensureRenderable = (
   services: ClientServices,
   entityId: EntityId,
@@ -77,9 +74,6 @@ const ensureRenderable = (
   return renderable;
 };
 
-/**
- * Ensures all required components exist for an entity from a snapshot.
- */
 const ensureEntity = (
   services: ClientServices,
   context: { entityId: EntityId; snapshot: TimedEntity }
@@ -121,9 +115,6 @@ const ensureEntity = (
   }));
 };
 
-/**
- * Removes entities that are no longer present in the latest server snapshot.
- */
 const removeMissingEntities = (
   latestSnapshot: ServerSnapshot,
   services: ClientServices,
@@ -143,8 +134,6 @@ const removeMissingEntities = (
     services.stores.velocity.delete(entityId);
     services.stores.shipControl.delete(entityId);
     services.stores.networkState.delete(entityId);
-    services.stores.localProjectile.delete(entityId);
-    services.stores.predicted.delete(entityId);
     entities.destroy(entityId);
     if (services.player.entityId === entityId) {
       services.player.entityId = null;
@@ -159,8 +148,8 @@ const angleLerp = (start: number, end: number, alpha: number) => {
 };
 
 /**
- * Interpolates remote entities between server snapshots.
- * Also handles linking local projectiles to server entities to transition from prediction to authoritative state.
+ * Buffers server snapshots, keeps the ECS in sync with streamed entities,
+ * and interpolates transforms at predicted server time minus the render delay.
  */
 export const InterpolationSystem: System<ClientServices> = {
   id: "interpolation-system",
@@ -200,27 +189,8 @@ export const InterpolationSystem: System<ClientServices> = {
       let lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
       const isPlayer = serverId === services.player.id;
 
-      let entityId = services.entityIndex.get(serverId);
-
-      // Link local projectiles if needed
-      if (
-        !entityId &&
-        target.state.type === "bullet" &&
-        (target.state as any).ownerId === services.player.id
-      ) {
-        // Try to pop a local projectile
-        const localId = services.unlinkedProjectiles.shift();
-        if (localId !== undefined && services.stores.localProjectile.has(localId)) {
-          entityId = localId;
-          // Remove local projectile component to stop client-side prediction
-          // and let standard interpolation take over
-          services.stores.localProjectile.delete(entityId);
-        }
-      }
-
-      if (!entityId) {
-        entityId = entities.create();
-      }
+      const entityId =
+        services.entityIndex.get(serverId) ?? entities.create();
       services.entityIndex.set(serverId, entityId);
 
       ensureEntity(services, {
@@ -229,48 +199,42 @@ export const InterpolationSystem: System<ClientServices> = {
       });
       ensureRenderable(services, entityId, target.state);
 
-      // Skip interpolation for predicted entities (local player ship and projectiles)
-      if (services.stores.predicted.has(entityId) || services.player.entityId === entityId) {
-         // Let ReconciliationSystem handle Transform
-      } else {
-        // Standard Interpolation
-        const transform = services.stores.transform.get(entityId);
-        if (transform) {
-          const dx = target.state.x - source.state.x;
-          const dy = target.state.y - source.state.y;
-          const distance = Math.hypot(dx, dy);
-          const teleported = distance > TELEPORT_DISTANCE_THRESHOLD;
-          if (teleported) {
-            lerpAlpha = 1;
-          }
-
-          transform.x = lerp(source.state.x, target.state.x, lerpAlpha);
-          transform.y = lerp(source.state.y, target.state.y, lerpAlpha);
-          transform.angle = angleLerp(
-            source.state.angle,
-            target.state.angle,
-            lerpAlpha
-          );
+      const transform = services.stores.transform.get(entityId);
+      if (transform) {
+        const dx = target.state.x - source.state.x;
+        const dy = target.state.y - source.state.y;
+        const distance = Math.hypot(dx, dy);
+        const teleported = distance > TELEPORT_DISTANCE_THRESHOLD;
+        if (teleported) {
+          lerpAlpha = 1;
         }
 
-        const velocity = services.stores.velocity.get(entityId);
-        if (velocity) {
-          velocity.vx = lerp(
-            source.state.vx,
-            target.state.vx,
-            lerpAlpha
-          );
-          velocity.vy = lerp(
-            source.state.vy,
-            target.state.vy,
-            lerpAlpha
-          );
-          velocity.va = lerp(
-            source.state.va ?? 0,
-            target.state.va ?? 0,
-            lerpAlpha
-          );
-        }
+        transform.x = lerp(source.state.x, target.state.x, lerpAlpha);
+        transform.y = lerp(source.state.y, target.state.y, lerpAlpha);
+        transform.angle = angleLerp(
+          source.state.angle,
+          target.state.angle,
+          lerpAlpha
+        );
+      }
+
+      const velocity = services.stores.velocity.get(entityId);
+      if (velocity) {
+        velocity.vx = lerp(
+          source.state.vx,
+          target.state.vx,
+          lerpAlpha
+        );
+        velocity.vy = lerp(
+          source.state.vy,
+          target.state.vy,
+          lerpAlpha
+        );
+        velocity.va = lerp(
+          source.state.va ?? 0,
+          target.state.va ?? 0,
+          lerpAlpha
+        );
       }
 
       const networkState = services.stores.networkState.get(entityId);

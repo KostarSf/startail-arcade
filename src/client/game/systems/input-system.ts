@@ -1,7 +1,5 @@
 import type { System } from "@/shared/ecs";
 import type { ShipControlComponent } from "@/shared/ecs/components";
-import { createBulletSpawnFromShip } from "@/shared/game/entities/ship";
-import { Container, Sprite } from "pixi.js";
 
 import type { ClientServices } from "../types";
 
@@ -14,10 +12,10 @@ const defaultControl = (): ShipControlComponent => ({
 });
 
 // Shake parameters
-const FIRE_SHAKE_AMPLITUDE = 6;
-const FIRE_SHAKE_DURATION = 0.2;
+const FIRE_SHAKE_AMPLITUDE = 6; // Increased amplitude for more noticeable fire shake
+const FIRE_SHAKE_DURATION = 0.2; // Slightly longer duration (150ms)
 
-// Angle packet throttling constants
+// Angle packet throttling
 const ANGLE_PACKET_INTERVAL_MS = 1000 / 60; // ~60hz
 const ANGLE_EPSILON = (Math.PI / 180) * 0.25; // 0.25 degree
 const ANGLE_FORCE_THRESHOLD = (Math.PI / 180) * 5; // 5 degrees
@@ -30,13 +28,13 @@ const normalizeAngleDelta = (current: number, previous: number) => {
 };
 
 /**
- * Captures local inputs, updates the local player ship, and queues network commands.
- * Also handles immediate client-side spawning of projectiles for responsiveness.
+ * Captures local controls, mutates the player's ship component immediately,
+ * and emits buffered commands to the network layer for reconciliation.
  */
 export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",
-  tick({ services, time, entities }) {
+  tick({ services, time }) {
     const {
       player,
       controls,
@@ -149,51 +147,6 @@ export const InputSystem: System<ClientServices> = {
         controls.lastAnglePacketTime = now;
         controls.lastSentAngle = shipControl.angle;
         controls.pendingAngle = null;
-      }
-
-      if (command.fire) {
-        // Spawn local projectile
-        const shipState = {
-          ...transform!,
-          vx: stores.velocity.get(player.entityId)!.vx,
-          vy: stores.velocity.get(player.entityId)!.vy,
-          va: 0,
-          type: "ship",
-          id: player.id,
-          thrust: shipControl.thrust,
-        };
-        const spawn = createBulletSpawnFromShip(shipState);
-        const bulletId = entities.create();
-
-        stores.transform.set(bulletId, {
-          x: spawn.x,
-          y: spawn.y,
-          angle: spawn.angle,
-        });
-        stores.velocity.set(bulletId, {
-          vx: spawn.vx,
-          vy: spawn.vy,
-          va: 0,
-        });
-
-        // Create renderable
-        const container = new Container();
-        const sprite = new Sprite({
-          texture: services.textures.bullet,
-          anchor: 0.5,
-        });
-        container.addChild(sprite);
-        services.pixi.camera.addChild(container);
-        stores.renderable.set(bulletId, { ref: container, depth: 0 });
-
-        // Mark as local projectile
-        stores.localProjectile.set(bulletId, {
-          spawnTime: command.timestamp,
-          ownerId: player.id,
-        });
-
-        // Add to unlinked queue
-        services.unlinkedProjectiles.push(bulletId);
       }
     }
 

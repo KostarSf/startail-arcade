@@ -1,15 +1,8 @@
 import type { NetworkEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { DT_MS, TPS } from "./constants";
-import { replayBulletFromSnapshots } from "./lag-compensation/bullet-replay";
 import { Ship } from "./entities/ship";
 import { World } from "./world/world";
-import {
-  WorldSnapshotBuffer,
-  type WorldSnapshot,
-} from "./world/snapshot-buffer";
-
-const SNAPSHOT_HISTORY_MS = 200;
 
 export class Engine {
   network: EngineNetwork;
@@ -20,9 +13,6 @@ export class Engine {
   #startTime = 0;
   #lastTime = 0;
   #accumulatedTime = 0;
-  #snapshotBuffer = new WorldSnapshotBuffer(SNAPSHOT_HISTORY_MS);
-
-  static SNAPSHOT_HISTORY_MS = SNAPSHOT_HISTORY_MS;
 
   get tick() {
     return this.#tick;
@@ -38,10 +28,6 @@ export class Engine {
 
   get serverTime() {
     return performance.now() - this.#startTime;
-  }
-
-  get snapshotHistoryMs() {
-    return SNAPSHOT_HISTORY_MS;
   }
 
   constructor() {
@@ -85,7 +71,6 @@ export class Engine {
   stop() {
     this.#running = false;
     this.world.clear();
-    this.#snapshotBuffer.clear();
     this.#tick = 0;
 
     console.log("engine stopped");
@@ -99,18 +84,6 @@ export class Engine {
     if (this.network.playerCount === 0) {
       this.stop();
     }
-  }
-
-  recordWorldSnapshot(snapshot: WorldSnapshot) {
-    this.#snapshotBuffer.record(snapshot);
-  }
-
-  getSnapshotAtOrBefore(time: number) {
-    return this.#snapshotBuffer.getSnapshotAtOrBefore(time);
-  }
-
-  getSnapshotRange(startTime: number, endTime: number) {
-    return this.#snapshotBuffer.getRange(startTime, endTime);
   }
 }
 
@@ -185,10 +158,7 @@ class EngineNetwork {
           player.ship.angle = message.input.angle;
         }
         if (message.input.fire) {
-          const handled = this.#handleFireCommand(player, message.latencyMs);
-          if (!handled) {
-            player.ship.fire();
-          }
+          player.ship.fire();
         }
         player.ship.lastInputSequence = message.sequence;
 
@@ -222,19 +192,12 @@ class EngineNetwork {
     const entities = this.engine.world.entities.map((entity) =>
       entity.toJSON()
     );
-    const serverTime = this.engine.serverTime;
-
-    this.engine.recordWorldSnapshot({
-      serverTime,
-      tick: this.engine.tick,
-      entities,
-    });
 
     this.#bunServer.publish(
       "server:state",
       event({
         type: "server:state",
-        serverTime,
+        serverTime: this.engine.serverTime,
         entities,
       }).serialize()
     );
@@ -244,53 +207,6 @@ class EngineNetwork {
     for (const player of this.#players.values()) {
       this.disconnectPlayer(player.ws);
     }
-  }
-
-  #handleFireCommand(player: ServerPlayer, latencyMs?: number) {
-    if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs)) {
-      return false;
-    }
-
-    const now = this.engine.serverTime;
-    const historyMs = this.engine.snapshotHistoryMs;
-    // latencyMs is the RTT, so we divide by 2 to get one-way latency
-    const oneWayLatency = latencyMs / 2;
-    const clampedLatency = Math.min(Math.max(oneWayLatency, 0), historyMs);
-    const targetTime = now - clampedLatency;
-
-    const startSnapshot =
-      this.engine.getSnapshotAtOrBefore(targetTime) ??
-      this.engine.getSnapshotAtOrBefore(now);
-    if (!startSnapshot) {
-      return false;
-    }
-
-    const shipSnapshot = startSnapshot.entities.find(
-      (entity) => entity.id === player.ship.id && entity.type === "ship"
-    );
-    if (!shipSnapshot) {
-      return false;
-    }
-
-    const snapshots = this.engine.getSnapshotRange(
-      startSnapshot.serverTime,
-      now
-    );
-    const bullet = replayBulletFromSnapshots({
-      shooterId: player.ship.id,
-      startSnapshot,
-      shipSnapshot,
-      snapshots,
-      worldEntities: this.engine.world.entities,
-      now,
-    });
-
-    if (!bullet) {
-      return false;
-    }
-
-    this.engine.world.spawn(bullet);
-    return true;
   }
 }
 

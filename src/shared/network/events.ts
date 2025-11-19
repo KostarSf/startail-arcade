@@ -1,7 +1,6 @@
 export interface PlayerInputEvent {
   type: "player:input";
   sequence: number;
-  latencyMs?: number;
   input: {
     thrust?: boolean;
     angle?: number;
@@ -43,7 +42,6 @@ export interface ServerStateEvent {
     thrust?: boolean;
     lastInputSequence?: number;
     life?: number;
-    ownerId?: string;
   }[];
 }
 

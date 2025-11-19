@@ -15,9 +15,7 @@ import {
   type EntityId,
 } from "@/shared/ecs";
 import type {
-  LocalProjectileComponent,
   NetworkStateComponent,
-  PredictedComponent,
   RenderableComponent,
   ShipControlComponent,
   ShipInputCommand,
@@ -74,10 +72,6 @@ export class ClientEngine {
   #networkStateStore = new ComponentStore<
     NetworkStateComponent<BaseEntityState>
   >(this.#entityManager);
-  #localProjectileStore = new ComponentStore<LocalProjectileComponent>(
-    this.#entityManager
-  );
-  #predictedStore = new ComponentStore<PredictedComponent>(this.#entityManager);
 
   #snapshotBuffer = new SnapshotBuffer();
   #inputBuffer = new InputBuffer();
@@ -93,7 +87,6 @@ export class ClientEngine {
     lastSentAngle: 0,
     pendingAngle: null,
   };
-  #unlinkedProjectiles: EntityId[] = [];
 
   #services: ClientServices | null = null;
 
@@ -328,15 +321,12 @@ export class ClientEngine {
       inputBuffer: this.#inputBuffer,
       cameraShake: this.#cameraShake,
       entityIndex: this.#entityIndex,
-      unlinkedProjectiles: this.#unlinkedProjectiles,
       stores: {
         transform: this.#transformStore,
         velocity: this.#velocityStore,
         renderable: this.#renderableStore,
         shipControl: this.#shipControlStore,
         networkState: this.#networkStateStore,
-        localProjectile: this.#localProjectileStore,
-        predicted: this.#predictedStore,
       },
       pixi: {
         app: this.#app,
@@ -538,9 +528,6 @@ export class ClientEngine {
       this.#services.stores.renderable.clear();
       this.#services.stores.shipControl.clear();
       this.#services.stores.networkState.clear();
-      this.#services.stores.localProjectile.clear();
-      this.#services.stores.predicted.clear();
-      this.#services.unlinkedProjectiles = [];
     }
     this.#camera.removeChildren();
 
@@ -564,8 +551,6 @@ export class ClientEngine {
       fire: input.fire,
       timestamp: this.#predictedServerTime(),
     };
-    const { latency } = this.#statsGetter();
-    const latencyMs = Number.isFinite(latency) ? latency : 0;
     const includeFields = options?.fields ?? ["thrust", "angle", "fire"];
     const payloadInput: PlayerInputEvent["input"] = {};
     if (includeFields.includes("thrust")) {
@@ -584,7 +569,6 @@ export class ClientEngine {
     const payload = event({
       type: "player:input",
       sequence: command.sequence,
-      latencyMs,
       input: payloadInput,
     }).serialize();
     this.#sendWithLatency(payload);

@@ -8,8 +8,6 @@ import type {
   RenderableComponent,
   ShipControlComponent,
   NetworkStateComponent,
-  LocalProjectileComponent,
-  PredictedComponent,
 } from "@/shared/ecs";
 import type { BaseEntityState } from "@/shared/game/entities/base";
 import type { ShipInputCommand } from "@/shared/ecs/components";
@@ -21,9 +19,6 @@ import type { CameraShake } from "./systems/camera-shake";
 
 type StatsStore = ReturnType<typeof import("../store").stats>;
 
-/**
- * Represents the immediate input state from the user (keyboard/mouse).
- */
 export interface ControlState {
   angle: number;
   thrust: boolean;
@@ -35,26 +30,18 @@ export interface ControlState {
   pendingAngle: number | null;
 }
 
-/**
- * Global services available to all ECS systems in the client game loop.
- */
 export interface ClientServices extends Record<string, unknown> {
   controls: ControlState;
   snapshotBuffer: SnapshotBuffer;
   inputBuffer: InputBuffer;
   cameraShake: CameraShake;
-  /** Map from server entity IDs to local ECS entity IDs. */
   entityIndex: Map<string, EntityId>;
-  /** Queue of local projectile entity IDs waiting to be linked to server entities. */
-  unlinkedProjectiles: EntityId[];
   stores: {
     transform: ComponentStore<TransformComponent>;
     velocity: ComponentStore<VelocityComponent>;
     renderable: ComponentStore<RenderableComponent<Container>>;
     shipControl: ComponentStore<ShipControlComponent>;
     networkState: ComponentStore<NetworkStateComponent<BaseEntityState>>;
-    localProjectile: ComponentStore<LocalProjectileComponent>;
-    predicted: ComponentStore<PredictedComponent>;
   };
   pixi: {
     app: import("pixi.js").Application;

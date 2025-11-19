@@ -23,7 +23,7 @@ import type {
   VelocityComponent,
 } from "@/shared/ecs/components";
 import type { BaseEntityState } from "@/shared/game/entities/base";
-import type { NetworkEvent } from "@/shared/network/events";
+import type { NetworkEvent, PlayerInputEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
 import asteroidTextureSrc from "../assets/images/asteroids/medium-01.png";
@@ -83,6 +83,9 @@ export class ClientEngine {
     fire: false,
     cursorScreen: null,
     cursorWorld: null,
+    lastAnglePacketTime: 0,
+    lastSentAngle: 0,
+    pendingAngle: null,
   };
 
   #services: ClientServices | null = null;
@@ -348,7 +351,7 @@ export class ClientEngine {
         entityId: null,
       },
       network: {
-        sendInput: (input) => this.#sendInput(input),
+        sendInput: (input, options) => this.#sendInput(input, options),
         predictedServerTime: () => this.#predictedServerTime(),
         renderDelayMs: RENDER_DELAY_MS,
       },
@@ -532,11 +535,14 @@ export class ClientEngine {
     this.#connectTimeout = setTimeout(() => this.#connect(), 500);
   }
 
-  #sendInput(input: {
-    thrust: boolean;
-    angle: number;
-    fire: boolean;
-  }): ShipInputCommand | null {
+  #sendInput(
+    input: {
+      thrust: boolean;
+      angle: number;
+      fire: boolean;
+    },
+    options?: { fields?: Array<"thrust" | "angle" | "fire"> }
+  ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
     const command: ShipInputCommand = {
       sequence: this.#inputSequence++,
@@ -545,14 +551,25 @@ export class ClientEngine {
       fire: input.fire,
       timestamp: this.#predictedServerTime(),
     };
+    const includeFields = options?.fields ?? ["thrust", "angle", "fire"];
+    const payloadInput: PlayerInputEvent["input"] = {};
+    if (includeFields.includes("thrust")) {
+      payloadInput.thrust = command.thrust;
+    }
+    if (includeFields.includes("angle")) {
+      payloadInput.angle = command.angle;
+    }
+    if (includeFields.includes("fire") && command.fire) {
+      payloadInput.fire = command.fire;
+    }
+
+    if (Object.keys(payloadInput).length === 0) {
+      return null;
+    }
     const payload = event({
       type: "player:input",
       sequence: command.sequence,
-      input: {
-        thrust: command.thrust,
-        angle: command.angle,
-        fire: command.fire,
-      },
+      input: payloadInput,
     }).serialize();
     this.#sendWithLatency(payload);
     return command;

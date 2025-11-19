@@ -25,6 +25,9 @@ export interface ControlState {
   fire: boolean;
   cursorScreen: { x: number; y: number } | null;
   cursorWorld: { x: number; y: number } | null;
+  lastAnglePacketTime: number;
+  lastSentAngle: number;
+  pendingAngle: number | null;
 }
 
 export interface ClientServices extends Record<string, unknown> {
@@ -59,11 +62,14 @@ export interface ClientServices extends Record<string, unknown> {
     entityId: EntityId | null;
   };
   network: {
-    sendInput: (input: {
-      thrust: boolean;
-      angle: number;
-      fire: boolean;
-    }) => ShipInputCommand | null;
+    sendInput: (
+      input: {
+        thrust: boolean;
+        angle: number;
+        fire: boolean;
+      },
+      options?: { fields?: Array<"thrust" | "angle" | "fire"> }
+    ) => ShipInputCommand | null;
     predictedServerTime: () => number;
     renderDelayMs: number;
   };

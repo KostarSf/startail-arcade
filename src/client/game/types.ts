@@ -63,4 +63,10 @@ export interface ClientServices extends Record<string, unknown> {
     predictedServerTime: () => number;
     renderDelayMs: number;
   };
+  debug: {
+    drawGrid: boolean;
+    drawWorldBorder: boolean;
+    setDrawGrid: (value: boolean) => void;
+    setDrawWorldBorder: (value: boolean) => void;
+  };
 }

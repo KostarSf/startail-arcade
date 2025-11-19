@@ -1,11 +1,15 @@
 import "./index.css";
 import { useStats } from "./store";
+import { DebugDialog } from "./DebugDialog";
 
 export function App() {
   return (
-    <div className="p-4 z-10">
-      <PlayerStats />
-    </div>
+    <>
+      <div className="p-4 z-10">
+        <PlayerStats />
+      </div>
+      <DebugDialog />
+    </>
   );
 }
 

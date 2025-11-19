@@ -28,6 +28,7 @@ import { stats } from "../store";
 import { InputBuffer } from "./network/input-buffer";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { CameraSystem } from "./systems/camera-system";
+import { GridSystem } from "./systems/grid-system";
 import { InputSystem } from "./systems/input-system";
 import { InterpolationSystem } from "./systems/interpolation-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
@@ -83,6 +84,8 @@ export class ClientEngine {
   #pingSequence = 0;
   #pingTicker = new Ticker();
   #simulatedLatencyMs = 0;
+  #drawGrid = false;
+  #drawWorldBorder = false;
 
   constructor() {
     this.#app = new Application();
@@ -92,6 +95,67 @@ export class ClientEngine {
         `[net] Using simulated latency: ${this.#simulatedLatencyMs}ms`
       );
     }
+    // Initialize debug settings from URL params
+    this.#drawWorldBorder = this.#resolveWorldBorderFromURL();
+    this.#drawGrid = this.#resolveDrawGridFromURL();
+  }
+
+  #resolveWorldBorderFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("world-border") === "true";
+  }
+
+  #resolveDrawGridFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const gridParam = params.get("draw-grid");
+    if (gridParam === null) return false; // Default to false (disabled) when param is missing
+    return gridParam === "true";
+  }
+
+  setDrawGrid(value: boolean) {
+    this.#drawGrid = value;
+    // Update URL param
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("draw-grid", "true");
+      } else {
+        url.searchParams.set("draw-grid", "false");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
+  setDrawWorldBorder(value: boolean) {
+    this.#drawWorldBorder = value;
+    // Update URL param
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("world-border", "true");
+      } else {
+        url.searchParams.delete("world-border");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
+  getSimulatedLatency(): number {
+    return this.#simulatedLatencyMs;
+  }
+
+  setSimulatedLatency(ms: number) {
+    this.#simulatedLatencyMs = Math.max(0, ms);
+  }
+
+  getDrawGrid(): boolean {
+    return this.#drawGrid;
+  }
+
+  getDrawWorldBorder(): boolean {
+    return this.#drawWorldBorder;
   }
 
   async initialize(parent: HTMLElement) {
@@ -128,6 +192,7 @@ export class ClientEngine {
     ) {
       throw new Error("Textures not loaded");
     }
+    const self = this;
     this.#services = {
       controls: this.#controls,
       snapshotBuffer: this.#snapshotBuffer,
@@ -161,6 +226,20 @@ export class ClientEngine {
         predictedServerTime: () => this.#predictedServerTime(),
         renderDelayMs: RENDER_DELAY_MS,
       },
+      debug: {
+        get drawGrid() {
+          return self.#drawGrid;
+        },
+        get drawWorldBorder() {
+          return self.#drawWorldBorder;
+        },
+        setDrawGrid: (value) => {
+          self.setDrawGrid(value);
+        },
+        setDrawWorldBorder: (value) => {
+          self.setDrawWorldBorder(value);
+        },
+      },
     };
   }
 
@@ -176,6 +255,7 @@ export class ClientEngine {
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
     this.#pipeline.register(RenderSystem);
+    this.#pipeline.register(GridSystem);
     this.#pipeline.register(CameraSystem);
     this.#pipeline.init(performance.now());
 

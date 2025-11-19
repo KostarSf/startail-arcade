@@ -1,4 +1,8 @@
-import { integrateMotion, type BaseEntityState } from "@/shared/game/entities/base";
+import {
+  integrateMotion,
+  type BaseEntityState,
+} from "@/shared/game/entities/base";
+import { Vector2 } from "@/shared/math/vector";
 import type { World } from "../world/world";
 
 export type IBaseEntity = BaseEntityState;
@@ -16,6 +20,14 @@ export abstract class BaseEntity {
   vy: number;
   /** Radians per second */
   va: number;
+
+  get position() {
+    return new Vector2(this.x, this.y);
+  }
+
+  get velocity() {
+    return new Vector2(this.vx, this.vy);
+  }
 
   removed = false;
 

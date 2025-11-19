@@ -1,9 +1,11 @@
 import type { Engine } from "../engine";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
+import { UniformGrid } from "./uniform-grid";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
+  #uniformGrid = new UniformGrid();
 
   #borderRadius = 2000;
 
@@ -11,11 +13,16 @@ export class World {
     return Array.from(this.#entities.values());
   }
 
+  get uniformGrid() {
+    return this.#uniformGrid;
+  }
+
   spawn(entity: BaseEntity) {
     if (entity.initialized) {
       throw new Error("Entity already initialized");
     }
     this.#entities.set(entity.id, entity);
+    this.#uniformGrid.update(entity);
   }
 
   find(id: string) {
@@ -23,7 +30,7 @@ export class World {
   }
 
   initialize(engine: Engine) {
-    const ASTEROID_COUNT = 20;
+    const ASTEROID_COUNT = 50;
     const ASTEROID_VELOCITY = 50;
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 
@@ -34,7 +41,8 @@ export class World {
       const angle = Math.random() * 2 * Math.PI - Math.PI;
       const vx = Math.random() * ASTEROID_VELOCITY - ASTEROID_VELOCITY / 2;
       const vy = Math.random() * ASTEROID_VELOCITY - ASTEROID_VELOCITY / 2;
-      const va = Math.random() * ASTEROID_ANGLE_VELOCITY - ASTEROID_ANGLE_VELOCITY / 2;
+      const va =
+        Math.random() * ASTEROID_ANGLE_VELOCITY - ASTEROID_ANGLE_VELOCITY / 2;
       const asteroid = new Asteroid({ x, y, angle, vx, vy, va, size });
       this.spawn(asteroid);
     }
@@ -63,11 +71,15 @@ export class World {
 
       if (entity.removed) {
         this.#entities.delete(entity.id);
+        this.#uniformGrid.remove(entity);
+      } else {
+        this.#uniformGrid.update(entity);
       }
     }
   }
 
   clear() {
     this.#entities.clear();
+    this.#uniformGrid.clear();
   }
 }

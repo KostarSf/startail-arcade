@@ -118,7 +118,6 @@ class EngineNetwork {
       this.engine.start();
     }
 
-    ws.subscribe("server:state");
     ws.send(
       event({
         type: "server:player-initialize",
@@ -189,18 +188,20 @@ class EngineNetwork {
 
     if (this.#players.size === 0) return;
 
-    const entities = this.engine.world.entities.map((entity) =>
-      entity.toJSON()
-    );
+    for (const player of this.#players.values()) {
+      const playerPos = player.ship.position;
+      const visibleEntities = Array.from(
+        this.engine.world.uniformGrid.query(playerPos, 900).values()
+      );
 
-    this.#bunServer.publish(
-      "server:state",
-      event({
-        type: "server:state",
-        serverTime: this.engine.serverTime,
-        entities,
-      }).serialize()
-    );
+      player.ws.send(
+        event({
+          type: "server:state",
+          serverTime: this.engine.serverTime,
+          entities: visibleEntities.map((entity) => entity.toJSON()),
+        }).serialize()
+      );
+    }
   }
 
   disconnectAllPlayers() {

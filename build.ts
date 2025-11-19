@@ -33,7 +33,8 @@ Example:
   process.exit(0);
 }
 
-const toCamelCase = (str: string): string => str.replace(/-([a-z])/g, g => g[1].toUpperCase());
+const toCamelCase = (str: string): string =>
+  str.replace(/-([a-z])/g, (_, ch: string) => ch?.toUpperCase() ?? "");
 
 const parseValue = (value: string): any => {
   if (value === "true") return true;
@@ -48,7 +49,7 @@ const parseValue = (value: string): any => {
 };
 
 function parseArgs(): Partial<Bun.BuildConfig> {
-  const config: Partial<Bun.BuildConfig> = {};
+  const config: Record<string, any> = {};
   const args = process.argv.slice(2);
 
   for (let i = 0; i < args.length; i++) {
@@ -81,8 +82,8 @@ function parseArgs(): Partial<Bun.BuildConfig> {
     key = toCamelCase(key);
 
     if (key.includes(".")) {
-      const [parentKey, childKey] = key.split(".");
-      config[parentKey] = config[parentKey] || {};
+      const [parentKey, childKey] = key.split(".") as [string, string];
+      if (!config[parentKey]) config[parentKey] = {};
       config[parentKey][childKey] = parseValue(value);
     } else {
       config[key] = parseValue(value);
@@ -117,7 +118,7 @@ if (existsSync(outdir)) {
 
 const start = performance.now();
 
-const entrypoints = [...new Bun.Glob("**.html").scanSync("src")]
+const entrypoints = [...new Bun.Glob("**/*.html").scanSync("src")]
   .map(a => path.resolve("src", a))
   .filter(dir => !dir.includes("node_modules"));
 console.log(`📄 Found ${entrypoints.length} HTML ${entrypoints.length === 1 ? "file" : "files"} to process\n`);

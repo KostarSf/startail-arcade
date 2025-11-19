@@ -160,6 +160,7 @@ class EngineNetwork {
         if (message.input.fire) {
           player.ship.fire();
         }
+        player.ship.lastInputSequence = message.sequence;
 
         break;
 

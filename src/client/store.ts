@@ -16,7 +16,7 @@ type StatsStoreActions = {
   setHasTimeSync: (hasTimeSync: boolean) => void;
   setObjectsCount: (objectsCount: number) => void;
   setPlayerId: (playerId: string) => void;
-  setPlayerObject: (playerObject: Container) => void;
+  setPlayerObject: (playerObject: Container | null) => void;
 };
 
 type StatsStore = StatsStoreState & StatsStoreActions;
@@ -33,7 +33,7 @@ export const useStats = create<StatsStore>((set) => ({
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
   setObjectsCount: (objectsCount: number) => set({ objectsCount }),
   setPlayerId: (playerId: string) => set({ playerId }),
-  setPlayerObject: (playerObject: Container) => set({ playerObject }),
+  setPlayerObject: (playerObject: Container | null) => set({ playerObject }),
 }));
 
 export const stats = () => useStats.getState();

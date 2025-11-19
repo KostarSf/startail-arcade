@@ -38,7 +38,9 @@ export interface ServerStateEvent {
     angle: number;
     vx: number;
     vy: number;
-    accelerating?: boolean;
+    va?: number;
+    thrust?: boolean;
+    lastInputSequence?: number;
     life?: number;
   }[];
 }

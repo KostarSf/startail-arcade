@@ -1,15 +1,7 @@
+import { integrateMotion, type BaseEntityState } from "@/shared/game/entities/base";
 import type { World } from "../world/world";
 
-export interface IBaseEntity {
-  type: string;
-  id: string;
-  x: number;
-  y: number;
-  angle: number;
-  vx: number;
-  vy: number;
-  va: number;
-}
+export type IBaseEntity = BaseEntityState;
 
 export abstract class BaseEntity {
   type: string;
@@ -55,10 +47,7 @@ export abstract class BaseEntity {
   }
 
   update(delta: number) {
-    this.x += this.vx * delta;
-    this.y += this.vy * delta;
-    this.angle += this.va * delta;
-    this.angle = ((this.angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    integrateMotion(this, delta);
   }
 
   remove() {
@@ -94,6 +83,7 @@ export abstract class BaseEntity {
       angle: this.angle,
       vx: this.vx,
       vy: this.vy,
+      va: this.va,
     };
   }
 }

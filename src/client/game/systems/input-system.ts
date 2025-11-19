@@ -11,6 +11,10 @@ const defaultControl = (): ShipControlComponent => ({
   pendingInputs: [],
 });
 
+/**
+ * Captures local controls, mutates the player's ship component immediately,
+ * and emits buffered commands to the network layer for reconciliation.
+ */
 export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",

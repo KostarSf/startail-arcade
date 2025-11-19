@@ -3,6 +3,9 @@ import type { System } from "@/shared/ecs";
 
 import type { ClientServices } from "../types";
 
+/**
+ * Synchronizes PIXI display objects with ECS transforms each frame.
+ */
 export const RenderSystem: System<ClientServices> = {
   id: "render-system",
   stage: "presentation",

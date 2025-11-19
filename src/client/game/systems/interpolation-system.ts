@@ -140,6 +140,10 @@ const angleLerp = (start: number, end: number, alpha: number) => {
   return normalizeAngle(start + delta * alpha);
 };
 
+/**
+ * Buffers server snapshots, keeps the ECS in sync with streamed entities,
+ * and interpolates transforms at predicted server time minus the render delay.
+ */
 export const InterpolationSystem: System<ClientServices> = {
   id: "interpolation-system",
   stage: "prediction",

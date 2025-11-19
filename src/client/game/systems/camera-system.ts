@@ -6,6 +6,10 @@ import type { ClientServices } from "../types";
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
+/**
+ * Smoothly follows the player ship, applies auto-zoom, and drives parallax
+ * starfield updates based on the active camera transform.
+ */
 export const CameraSystem: System<ClientServices> = {
   id: "camera-system",
   stage: "presentation",

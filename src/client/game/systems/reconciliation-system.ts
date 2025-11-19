@@ -38,6 +38,10 @@ const simulateUntil = (
   return toTime;
 };
 
+/**
+ * Replays buffered player inputs on top of the latest authoritative snapshot
+ * so the local ship stays responsive while converging to server truth.
+ */
 export const ReconciliationSystem: System<ClientServices> = {
   id: "reconciliation-system",
   stage: "prediction",

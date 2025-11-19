@@ -6,7 +6,7 @@ export interface IBullet extends IBaseEntity {
 }
 
 export class Bullet extends BaseEntity {
-  static lifeSpan = TPS * 4; // 4 seconds
+  static lifeSpan = TPS * 5; // 4 seconds
   life: number;
 
   constructor(bullet: Partial<IBullet>) {

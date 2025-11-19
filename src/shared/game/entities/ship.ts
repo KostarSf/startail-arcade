@@ -31,7 +31,7 @@ export const SHIP_CONSTANTS = {
   startBoost: 5,
   driftBoost: 2,
   acceleration: 50,
-  bulletSpeed: 250,
+  bulletSpeed: 350,
   bulletOffset: 10,
 };
 

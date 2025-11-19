@@ -82,9 +82,16 @@ export class ClientEngine {
   #inputSequence = 0;
   #pingSequence = 0;
   #pingTicker = new Ticker();
+  #simulatedLatencyMs = 0;
 
   constructor() {
     this.#app = new Application();
+    this.#simulatedLatencyMs = this.#resolveSimulatedLatency();
+    if (this.#simulatedLatencyMs > 0) {
+      console.info(
+        `[net] Using simulated latency: ${this.#simulatedLatencyMs}ms`
+      );
+    }
   }
 
   async initialize(parent: HTMLElement) {
@@ -210,13 +217,12 @@ export class ClientEngine {
     this.#pingTicker.maxFPS = 2;
     this.#pingTicker.add(() => {
       if (!this.#ws) return;
-      this.#ws.send(
-        event({
-          type: "player:ping",
-          sequence: this.#pingSequence++,
-          clientTime: performance.now(),
-        }).serialize()
-      );
+      const payload = event({
+        type: "player:ping",
+        sequence: this.#pingSequence++,
+        clientTime: performance.now(),
+      }).serialize();
+      this.#sendWithLatency(payload);
     });
   }
 
@@ -233,8 +239,13 @@ export class ClientEngine {
       this.#handleDisconnect();
     };
     this.#ws.onmessage = (eventMessage) => {
-      const message = JSON.parse(eventMessage.data) as NetworkEvent;
-      this.#handleMessage(message);
+      const payload = eventMessage.data;
+      this.#withSimulatedLatency(() => {
+        const raw =
+          typeof payload === "string" ? payload : payload.toString();
+        const message = JSON.parse(raw) as NetworkEvent;
+        this.#handleMessage(message);
+      });
     };
   }
 
@@ -324,17 +335,16 @@ export class ClientEngine {
       fire: input.fire,
       timestamp: this.#predictedServerTime(),
     };
-    this.#ws.send(
-      event({
-        type: "player:input",
-        sequence: command.sequence,
-        input: {
-          thrust: command.thrust,
-          angle: command.angle,
-          fire: command.fire,
-        },
-      }).serialize()
-    );
+    const payload = event({
+      type: "player:input",
+      sequence: command.sequence,
+      input: {
+        thrust: command.thrust,
+        angle: command.angle,
+        fire: command.fire,
+      },
+    }).serialize();
+    this.#sendWithLatency(payload);
     return command;
   }
 
@@ -355,5 +365,37 @@ export class ClientEngine {
     this.#textures.pirate = pirate;
     this.#textures.asteroid = asteroid;
     this.#textures.bullet = bullet;
+  }
+
+  #resolveSimulatedLatency() {
+    if (typeof window === "undefined") return 0;
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get("sim-latency");
+    if (!value) return 0;
+    if (value === "random") {
+      const min = 20;
+      const max = 100;
+      return Math.round(Math.random() * (max - min) + min);
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+    return 0;
+  }
+
+  #withSimulatedLatency(cb: () => void) {
+    if (this.#simulatedLatencyMs <= 0) {
+      cb();
+      return;
+    }
+    setTimeout(cb, this.#simulatedLatencyMs);
+  }
+
+  #sendWithLatency(payload: string) {
+    if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+    this.#withSimulatedLatency(() => {
+      this.#ws?.send(payload);
+    });
   }
 }

@@ -1,9 +1,7 @@
 import type { System } from "@/shared/ecs";
 import type { ShipInputCommand } from "@/shared/ecs/components";
-import {
-  updateShipPhysics,
-  type ShipState,
-} from "@/shared/game/entities/ship";
+import { integrateMotion } from "@/shared/game/entities/base";
+import { updateShipPhysics, type ShipState } from "@/shared/game/entities/ship";
 
 import type { ClientServices } from "../types";
 
@@ -30,6 +28,7 @@ const simulateUntil = (
     return fromTime;
   }
   const deltaSeconds = deltaMs / 1000;
+  integrateMotion(shipState, deltaSeconds);
   updateShipPhysics(shipState, {
     thrust: currentInput.thrust,
     fire: false,

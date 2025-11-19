@@ -187,6 +187,7 @@ export const InterpolationSystem: System<ClientServices> = {
       const source = pair.from ?? pair.to!;
       const target = pair.to ?? pair.from!;
       let lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
+      const isPlayer = serverId === services.player.id;
 
       const entityId =
         services.entityIndex.get(serverId) ?? entities.create();
@@ -252,9 +253,11 @@ export const InterpolationSystem: System<ClientServices> = {
       if (target.state.type === "ship") {
         const shipControl = services.stores.shipControl.get(entityId);
         if (shipControl) {
-          shipControl.angle = target.state.angle;
-          shipControl.thrust =
-            target.state.thrust ?? shipControl.thrust;
+          if (!isPlayer) {
+            shipControl.angle = target.state.angle;
+            shipControl.thrust =
+              target.state.thrust ?? shipControl.thrust;
+          }
           if (
             target.state.lastInputSequence !== undefined &&
             target.state.lastInputSequence > shipControl.lastServerSequence
@@ -263,7 +266,7 @@ export const InterpolationSystem: System<ClientServices> = {
               target.state.lastInputSequence;
           }
         }
-        if (serverId === services.player.id) {
+        if (isPlayer) {
           if (services.player.entityId === null) {
             services.controls.angle = target.state.angle;
           }

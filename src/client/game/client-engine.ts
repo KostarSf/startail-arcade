@@ -1,4 +1,12 @@
-import { Application, Assets, Container, Texture, Ticker } from "pixi.js";
+import {
+  Application,
+  Assets,
+  Container,
+  RenderTexture,
+  Sprite,
+  Texture,
+  Ticker,
+} from "pixi.js";
 
 import {
   ComponentStore,
@@ -42,6 +50,12 @@ export class ClientEngine {
   #camera = new Container();
   #starfield = new Starfield(500, 10000, 10000, 0.3);
   #statsGetter = stats;
+  #gameContainer = new Container();
+  #renderTexture: RenderTexture | null = null;
+  #renderSprite: Sprite | null = null;
+  #renderScale = 0.7;
+  #lastScreenWidth = 0;
+  #lastScreenHeight = 0;
 
   #entityManager = new EntityManager();
   #pipeline: Pipeline<ClientServices> | null = null;
@@ -162,18 +176,28 @@ export class ClientEngine {
     await this.#app.init({
       background: "#000000",
       resizeTo: window,
+      antialias: false,
+      resolution: 1,
     });
 
     parent.appendChild(this.#app.canvas);
-    this.#app.canvas.style.imageRendering = "pixelated";
-    this.#app.stage.addChild(this.#starfield.getContainer());
-    this.#app.stage.addChild(this.#camera);
+    // Disable CSS-level antialiasing for pixelated retro look
+    const canvas = this.#app.canvas;
+    canvas.style.imageRendering = "pixelated";
+    canvas.style.setProperty("image-rendering", "-moz-crisp-edges", "important");
+    canvas.style.setProperty("image-rendering", "crisp-edges", "important");
+
+    // Set up retro rendering: render game at 0.75x resolution
+    this.#setupRetroRendering();
+
     this.#app.stage.eventMode = "static";
     this.#app.stage.hitArea = this.#app.screen;
-    this.#controls.cursorScreen = {
-      x: this.#app.screen.width / 2,
-      y: this.#app.screen.height / 2,
-    };
+
+    // Ensure render texture is updated after initialization
+    // Use requestAnimationFrame to ensure screen dimensions are set
+    requestAnimationFrame(() => {
+      this.#checkAndUpdateRenderTexture();
+    });
 
     await this.#loadTextures();
     this.#setupServices();
@@ -181,6 +205,99 @@ export class ClientEngine {
     this.#setupInputListeners();
     this.#setupTickers();
     this.#connect();
+  }
+
+  #setupRetroRendering() {
+    // Create container for game content
+    this.#gameContainer.addChild(this.#starfield.getContainer());
+    this.#gameContainer.addChild(this.#camera);
+
+    // Create render texture at 0.75x resolution
+    this.#updateRenderTexture();
+
+    // Create sprite to display the render texture
+    this.#renderSprite = new Sprite(this.#renderTexture!);
+    this.#renderSprite.texture.source.scaleMode = "nearest";
+    this.#renderSprite.anchor.set(0, 0); // Anchor at top-left
+    this.#renderSprite.x = 0;
+    this.#renderSprite.y = 0;
+    this.#app.stage.addChild(this.#renderSprite);
+
+    // Handle window resize
+    const handleResize = () => {
+      // Use a small delay to ensure PixiJS has updated its screen dimensions
+      requestAnimationFrame(() => {
+        this.#checkAndUpdateRenderTexture();
+      });
+    };
+    window.addEventListener("resize", handleResize);
+
+    // Also listen to app resize events
+    this.#app.renderer.on("resize", handleResize);
+
+    // Render game container to texture each frame and check for size changes
+    this.#app.ticker.add(() => {
+      // Check if screen dimensions changed and update if needed
+      this.#checkAndUpdateRenderTexture();
+
+      if (this.#renderTexture && this.#gameContainer) {
+        this.#app.renderer.render(this.#gameContainer, {
+          renderTexture: this.#renderTexture,
+        });
+      }
+    });
+  }
+
+  #checkAndUpdateRenderTexture() {
+    const screenWidth = this.#app.screen.width;
+    const screenHeight = this.#app.screen.height;
+
+    // Only update if dimensions actually changed
+    if (
+      screenWidth === this.#lastScreenWidth &&
+      screenHeight === this.#lastScreenHeight
+    ) {
+      return;
+    }
+
+    this.#lastScreenWidth = screenWidth;
+    this.#lastScreenHeight = screenHeight;
+    this.#updateRenderTexture();
+  }
+
+  #updateRenderTexture() {
+    const screenWidth = this.#app.screen.width;
+    const screenHeight = this.#app.screen.height;
+    const renderWidth = Math.floor(screenWidth * this.#renderScale);
+    const renderHeight = Math.floor(screenHeight * this.#renderScale);
+
+    if (this.#renderTexture) {
+      this.#renderTexture.destroy(true);
+    }
+
+    this.#renderTexture = RenderTexture.create({
+      width: renderWidth,
+      height: renderHeight,
+      resolution: 1,
+    });
+    this.#renderTexture.source.scaleMode = "nearest";
+
+    if (this.#renderSprite) {
+      this.#renderSprite.texture = this.#renderTexture;
+      this.#renderSprite.texture.source.scaleMode = "nearest";
+      // Scale sprite to fill screen exactly
+      const scaleX = screenWidth / renderWidth;
+      const scaleY = screenHeight / renderHeight;
+      this.#renderSprite.scale.set(scaleX, scaleY);
+      this.#renderSprite.x = 0;
+      this.#renderSprite.y = 0;
+
+      // Update default cursor position in render space
+      this.#controls.cursorScreen = {
+        x: renderWidth / 2,
+        y: renderHeight / 2,
+      };
+    }
   }
 
   #setupServices() {
@@ -209,6 +326,12 @@ export class ClientEngine {
         app: this.#app,
         camera: this.#camera,
         starfield: this.#starfield,
+        get renderWidth() {
+          return Math.floor(self.#app.screen.width * self.#renderScale);
+        },
+        get renderHeight() {
+          return Math.floor(self.#app.screen.height * self.#renderScale);
+        },
       },
       stats: this.#statsGetter,
       textures: {
@@ -269,7 +392,11 @@ export class ClientEngine {
 
   #setupInputListeners() {
     const updateCursor = (e: import("pixi.js").FederatedPointerEvent) => {
-      this.#controls.cursorScreen = { x: e.global.x, y: e.global.y };
+      // Convert screen coordinates to game render space (0.75x resolution)
+      this.#controls.cursorScreen = {
+        x: e.global.x * this.#renderScale,
+        y: e.global.y * this.#renderScale,
+      };
     };
     this.#app.stage.on("pointermove", updateCursor);
     this.#app.stage.on("pointerdown", updateCursor);
@@ -441,6 +568,13 @@ export class ClientEngine {
       Assets.load<Texture>(asteroidTextureSrc),
       Assets.load<Texture>(bulletTextureSrc),
     ]);
+
+    // Ensure all textures use nearest neighbor scaling
+    player.source.scaleMode = "nearest";
+    pirate.source.scaleMode = "nearest";
+    asteroid.source.scaleMode = "nearest";
+    bullet.source.scaleMode = "nearest";
+
     this.#textures.player = player;
     this.#textures.pirate = pirate;
     this.#textures.asteroid = asteroid;

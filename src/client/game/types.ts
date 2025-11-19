@@ -42,6 +42,8 @@ export interface ClientServices extends Record<string, unknown> {
     app: import("pixi.js").Application;
     camera: Container;
     starfield: Starfield;
+    renderWidth: number;
+    renderHeight: number;
   };
   stats: () => StatsStore;
   textures: {

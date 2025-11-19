@@ -30,13 +30,23 @@ export const CameraSystem: System<ClientServices> = {
     const velocity = stores.velocity.get(player.entityId);
     if (!transform || !velocity) return;
 
-    const speed = Math.sqrt(velocity.vx ** 2 + velocity.vy ** 2);
-    const targetScale = clamp(2 - inverseLerp(speed, 0, 350), 0.5, 2);
+    const speed = Math.hypot(velocity.vx, velocity.vy);
+    const MIN_CAMERA_ZOOM = 0.7;
+    const MAX_CAMERA_ZOOM = 1.7;
+    const MAX_PLAYER_SPEED = 350;
+    const targetScale = clamp(
+      MAX_CAMERA_ZOOM - inverseLerp(speed, 0, MAX_PLAYER_SPEED),
+      MIN_CAMERA_ZOOM,
+      MAX_CAMERA_ZOOM
+    );
     const currentScale = camera.scale.x;
     const newScale = lerp(currentScale, targetScale, dt * 5);
 
-    const targetX = transform.x * newScale - app.screen.width / 2;
-    const targetY = transform.y * newScale - app.screen.height / 2;
+    const renderWidth = services.pixi.renderWidth;
+    const renderHeight = services.pixi.renderHeight;
+
+    const targetX = transform.x * newScale - renderWidth / 2;
+    const targetY = transform.y * newScale - renderHeight / 2;
 
     camera.x = -lerp(-camera.x, targetX, dt * 6);
     camera.y = -lerp(-camera.y, targetY, dt * 6);
@@ -47,8 +57,8 @@ export const CameraSystem: System<ClientServices> = {
       camera.x,
       camera.y,
       newScale,
-      app.screen.width,
-      app.screen.height
+      renderWidth,
+      renderHeight
     );
   },
 };

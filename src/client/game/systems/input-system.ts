@@ -24,8 +24,8 @@ export const InputSystem: System<ClientServices> = {
 
     const screenCursor =
       controls.cursorScreen ?? {
-        x: pixi.app.screen.width / 2,
-        y: pixi.app.screen.height / 2,
+        x: pixi.renderWidth / 2,
+        y: pixi.renderHeight / 2,
       };
 
     const cursorWorld = {

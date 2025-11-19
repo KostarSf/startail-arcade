@@ -26,7 +26,7 @@ export const GridSystem: System<ClientServices> = {
   },
   tick({ services }) {
     const {
-      pixi: { app, camera },
+      pixi: { app, camera, renderWidth, renderHeight },
       debug,
     } = services;
     const grid = (services as any).grid as Graphics;
@@ -51,9 +51,9 @@ export const GridSystem: System<ClientServices> = {
 
     // Calculate visible world bounds using the same formula as input system
     // World coordinates: worldX = (screenX - camera.x) / scale
-    // Screen center world position:
-    const screenCenterX = app.screen.width / 2;
-    const screenCenterY = app.screen.height / 2;
+    // Screen center world position (using render dimensions):
+    const screenCenterX = renderWidth / 2;
+    const screenCenterY = renderHeight / 2;
 
     // If camera hasn't moved (x/y are 0 or very close), center on origin
     let cameraWorldX: number;
@@ -67,8 +67,8 @@ export const GridSystem: System<ClientServices> = {
       cameraWorldY = (screenCenterY - camera.y) / scale;
     }
 
-    const viewWidth = app.screen.width / scale;
-    const viewHeight = app.screen.height / scale;
+    const viewWidth = renderWidth / scale;
+    const viewHeight = renderHeight / scale;
 
     // Extend bounds to ensure grid covers visible area plus margin
     const left = cameraWorldX - viewWidth / 2 - BIG_CELL_SIZE;

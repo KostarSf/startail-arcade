@@ -48,6 +48,7 @@ export interface ClientServices extends Record<string, unknown> {
     player: import("pixi.js").Texture;
     pirate: import("pixi.js").Texture;
     asteroid: import("pixi.js").Texture;
+    bullet: import("pixi.js").Texture;
   };
   player: {
     id: string | null;

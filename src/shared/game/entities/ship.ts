@@ -31,7 +31,7 @@ export const SHIP_CONSTANTS = {
   startBoost: 5,
   driftBoost: 2,
   acceleration: 50,
-  bulletSpeed: 100,
+  bulletSpeed: 250,
   bulletOffset: 10,
 };
 
@@ -91,8 +91,8 @@ export function updateShipPhysics(
     x: ship.x + cos * SHIP_CONSTANTS.bulletOffset,
     y: ship.y + sin * SHIP_CONSTANTS.bulletOffset,
     angle: ship.angle,
-    vx: cos * SHIP_CONSTANTS.bulletSpeed,
-    vy: sin * SHIP_CONSTANTS.bulletSpeed,
+    vx: cos * SHIP_CONSTANTS.bulletSpeed + ship.vx,
+    vy: sin * SHIP_CONSTANTS.bulletSpeed + ship.vy,
   };
 
   return { fired: true, bullet };

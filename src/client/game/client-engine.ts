@@ -1,10 +1,4 @@
-import {
-  Application,
-  Assets,
-  Container,
-  Texture,
-  Ticker,
-} from "pixi.js";
+import { Application, Assets, Container, Texture, Ticker } from "pixi.js";
 
 import {
   ComponentStore,
@@ -13,25 +7,26 @@ import {
   type EntityId,
 } from "@/shared/ecs";
 import type {
-  TransformComponent,
-  VelocityComponent,
+  NetworkStateComponent,
   RenderableComponent,
   ShipControlComponent,
-  NetworkStateComponent,
   ShipInputCommand,
+  TransformComponent,
+  VelocityComponent,
 } from "@/shared/ecs/components";
 import type { BaseEntityState } from "@/shared/game/entities/base";
 import type { NetworkEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
-import playerTextureSrc from "../assets/images/player.png";
-import pirateTextureSrc from "../assets/images/pirate.png";
 import asteroidTextureSrc from "../assets/images/asteroids/medium-01.png";
+import bulletTextureSrc from "../assets/images/bullet.png";
+import pirateTextureSrc from "../assets/images/pirate.png";
+import playerTextureSrc from "../assets/images/player.png";
 
 import { Starfield } from "../starfield";
 import { stats } from "../store";
-import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { InputBuffer } from "./network/input-buffer";
+import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { CameraSystem } from "./systems/camera-system";
 import { InputSystem } from "./systems/input-system";
 import { InterpolationSystem } from "./systems/interpolation-system";
@@ -52,15 +47,15 @@ export class ClientEngine {
 
   #transformStore = new ComponentStore<TransformComponent>(this.#entityManager);
   #velocityStore = new ComponentStore<VelocityComponent>(this.#entityManager);
-  #renderableStore =
-    new ComponentStore<RenderableComponent<Container>>(this.#entityManager);
+  #renderableStore = new ComponentStore<RenderableComponent<Container>>(
+    this.#entityManager
+  );
   #shipControlStore = new ComponentStore<ShipControlComponent>(
     this.#entityManager
   );
-  #networkStateStore =
-    new ComponentStore<NetworkStateComponent<BaseEntityState>>(
-      this.#entityManager
-    );
+  #networkStateStore = new ComponentStore<
+    NetworkStateComponent<BaseEntityState>
+  >(this.#entityManager);
 
   #snapshotBuffer = new SnapshotBuffer();
   #inputBuffer = new InputBuffer();
@@ -79,7 +74,8 @@ export class ClientEngine {
     player: Texture | null;
     pirate: Texture | null;
     asteroid: Texture | null;
-  } = { player: null, pirate: null, asteroid: null };
+    bullet: Texture | null;
+  } = { player: null, pirate: null, asteroid: null, bullet: null };
 
   #ws: WebSocket | null = null;
   #connectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -117,7 +113,12 @@ export class ClientEngine {
   }
 
   #setupServices() {
-    if (!this.#textures.player || !this.#textures.pirate || !this.#textures.asteroid) {
+    if (
+      !this.#textures.player ||
+      !this.#textures.pirate ||
+      !this.#textures.asteroid ||
+      !this.#textures.bullet
+    ) {
       throw new Error("Textures not loaded");
     }
     this.#services = {
@@ -142,6 +143,7 @@ export class ClientEngine {
         player: this.#textures.player,
         pirate: this.#textures.pirate,
         asteroid: this.#textures.asteroid,
+        bullet: this.#textures.bullet,
       },
       player: {
         id: null,
@@ -343,13 +345,15 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, asteroid] = await Promise.all([
+    const [player, pirate, asteroid, bullet] = await Promise.all([
       Assets.load<Texture>(playerTextureSrc),
       Assets.load<Texture>(pirateTextureSrc),
       Assets.load<Texture>(asteroidTextureSrc),
+      Assets.load<Texture>(bulletTextureSrc),
     ]);
     this.#textures.player = player;
     this.#textures.pirate = pirate;
     this.#textures.asteroid = asteroid;
+    this.#textures.bullet = bullet;
   }
 }

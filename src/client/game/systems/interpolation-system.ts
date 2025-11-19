@@ -8,6 +8,7 @@ import type { ClientServices } from "../types";
 import type { ServerSnapshot } from "../network/snapshot-buffer";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const TELEPORT_DISTANCE_THRESHOLD = 2000;
 
 type SnapshotEntity = ServerSnapshot["entities"][number];
 
@@ -50,6 +51,12 @@ const ensureRenderable = (
         anchor: 0.5,
       });
       sprite.tint = 0x808080;
+      break;
+    case "bullet":
+      sprite = new Sprite({
+        texture: services.textures.bullet,
+        anchor: 0.5,
+      });
       break;
   }
 
@@ -179,7 +186,7 @@ export const InterpolationSystem: System<ClientServices> = {
     for (const [serverId, pair] of pairMap.entries()) {
       const source = pair.from ?? pair.to!;
       const target = pair.to ?? pair.from!;
-      const lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
+      let lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
 
       const entityId =
         services.entityIndex.get(serverId) ?? entities.create();
@@ -193,16 +200,16 @@ export const InterpolationSystem: System<ClientServices> = {
 
       const transform = services.stores.transform.get(entityId);
       if (transform) {
-        transform.x = lerp(
-          source.state.x,
-          target.state.x,
-          lerpAlpha
-        );
-        transform.y = lerp(
-          source.state.y,
-          target.state.y,
-          lerpAlpha
-        );
+        const dx = target.state.x - source.state.x;
+        const dy = target.state.y - source.state.y;
+        const distance = Math.hypot(dx, dy);
+        const teleported = distance > TELEPORT_DISTANCE_THRESHOLD;
+        if (teleported) {
+          lerpAlpha = 1;
+        }
+
+        transform.x = lerp(source.state.x, target.state.x, lerpAlpha);
+        transform.y = lerp(source.state.y, target.state.y, lerpAlpha);
         transform.angle = angleLerp(
           source.state.angle,
           target.state.angle,

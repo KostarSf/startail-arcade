@@ -570,6 +570,7 @@ export class ClientEngine {
       type: "player:input",
       sequence: command.sequence,
       input: payloadInput,
+      latency: this.#statsGetter().latency
     }).serialize();
     this.#sendWithLatency(payload);
     return command;

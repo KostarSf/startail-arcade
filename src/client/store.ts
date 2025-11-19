@@ -2,6 +2,7 @@ import type { Container } from "pixi.js";
 import { create } from "zustand";
 
 type StatsStoreState = {
+  /** The round-trip time of the last ping-pong message */
   latency: number;
   offset: number;
   hasTimeSync: boolean;

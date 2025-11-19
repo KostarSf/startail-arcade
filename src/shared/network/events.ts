@@ -1,6 +1,8 @@
 export interface PlayerInputEvent {
   type: "player:input";
   sequence: number;
+  /** Round trip time in milliseconds */
+  latency: number;
   input: {
     thrust?: boolean;
     angle?: number;

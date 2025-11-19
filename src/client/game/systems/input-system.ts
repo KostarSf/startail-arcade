@@ -70,7 +70,6 @@ export const InputSystem: System<ClientServices> = {
 
     if (command) {
       inputBuffer.enqueue(command);
-      shipControl.lastServerSequence = command.sequence;
     }
 
     controls.fire = false;

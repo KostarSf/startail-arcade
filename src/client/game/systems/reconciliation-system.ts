@@ -66,13 +66,20 @@ export const ReconciliationSystem: System<ClientServices> = {
     if (!baseline) {
       baseline = {
         sequence: shipControl.lastServerSequence,
-        thrust: latestServerState?.thrust ?? shipControl.thrust,
-        angle: latestServerState?.angle ?? transform.angle,
+        thrust: shipControl.thrust,
+        angle: shipControl.angle,
         fire: false,
         timestamp: networkState.lastServerTime,
       };
       inputBuffer.setBaseline(baseline);
     }
+
+    baseline.thrust = shipControl.thrust;
+    baseline.angle = shipControl.angle;
+    baseline.timestamp = Math.max(
+      baseline.timestamp,
+      networkState.lastServerTime
+    );
 
     const authoritative = cloneShipState({
       ...latestServerState,

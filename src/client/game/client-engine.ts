@@ -51,6 +51,7 @@ import { InputSystem } from "./systems/input-system";
 import { InterpolationSystem } from "./systems/interpolation-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
+import { ParticleSystem } from "./systems/particle-system";
 import type { ClientServices, ControlState } from "./types";
 
 const RENDER_DELAY_MS = 100;
@@ -455,6 +456,7 @@ export class ClientEngine {
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
     this.#pipeline.register(RenderSystem);
+    this.#pipeline.register(ParticleSystem);
     this.#pipeline.register(HintSystem);
     this.#pipeline.register(GridSystem);
     this.#pipeline.register(CameraSystem);

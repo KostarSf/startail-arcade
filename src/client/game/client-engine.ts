@@ -45,6 +45,7 @@ import { Starfield } from "../starfield";
 import { stats } from "../store";
 import { InputBuffer } from "./network/input-buffer";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
+import { EdgeOfWorldFilter } from "./shaders/edge-of-world-filter";
 import { CameraShake } from "./systems/camera-shake";
 import { CameraSystem } from "./systems/camera-system";
 import { GridSystem } from "./systems/grid-system";
@@ -72,6 +73,7 @@ export class ClientEngine {
   #gameContainer = new Container();
   #renderTexture: RenderTexture | null = null;
   #renderSprite: Sprite | null = null;
+  #edgeOfWorldFilter: EdgeOfWorldFilter | null = null;
   #renderScale = 0.7;
   #lastScreenWidth = 0;
   #lastScreenHeight = 0;
@@ -300,6 +302,14 @@ export class ClientEngine {
     this.#renderSprite.anchor.set(0, 0); // Anchor at top-left
     this.#renderSprite.x = 0;
     this.#renderSprite.y = 0;
+
+    // Create and apply edge of world filter
+    this.#edgeOfWorldFilter = new EdgeOfWorldFilter();
+    const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
+    const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
+    this.#edgeOfWorldFilter.setResolution(renderWidth, renderHeight);
+    this.#renderSprite.filters = [this.#edgeOfWorldFilter];
+
     this.#app.stage.addChild(this.#renderSprite);
 
     // Handle window resize
@@ -376,6 +386,11 @@ export class ClientEngine {
         x: renderWidth / 2,
         y: renderHeight / 2,
       };
+
+      // Update edge filter resolution when screen resizes
+      if (this.#edgeOfWorldFilter) {
+        this.#edgeOfWorldFilter.setResolution(renderWidth, renderHeight);
+      }
     }
   }
 
@@ -501,6 +516,28 @@ export class ClientEngine {
         dt: dtSeconds,
         time: nowTick,
       });
+
+      // Update edge of world filter uniforms
+      if (this.#edgeOfWorldFilter && this.#services) {
+        // Get camera transform
+        const cameraX = this.#camera.x;
+        const cameraY = this.#camera.y;
+        const cameraScale = this.#camera.scale.x;
+
+        // Convert camera position from screen space to world space
+        const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
+        const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
+        const screenCenterX = renderWidth / 2;
+        const screenCenterY = renderHeight / 2;
+        const worldCameraX = (screenCenterX - cameraX) / cameraScale;
+        const worldCameraY = (screenCenterY - cameraY) / cameraScale;
+
+        // Update filter uniforms
+        this.#edgeOfWorldFilter.setCameraPosition(worldCameraX, worldCameraY);
+        this.#edgeOfWorldFilter.setCameraScale(cameraScale);
+        this.#edgeOfWorldFilter.setWorldRadius(this.#services.world.radius);
+        this.#edgeOfWorldFilter.setTime(nowTick);
+      }
 
       // FPS sampling (smoothed over a short window)
       this.#fpsSampleFrames += 1;

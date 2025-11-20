@@ -121,6 +121,8 @@ export class ClientEngine {
   #drawGrid = false;
   #drawWorldBorder = false;
   #drawColliders = false;
+  #fpsSampleFrames = 0;
+  #fpsLastSampleTime = 0;
 
   constructor() {
     this.#app = new Application();
@@ -446,13 +448,29 @@ export class ClientEngine {
     this.#pipeline.register(RenderSystem);
     this.#pipeline.register(GridSystem);
     this.#pipeline.register(CameraSystem);
-    this.#pipeline.init(performance.now());
+    const now = performance.now();
+    this.#pipeline.init(now);
+    this.#fpsLastSampleTime = now;
 
     this.#app.ticker.add((time) => {
+      const dtSeconds = time.deltaMS / 1000;
+      const nowTick = performance.now();
+
       this.#pipeline?.tick({
-        dt: time.deltaMS / 1000,
-        time: performance.now(),
+        dt: dtSeconds,
+        time: nowTick,
       });
+
+      // FPS sampling (smoothed over a short window)
+      this.#fpsSampleFrames += 1;
+      const elapsedMs = nowTick - this.#fpsLastSampleTime;
+      if (elapsedMs >= 500) {
+        const fps = (this.#fpsSampleFrames * 1000) / elapsedMs;
+        const statsStore = this.#statsGetter();
+        statsStore.setFps(fps);
+        this.#fpsSampleFrames = 0;
+        this.#fpsLastSampleTime = nowTick;
+      }
     });
   }
 

@@ -7,6 +7,8 @@ type StatsStoreState = {
   offset: number;
   hasTimeSync: boolean;
   objectsCount: number;
+  /** Smoothed client-side render FPS */
+  fps: number;
   playerId: string | null;
   playerObject: Container | null;
 };
@@ -16,6 +18,7 @@ type StatsStoreActions = {
   setOffset: (offset: number) => void;
   setHasTimeSync: (hasTimeSync: boolean) => void;
   setObjectsCount: (objectsCount: number) => void;
+  setFps: (fps: number) => void;
   setPlayerId: (playerId: string) => void;
   setPlayerObject: (playerObject: Container | null) => void;
 };
@@ -27,12 +30,14 @@ export const useStats = create<StatsStore>((set) => ({
   offset: 0,
   hasTimeSync: false,
   objectsCount: 0,
+  fps: 0,
   playerId: null,
   playerObject: null,
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
   setObjectsCount: (objectsCount: number) => set({ objectsCount }),
+   setFps: (fps: number) => set({ fps }),
   setPlayerId: (playerId: string) => set({ playerId }),
   setPlayerObject: (playerObject: Container | null) => set({ playerObject }),
 }));

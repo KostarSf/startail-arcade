@@ -22,6 +22,9 @@ function PlayerStats() {
     <div className="font-mono">
       <p className="text-sm">Player ID: {stats.playerId}</p>
       <p className="text-sm">
+        FPS: {Math.round(stats.fps || 0)}
+      </p>
+      <p className="text-sm">
         Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
         {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
       </p>

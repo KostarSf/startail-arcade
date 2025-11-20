@@ -1,3 +1,4 @@
+import type { Vector2 } from "@/shared/math/vector";
 import type { Engine } from "../engine";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
@@ -5,7 +6,7 @@ import { UniformGrid } from "./uniform-grid";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
-  #uniformGrid = new UniformGrid();
+  #grid = new UniformGrid();
 
   #borderRadius = 2000;
 
@@ -13,16 +14,12 @@ export class World {
     return Array.from(this.#entities.values());
   }
 
-  get uniformGrid() {
-    return this.#uniformGrid;
-  }
-
   spawn(entity: BaseEntity) {
     if (entity.initialized) {
       throw new Error("Entity already initialized");
     }
     this.#entities.set(entity.id, entity);
-    this.#uniformGrid.update(entity);
+    this.#grid.update(entity);
   }
 
   find(id: string) {
@@ -35,7 +32,7 @@ export class World {
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 
     for (let i = 0; i < ASTEROID_COUNT; i++) {
-      const size = Math.floor(Math.random() * 10 + 10);
+      const radius = Math.floor(Math.random() * 40 + 10);
       const x = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
       const y = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
       const angle = Math.random() * 2 * Math.PI - Math.PI;
@@ -43,7 +40,7 @@ export class World {
       const vy = Math.random() * ASTEROID_VELOCITY - ASTEROID_VELOCITY / 2;
       const va =
         Math.random() * ASTEROID_ANGLE_VELOCITY - ASTEROID_ANGLE_VELOCITY / 2;
-      const asteroid = new Asteroid({ x, y, angle, vx, vy, va, size });
+      const asteroid = new Asteroid({ x, y, angle, vx, vy, va, radius });
       this.spawn(asteroid);
     }
   }
@@ -71,15 +68,26 @@ export class World {
 
       if (entity.removed) {
         this.#entities.delete(entity.id);
-        this.#uniformGrid.remove(entity);
+        this.#grid.remove(entity);
       } else {
-        this.#uniformGrid.update(entity);
+        this.#grid.update(entity);
       }
     }
   }
 
+  /** Query the world for entities within a given radius of a position. */
+  query(pos: Vector2, radius: number) {
+    const entitiesSet = this.#grid.query(pos, radius);
+    return {
+      set: () => entitiesSet,
+      map: () =>
+        new Map(entitiesSet.values().map((entity) => [entity.id, entity])),
+      array: () => Array.from(entitiesSet.values()),
+    };
+  }
+
   clear() {
     this.#entities.clear();
-    this.#uniformGrid.clear();
+    this.#grid.clear();
   }
 }

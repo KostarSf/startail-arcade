@@ -7,6 +7,7 @@ export interface BaseEntityState {
   vx: number;
   vy: number;
   va: number;
+  radius: number | undefined;
 }
 
 export type MutableBaseEntityState = BaseEntityState & {
@@ -19,7 +20,7 @@ export const normalizeAngle = (angle: number) =>
   ((angle + Math.PI) % TWO_PI) - Math.PI;
 
 export function integrateMotion<T extends MutableBaseEntityState>(
-  entity: Pick<T, "x" | "y" | "angle" | "vx" | "vy" | "va">,
+  entity: Pick<T, "x" | "y" | "angle" | "vx" | "vy" | "va" | "radius">,
   delta: number
 ) {
   entity.x += entity.vx * delta;

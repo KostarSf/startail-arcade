@@ -190,9 +190,7 @@ class EngineNetwork {
 
     for (const player of this.#players.values()) {
       const playerPos = player.ship.position;
-      const visibleEntities = Array.from(
-        this.engine.world.uniformGrid.query(playerPos, 900).values()
-      );
+      const visibleEntities = this.engine.world.query(playerPos, 900).array();
 
       player.ws.send(
         event({

@@ -21,6 +21,9 @@ export abstract class BaseEntity {
   /** Radians per second */
   va: number;
 
+  /** Radius in pixels for collision detection */
+  radius: number | undefined;
+
   get position() {
     return new Vector2(this.x, this.y);
   }
@@ -52,6 +55,7 @@ export abstract class BaseEntity {
     this.vx = entity.vx ?? 0;
     this.vy = entity.vy ?? 0;
     this.va = entity.va ?? 0;
+    this.radius = entity.radius ?? undefined;
   }
 
   initialize(world: World) {
@@ -60,6 +64,10 @@ export abstract class BaseEntity {
 
   update(delta: number) {
     integrateMotion(this, delta);
+  }
+
+  onCollision(other: BaseEntity) {
+    // Override in subclasses
   }
 
   remove() {
@@ -89,6 +97,7 @@ export abstract class BaseEntity {
   toJSON() {
     return {
       type: this.type,
+      radius: this.radius,
       id: this.id,
       x: this.x,
       y: this.y,

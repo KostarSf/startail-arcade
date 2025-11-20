@@ -5,6 +5,11 @@ import { Ship } from "./entities/ship";
 import { World } from "./world/world";
 
 export class Engine {
+  debug = {
+    collisions: false,
+    lifecycle: false,
+  };
+
   network: EngineNetwork;
 
   #world = new World();

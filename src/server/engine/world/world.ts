@@ -12,6 +12,14 @@ export class World {
 
   #borderRadius = 2000;
 
+  #engine: Engine | null = null;
+  get engine() {
+    if (!this.#engine) {
+      throw new Error("Engine not initialized");
+    }
+    return this.#engine;
+  }
+
   get borderRadius() {
     return this.#borderRadius;
   }
@@ -33,6 +41,8 @@ export class World {
   }
 
   initialize(engine: Engine) {
+    this.#engine = engine;
+
     const ASTEROID_COUNT = 50;
     const ASTEROID_VELOCITY = 50;
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
@@ -78,8 +88,7 @@ export class World {
 
     const createAccessor = (entities: BaseEntity[]) => ({
       set: () => new Set(entities),
-      map: () =>
-        new Map(entities.map((entity) => [entity.id, entity])),
+      map: () => new Map(entities.map((entity) => [entity.id, entity])),
       array: () => entities,
     });
 
@@ -101,6 +110,7 @@ export class World {
   }
 
   clear() {
+    this.#engine = null;
     this.#entities.clear();
     this.#grid.clear();
   }

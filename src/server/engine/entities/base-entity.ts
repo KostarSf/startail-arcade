@@ -64,6 +64,10 @@ export abstract class BaseEntity {
 
   initialize(world: World) {
     this.#world = world;
+
+    if (world.engine.debug.lifecycle) {
+      console.log(`entity initialized: ${this.name}`);
+    }
   }
 
   update(world: World, delta: number) {
@@ -88,11 +92,15 @@ export abstract class BaseEntity {
   }
 
   onCollisionStart(world: World, other: BaseEntity) {
-    console.log(`collision: ${this.name} <-> ${other.name} (started)`);
+    if (world.engine.debug.collisions) {
+      console.log(`collision: ${this.name} <-> ${other.name} (started)`);
+    }
   }
 
   onCollisionEnd(world: World, other: BaseEntity) {
-    console.log(`collision: ${this.name} <-> ${other.name} (ended)`);
+    if (world.engine.debug.collisions) {
+      console.log(`collision: ${this.name} <-> ${other.name} (ended)`);
+    }
   }
 
   remove() {
@@ -100,7 +108,9 @@ export abstract class BaseEntity {
   }
 
   onRemove(world: World) {
-    // console.log(`entity removed: ${this.name}`);
+    if (world.engine.debug.lifecycle) {
+      console.log(`entity removed: ${this.name}`);
+    }
   }
 
   setPosition(x: number, y: number) {

@@ -46,7 +46,7 @@ export class Ship extends LivingEntity {
     amount: number,
     source?: BaseEntity
   ): number {
-    if (source) {
+    if (source && source instanceof Bullet) {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.15));
     }
@@ -94,6 +94,16 @@ export class Ship extends LivingEntity {
     const firing = this.#firing;
     this.#firing = false;
     return firing;
+  }
+
+  override onCollisionStart(world: World, other: BaseEntity): void {
+    if (other instanceof Ship || other instanceof Asteroid) {
+      const relativeSpeed = other.velocity.sub(this.velocity).length();
+      const damage = Math.floor(Math.max(relativeSpeed - 150, 0) * 0.5);
+      if (damage > 0) {
+        this.takeDamage(world, damage, other);
+      }
+    }
   }
 
   override onCollision(world: World, other: BaseEntity): void {

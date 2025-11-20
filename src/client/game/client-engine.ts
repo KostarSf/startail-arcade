@@ -34,8 +34,8 @@ import asteroidSmall1TextureSrc from "../assets/images/asteroids/small-01.png";
 import asteroidSmall2TextureSrc from "../assets/images/asteroids/small-02.png";
 
 import bulletHintTextureSrc from "../assets/images/bullet-hint.png";
-import explosionTextureSrc from "../assets/images/explosion.png";
 import bulletTextureSrc from "../assets/images/bullet.png";
+import explosionTextureSrc from "../assets/images/explosion.png";
 import glareTextureSrc from "../assets/images/glare.png";
 import hintBwTextureSrc from "../assets/images/hint_bw.png";
 import pirateTextureSrc from "../assets/images/pirate.png";
@@ -48,14 +48,14 @@ import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { EdgeOfWorldFilter } from "./shaders/edge-of-world-filter";
 import { CameraShake } from "./systems/camera-shake";
 import { CameraSystem } from "./systems/camera-system";
+import { EffectSystem } from "./systems/effect-system";
 import { GridSystem } from "./systems/grid-system";
 import { HintSystem } from "./systems/hint-system";
 import { InputSystem } from "./systems/input-system";
 import { InterpolationSystem } from "./systems/interpolation-system";
-import { EffectSystem } from "./systems/effect-system";
+import { ParticleSystem } from "./systems/particle-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
-import { ParticleSystem } from "./systems/particle-system";
 import type {
   ClientServices,
   ControlState,
@@ -306,7 +306,9 @@ export class ClientEngine {
     // Create and apply edge of world filter
     this.#edgeOfWorldFilter = new EdgeOfWorldFilter();
     const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
-    const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
+    const renderHeight = Math.floor(
+      this.#app.screen.height * this.#renderScale
+    );
     this.#edgeOfWorldFilter.setResolution(renderWidth, renderHeight);
     this.#renderSprite.filters = [this.#edgeOfWorldFilter];
 
@@ -525,8 +527,12 @@ export class ClientEngine {
         const cameraScale = this.#camera.scale.x;
 
         // Convert camera position from screen space to world space
-        const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
-        const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
+        const renderWidth = Math.floor(
+          this.#app.screen.width * this.#renderScale
+        );
+        const renderHeight = Math.floor(
+          this.#app.screen.height * this.#renderScale
+        );
         const screenCenterX = renderWidth / 2;
         const screenCenterY = renderHeight / 2;
         const worldCameraX = (screenCenterX - cameraX) / cameraScale;
@@ -606,7 +612,11 @@ export class ClientEngine {
       clearTimeout(this.#connectTimeout);
       this.#connectTimeout = null;
     }
-    this.#ws = new WebSocket("ws://192.168.0.107:3000/ws");
+    const wsUrl =
+      `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
+        window.location.host
+      }/ws`;
+    this.#ws = new WebSocket(wsUrl);
     this.#ws.onopen = () => {
       this.#pingTicker.start();
     };
@@ -649,8 +659,7 @@ export class ClientEngine {
             x: message.x,
             y: message.y,
           });
-          const networkState =
-            this.#services.stores.networkState.get(entityId);
+          const networkState = this.#services.stores.networkState.get(entityId);
           if (networkState?.state?.type === "ship") {
             this.#services.effects.queueExplosion({
               x: message.x,
@@ -774,15 +783,16 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, bullet, glare, hint, bulletHint, explosion] = await Promise.all([
-      Assets.load<Texture>(playerTextureSrc),
-      Assets.load<Texture>(pirateTextureSrc),
-      Assets.load<Texture>(bulletTextureSrc),
-      Assets.load<Texture>(glareTextureSrc),
-      Assets.load<Texture>(hintBwTextureSrc),
-      Assets.load<Texture>(bulletHintTextureSrc),
-      Assets.load<Texture>(explosionTextureSrc),
-    ]);
+    const [player, pirate, bullet, glare, hint, bulletHint, explosion] =
+      await Promise.all([
+        Assets.load<Texture>(playerTextureSrc),
+        Assets.load<Texture>(pirateTextureSrc),
+        Assets.load<Texture>(bulletTextureSrc),
+        Assets.load<Texture>(glareTextureSrc),
+        Assets.load<Texture>(hintBwTextureSrc),
+        Assets.load<Texture>(bulletHintTextureSrc),
+        Assets.load<Texture>(explosionTextureSrc),
+      ]);
 
     const [
       asteroidSmall1,

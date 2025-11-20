@@ -122,7 +122,7 @@ export const ParticleSystem: System<ClientServices> = {
         const speedMultiplier = Math.random() * 0.2 + 0.2; // 0.3 to 0.5
 
         // Random lifespan (500-1000ms)
-        const lifespan = (Math.random() * 500 + 500) / 1000; // Convert to seconds
+        const lifespan = (Math.random() * 700 + 500) / 1000; // Convert to seconds
 
         // Random min alpha (0.2 to 0.5)
         const minAlpha = Math.random() * 0.4 + 0.4;

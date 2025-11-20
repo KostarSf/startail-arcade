@@ -72,6 +72,11 @@ export class Vector2 {
     return this.x * this.x + this.y * this.y;
   }
 
+  /** The angle of the vector in radians. */
+  angle(): number {
+    return Math.atan2(this.y, this.x);
+  }
+
   /** The length of the vector. */
   length(): number {
     return Math.hypot(this.x, this.y);

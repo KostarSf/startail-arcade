@@ -1,4 +1,3 @@
-import type { EntityType } from "@/shared/game/entities/base";
 import { TPS } from "../constants";
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
@@ -50,6 +49,8 @@ export class Bullet extends BaseEntity {
 
   override update(world: World, delta: number) {
     super.update(world, delta);
+
+    this.angle = Math.atan2(this.vy, this.vx);
 
     this.life -= 1;
     if (this.life <= 0) {

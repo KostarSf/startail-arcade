@@ -10,7 +10,7 @@ export function App() {
         <PlayerStats />
       </div>
       <RespawnButton />
-      <DebugDialog />
+      {/* <DebugDialog /> */}
     </>
   );
 }
@@ -22,27 +22,27 @@ function PlayerStats() {
 
   return (
     <div className="font-mono">
-      <p className="text-sm">Player ID: {stats.playerId}</p>
+      {/* <p className="text-sm">Player ID: {stats.playerId}</p> */}
       <p className="text-sm">
         FPS: {Math.round(stats.fps || 0)}
       </p>
-      <p className="text-sm">
+      {/* <p className="text-sm">
         Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
         {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
       </p>
       <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p>
-      <p className="text-sm">Objects: {stats.objectsCount}</p>
+      <p className="text-sm">Objects: {stats.objectsCount}</p> */}
       {stats.hasTimeSync ? (
         <>
           <p className="text-xs text-gray-500">
             Ping: {Math.floor((stats.latency / 2) * 100) / 100}
           </p>
-          <p className="text-xs text-gray-500">
+          {/* <p className="text-xs text-gray-500">
             Offset: {Math.floor(stats.offset * 100) / 100}
           </p>
           <p className="text-xs text-gray-500">
             Server Time Estimated: {predictedServerTime}
-          </p>
+          </p> */}
         </>
       ) : null}
     </div>

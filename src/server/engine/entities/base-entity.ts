@@ -1,6 +1,7 @@
 import {
   integrateMotion,
   type BaseEntityState,
+  type EntityType,
 } from "@/shared/game/entities/base";
 import { Vector2 } from "@/shared/math/vector";
 import type { World } from "../world/world";
@@ -10,7 +11,7 @@ export type IBaseEntity = BaseEntityState;
 export abstract class BaseEntity {
   static #nextId = 1;
 
-  type: string;
+  abstract type: EntityType;
   id: string;
   name: string;
 
@@ -35,6 +36,11 @@ export abstract class BaseEntity {
     return new Vector2(this.vx, this.vy);
   }
 
+  set velocity(velocity: Vector2) {
+    this.vx = velocity.x;
+    this.vy = velocity.y;
+  }
+
   removed = false;
 
   #world: World | null = null;
@@ -49,9 +55,8 @@ export abstract class BaseEntity {
     return !!this.#world;
   }
 
-  constructor(entity: Partial<IBaseEntity>) {
+  constructor(entity: Partial<Omit<IBaseEntity, "type">>) {
     this.name = entity.name ?? `entity-${BaseEntity.#nextId++}`;
-    this.type = entity.type ?? "entity";
     this.id = entity.id ?? crypto.randomUUID();
     this.x = entity.x ?? 0;
     this.y = entity.y ?? 0;

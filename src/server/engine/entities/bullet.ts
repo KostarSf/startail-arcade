@@ -1,3 +1,4 @@
+import type { EntityType } from "@/shared/game/entities/base";
 import { TPS } from "../constants";
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
@@ -8,6 +9,8 @@ export interface IBullet extends IBaseEntity {
 }
 
 export class Bullet extends BaseEntity {
+  override type = "bullet" as const;
+
   static #nextId = 1;
 
   static lifeSpan = TPS * 5; // 4 seconds
@@ -27,7 +30,6 @@ export class Bullet extends BaseEntity {
     bullet.radius = 3;
 
     super(bullet);
-    this.type = "bullet";
     this.#ownerId = bullet.ownerId ?? null;
     this.life = bullet.life ?? Bullet.lifeSpan;
   }

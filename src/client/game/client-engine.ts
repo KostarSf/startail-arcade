@@ -239,6 +239,11 @@ export class ClientEngine {
     );
     canvas.style.setProperty("image-rendering", "crisp-edges", "important");
 
+    // Disable right-click context menu
+    canvas.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+    });
+
     // Set up retro rendering: render game at 0.75x resolution
     this.#setupRetroRendering();
 

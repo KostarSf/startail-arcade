@@ -1,6 +1,8 @@
+export type EntityType = "ship" | "asteroid" | "bullet";
+
 export interface BaseEntityState {
   name: string;
-  type: string;
+  type: EntityType;
   id: string;
   x: number;
   y: number;

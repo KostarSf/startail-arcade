@@ -56,10 +56,29 @@ export interface ServerStateEvent {
   }[];
 }
 
+export interface EntityDamageEvent {
+  type: "entity:damage";
+  entityId: string;
+  amount: number;
+  x: number;
+  y: number;
+  sourceId?: string;
+}
+
+export interface EntityDestroyEvent {
+  type: "entity:destroy";
+  entityId: string;
+  x: number;
+  y: number;
+  sourceId?: string;
+}
+
 export type NetworkEvent =
   | PlayerInputEvent
   | ServerStateEvent
   | PlayerSetIdEvent
   | PlayerPingEvent
   | ServerPongEvent
-  | PlayerRespawnEvent;
+  | PlayerRespawnEvent
+  | EntityDamageEvent
+  | EntityDestroyEvent;

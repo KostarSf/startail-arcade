@@ -13,3 +13,5 @@ export function event<T extends NetworkEvent>(
     serialize: () => JSON.stringify(payload),
   };
 }
+
+export type SerializableEvent = ReturnType<typeof event>;

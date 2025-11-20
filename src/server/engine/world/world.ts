@@ -1,4 +1,5 @@
 import type { Vector2 } from "@/shared/math/vector";
+import type { SerializableEvent } from "@/shared/network/utils";
 import type { Engine } from "../engine";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
@@ -48,7 +49,11 @@ export class World {
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 
     for (let i = 0; i < ASTEROID_COUNT; i++) {
-      const radius = [8, 12, 18].at(Math.floor(Math.random() * 3));
+      const [radius, health] = [
+        [8, 20],
+        [12, 50],
+        [18, 100],
+      ].at(Math.floor(Math.random() * 3)) as [number, number];
       const x = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
       const y = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
       const angle = Math.random() * 2 * Math.PI - Math.PI;
@@ -56,7 +61,16 @@ export class World {
       const vy = Math.random() * ASTEROID_VELOCITY - ASTEROID_VELOCITY / 2;
       const va =
         Math.random() * ASTEROID_ANGLE_VELOCITY - ASTEROID_ANGLE_VELOCITY / 2;
-      const asteroid = new Asteroid({ x, y, angle, vx, vy, va, radius });
+      const asteroid = new Asteroid({
+        x,
+        y,
+        angle,
+        vx,
+        vy,
+        va,
+        radius,
+        maxHealth: health,
+      });
       this.spawn(asteroid);
     }
   }
@@ -107,6 +121,13 @@ export class World {
       },
       ...createAccessor(entitiesArray),
     };
+  }
+
+  broadcast(event: SerializableEvent) {
+    const data = event.serialize();
+    for (const player of this.engine.network.players) {
+      player.ws.send(data);
+    }
   }
 
   clear() {

@@ -3,13 +3,16 @@ import type { World } from "../world/world";
 import { Asteroid } from "./asteroid";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { Bullet } from "./bullet";
+import { LivingEntity } from "./living-entity";
 
 export interface IShip extends IBaseEntity {
   thrust: boolean;
   lastInputSequence: number;
+  health: number;
+  maxHealth: number;
 }
 
-export class Ship extends BaseEntity {
+export class Ship extends LivingEntity {
   override type = "ship" as const;
 
   static #nextId = 1;
@@ -29,6 +32,21 @@ export class Ship extends BaseEntity {
     super(ship);
     this.thrust = ship.thrust ?? false;
     this.lastInputSequence = ship.lastInputSequence ?? -1;
+    this.maxHealth = ship.maxHealth ?? 100;
+    this.health = ship.health ?? this.maxHealth;
+  }
+
+  protected override onDamage(
+    world: World,
+    amount: number,
+    source?: BaseEntity
+  ): number {
+    if (source) {
+      const relativeVelocity = source.velocity.sub(this.velocity);
+      this.velocity = this.velocity.add(relativeVelocity.mul(0.15));
+    }
+
+    return amount;
   }
 
   override update(world: World, delta: number) {
@@ -42,7 +60,11 @@ export class Ship extends BaseEntity {
 
     if (result.bullet) {
       result.bullet.ownerId = this.id;
-      this.world.spawn(new Bullet(result.bullet));
+      const bullet = new Bullet(result.bullet);
+      this.world.spawn(bullet);
+
+      const direction = bullet.velocity.sub(this.velocity).normalize();
+      this.velocity = this.velocity.sub(direction.mul(5));
     }
   }
 
@@ -54,13 +76,6 @@ export class Ship extends BaseEntity {
     const firing = this.#firing;
     this.#firing = false;
     return firing;
-  }
-
-  override onCollisionStart(world: World, other: BaseEntity): void {
-    if (other instanceof Bullet && other.owner !== this) {
-      this.remove();
-      return;
-    }
   }
 
   override onCollision(world: World, other: BaseEntity): void {
@@ -79,6 +94,8 @@ export class Ship extends BaseEntity {
   override toJSON() {
     return {
       ...super.toJSON(),
+      health: this.health,
+      maxHealth: this.maxHealth,
       thrust: this.thrust,
       lastInputSequence: this.lastInputSequence,
     };

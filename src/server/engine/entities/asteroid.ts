@@ -1,11 +1,15 @@
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { Bullet } from "./bullet";
+import { LivingEntity } from "./living-entity";
 import { Ship } from "./ship";
 
-export interface IAsteroid extends IBaseEntity {}
+export interface IAsteroid extends IBaseEntity {
+  health: number;
+  maxHealth: number;
+}
 
-export class Asteroid extends BaseEntity {
+export class Asteroid extends LivingEntity {
   override type = "asteroid" as const;
 
   static #nextId = 1;
@@ -16,13 +20,17 @@ export class Asteroid extends BaseEntity {
     }
 
     super(asteroid);
+
+    this.maxHealth = asteroid.maxHealth ?? 100;
+    this.health = asteroid.health ?? this.maxHealth;
   }
 
-  override onCollisionStart(world: World, other: BaseEntity): void {
-    if (other instanceof Bullet) {
-      this.remove();
-      return;
-    }
+  protected override onDamage(
+    world: World,
+    amount: number,
+    source?: BaseEntity
+  ): number {
+    return amount;
   }
 
   override onCollision(world: World, other: BaseEntity): void {
@@ -32,8 +40,18 @@ export class Asteroid extends BaseEntity {
         Math.abs(other.velocity.sub(this.velocity).dot(direction)),
         2
       );
-      this.velocity = this.velocity.add(direction.mul(relativeSpeed * 0.2).neg());
+      this.velocity = this.velocity.add(
+        direction.mul(relativeSpeed * 0.2).neg()
+      );
       return;
     }
+  }
+
+  override toJSON() {
+    return {
+      ...super.toJSON(),
+      health: this.health,
+      maxHealth: this.maxHealth,
+    };
   }
 }

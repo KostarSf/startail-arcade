@@ -87,6 +87,27 @@ export const RenderSystem: System<ClientServices> = {
       }
     }
 
+    // World Border Debug
+    const worldBorderName = "debug-world-border";
+    let worldBorder = pixi.camera.getChildByName(worldBorderName) as Graphics | null;
+
+    if (debug.drawWorldBorder) {
+      if (!worldBorder) {
+        worldBorder = new Graphics();
+        worldBorder.name = worldBorderName;
+        pixi.camera.addChild(worldBorder);
+      }
+      worldBorder.clear();
+      const r = services.world.radius;
+      worldBorder.rect(-r, -r, r * 2, r * 2);
+      worldBorder.stroke({ width: 4, color: 0xff0000, alpha: 0.5 });
+    } else {
+      if (worldBorder) {
+        pixi.camera.removeChild(worldBorder);
+        worldBorder.destroy();
+      }
+    }
+
     // Clean up any radius labels whose entities are gone
     for (const child of pixi.camera.children) {
       if (!(child instanceof Text)) continue;

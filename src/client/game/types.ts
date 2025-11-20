@@ -85,4 +85,7 @@ export interface ClientServices extends Record<string, unknown> {
     setDrawWorldBorder: (value: boolean) => void;
     setDrawColliders: (value: boolean) => void;
   };
+  world: {
+    radius: number;
+  };
 }

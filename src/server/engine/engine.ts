@@ -128,6 +128,7 @@ class EngineNetwork {
         type: "server:player-initialize",
         playerId: player.id,
         tps: TPS,
+        worldRadius: this.engine.world.borderRadius,
       }).serialize()
     );
   }

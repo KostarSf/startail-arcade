@@ -1,3 +1,5 @@
+import type { EntityType } from "../game/entities/base";
+
 export interface PlayerInputEvent {
   type: "player:input";
   sequence: number;
@@ -14,6 +16,7 @@ export interface PlayerSetIdEvent {
   type: "server:player-initialize";
   playerId: string;
   tps: number;
+  worldRadius: number;
 }
 
 export interface PlayerPingEvent {
@@ -34,7 +37,7 @@ export interface ServerStateEvent {
   serverTime: number;
   entities: {
     name: string;
-    type: string;
+    type: EntityType;
     id: string;
     x: number;
     y: number;

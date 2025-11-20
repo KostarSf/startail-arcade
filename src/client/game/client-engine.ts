@@ -426,6 +426,9 @@ export class ClientEngine {
           self.setDrawColliders(value);
         },
       },
+      world: {
+        radius: 2000,
+      },
     };
   }
 
@@ -528,6 +531,7 @@ export class ClientEngine {
       case "server:player-initialize":
         if (!this.#services) return;
         this.#services.player.id = message.playerId;
+        this.#services.world.radius = message.worldRadius;
         this.#statsGetter().setPlayerId(message.playerId);
         break;
       case "server:state":

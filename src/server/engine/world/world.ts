@@ -10,7 +10,7 @@ export class World {
   #grid = new UniformGrid();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 2000;
+  #borderRadius = 1000;
 
   #engine: Engine | null = null;
   get engine() {

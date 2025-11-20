@@ -8,7 +8,6 @@ import type { ServerSnapshot } from "../network/snapshot-buffer";
 import type { ClientServices } from "../types";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-const TELEPORT_DISTANCE_THRESHOLD = 2000;
 
 type SnapshotEntity = ServerSnapshot["entities"][number];
 
@@ -224,7 +223,7 @@ export const InterpolationSystem: System<ClientServices> = {
         const dx = target.state.x - source.state.x;
         const dy = target.state.y - source.state.y;
         const distance = Math.hypot(dx, dy);
-        const teleported = distance > TELEPORT_DISTANCE_THRESHOLD;
+        const teleported = distance > services.world.radius;
         if (teleported) {
           lerpAlpha = 1;
         }

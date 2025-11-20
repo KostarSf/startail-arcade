@@ -52,6 +52,9 @@ const MOVING_SPEED_THRESHOLD = 10;
 // Speed threshold for continuous shake (from 50)
 const SPEED_SHAKE_THRESHOLD = 50;
 
+let lastPlayerPos: Point | null = null;
+let lastCameraCenter: Point | null = null;
+
 /**
  * Smoothly follows the player ship, applies auto-zoom, and drives parallax
  * starfield updates based on the active camera transform.
@@ -64,6 +67,7 @@ export const CameraSystem: System<ClientServices> = {
     const {
       pixi: { app, camera, starfield },
       player,
+      world,
       stores,
       controls,
       cameraShake,
@@ -72,12 +76,33 @@ export const CameraSystem: System<ClientServices> = {
     app.canvas.width = window.innerWidth;
     app.canvas.height = window.innerHeight;
 
-    if (player.entityId === null) return;
+    if (player.entityId === null) {
+      lastPlayerPos = null;
+      lastCameraCenter = null;
+      return;
+    }
 
     const transform = stores.transform.get(player.entityId);
     const velocity = stores.velocity.get(player.entityId);
     const shipControl = stores.shipControl.get(player.entityId);
-    if (!transform || !velocity) return;
+    if (!transform || !velocity) {
+      lastPlayerPos = null;
+      lastCameraCenter = null;
+      return;
+    }
+
+    const currentPlayerPos: Point = { x: transform.x, y: transform.y };
+    const worldRadius = world.radius;
+    let didTeleport = false;
+
+    if (lastPlayerPos) {
+      const dx = currentPlayerPos.x - lastPlayerPos.x;
+      const dy = currentPlayerPos.y - lastPlayerPos.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > worldRadius) {
+        didTeleport = true;
+      }
+    }
 
     const speed = Math.hypot(velocity.vx, velocity.vy);
     const MIN_CAMERA_ZOOM = 0.7;
@@ -171,9 +196,39 @@ export const CameraSystem: System<ClientServices> = {
     // Update shake and get offset
     const shakeOffset = cameraShake.update(dt);
 
-    camera.x = -lerp(-camera.x, targetX, dt * 6) + shakeOffset.x;
-    camera.y = -lerp(-camera.y, targetY, dt * 6) + shakeOffset.y;
+    const canPreserveOffset = didTeleport && lastPlayerPos && lastCameraCenter;
+
+    if (canPreserveOffset) {
+      const deltaPlayerX = currentPlayerPos.x - lastPlayerPos!.x;
+      const deltaPlayerY = currentPlayerPos.y - lastPlayerPos!.y;
+
+      const newCameraCenterX = lastCameraCenter!.x + deltaPlayerX;
+      const newCameraCenterY = lastCameraCenter!.y + deltaPlayerY;
+
+      const teleportBaseCameraX =
+        newCameraCenterX * newScale - renderWidth / 2;
+      const teleportBaseCameraY =
+        newCameraCenterY * newScale - renderHeight / 2;
+
+      camera.x = -teleportBaseCameraX + shakeOffset.x;
+      camera.y = -teleportBaseCameraY + shakeOffset.y;
+    } else {
+      camera.x = -lerp(-camera.x, targetX, dt * 6) + shakeOffset.x;
+      camera.y = -lerp(-camera.y, targetY, dt * 6) + shakeOffset.y;
+    }
+
     camera.scale.set(newScale);
+
+    const baseCameraXCurrent = -(camera.x - shakeOffset.x);
+    const baseCameraYCurrent = -(camera.y - shakeOffset.y);
+
+    const centerWorldX =
+      (baseCameraXCurrent + renderWidth / 2) / newScale;
+    const centerWorldY =
+      (baseCameraYCurrent + renderHeight / 2) / newScale;
+
+    lastPlayerPos = { x: currentPlayerPos.x, y: currentPlayerPos.y };
+    lastCameraCenter = { x: centerWorldX, y: centerWorldY };
 
     starfield.update(
       dt * 1000,

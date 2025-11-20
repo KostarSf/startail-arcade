@@ -28,7 +28,7 @@ RUN bun install --frozen-lockfile --production
 # Copy built dist folder and source files
 COPY --from=builder /app/dist ./dist
 COPY src ./src
-COPY bunfig.toml ./
+COPY bunfig.toml tsconfig.json ./
 
 # Expose port (adjust if your server uses a different port)
 EXPOSE 3000

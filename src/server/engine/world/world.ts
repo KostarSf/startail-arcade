@@ -48,7 +48,7 @@ export class World {
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 
     for (let i = 0; i < ASTEROID_COUNT; i++) {
-      const radius = Math.floor(Math.random() * 40 + 10);
+      const radius = [8, 12, 18].at(Math.floor(Math.random() * 3));
       const x = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
       const y = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
       const angle = Math.random() * 2 * Math.PI - Math.PI;

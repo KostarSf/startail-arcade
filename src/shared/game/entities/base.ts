@@ -8,7 +8,7 @@ export interface BaseEntityState {
   vx: number;
   vy: number;
   va: number;
-  radius: number | undefined;
+  radius?: number | undefined;
 }
 
 export type MutableBaseEntityState = BaseEntityState & {

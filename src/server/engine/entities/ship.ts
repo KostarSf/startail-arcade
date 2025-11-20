@@ -39,6 +39,7 @@ export class Ship extends BaseEntity {
     });
 
     if (result.bullet) {
+      result.bullet.ownerId = this.id;
       this.world.spawn(new Bullet(result.bullet));
     }
   }
@@ -51,6 +52,13 @@ export class Ship extends BaseEntity {
     const firing = this.#firing;
     this.#firing = false;
     return firing;
+  }
+
+  override onCollisionStart(world: World, other: BaseEntity): void {
+    if (other instanceof Bullet && other.owner !== this) {
+      this.remove();
+      return;
+    }
   }
 
   override toJSON() {

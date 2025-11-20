@@ -135,6 +135,7 @@ export abstract class BaseEntity {
 
   toJSON() {
     return {
+      name: this.name,
       type: this.type,
       radius: this.radius,
       id: this.id,

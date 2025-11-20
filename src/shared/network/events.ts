@@ -33,6 +33,7 @@ export interface ServerStateEvent {
   type: "server:state";
   serverTime: number;
   entities: {
+    name: string;
     type: string;
     id: string;
     x: number;
@@ -44,6 +45,7 @@ export interface ServerStateEvent {
     thrust?: boolean;
     lastInputSequence?: number;
     life?: number;
+    radius?: number;
   }[];
 }
 

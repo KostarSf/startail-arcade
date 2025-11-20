@@ -18,6 +18,7 @@ export interface BulletSpawnState {
   angle: number;
   vx: number;
   vy: number;
+  ownerId?: string;
 }
 
 export interface ShipPhysicsResult {

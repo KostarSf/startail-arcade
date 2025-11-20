@@ -6,6 +6,9 @@ export function DebugDialog() {
   const [drawWorldBorder, setDrawWorldBorder] = useState(() =>
     clientEngine.getDrawWorldBorder()
   );
+  const [drawColliders, setDrawColliders] = useState(() =>
+    clientEngine.getDrawColliders()
+  );
   const [latencyInput, setLatencyInput] = useState(() =>
     clientEngine.getSimulatedLatency().toString()
   );
@@ -20,6 +23,11 @@ export function DebugDialog() {
     setDrawWorldBorder(checked);
     clientEngine.setDrawWorldBorder(checked);
     // State and URL param updated, no reload needed - grid system reads current state via getters
+  };
+
+  const handleDrawCollidersToggle = (checked: boolean) => {
+    setDrawColliders(checked);
+    clientEngine.setDrawColliders(checked);
   };
 
   const handleLatencyBlur = () => {
@@ -59,6 +67,15 @@ export function DebugDialog() {
             className="w-4 h-4"
           />
           <span>Draw Grid</span>
+        </label>
+        <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={drawColliders}
+            onChange={(e) => handleDrawCollidersToggle(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span>Draw Colliders</span>
         </label>
         <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
           <input

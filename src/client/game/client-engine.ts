@@ -26,7 +26,13 @@ import type { BaseEntityState } from "@/shared/game/entities/base";
 import type { NetworkEvent, PlayerInputEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
-import asteroidTextureSrc from "../assets/images/asteroids/medium-01.png";
+import asteroidLarge1TextureSrc from "../assets/images/asteroids/large-01.png";
+import asteroidLarge2TextureSrc from "../assets/images/asteroids/large-02.png";
+import asteroidMedium1TextureSrc from "../assets/images/asteroids/medium-01.png";
+import asteroidMedium2TextureSrc from "../assets/images/asteroids/medium-02.png";
+import asteroidSmall1TextureSrc from "../assets/images/asteroids/small-01.png";
+import asteroidSmall2TextureSrc from "../assets/images/asteroids/small-02.png";
+
 import bulletTextureSrc from "../assets/images/bullet.png";
 import pirateTextureSrc from "../assets/images/pirate.png";
 import playerTextureSrc from "../assets/images/player.png";
@@ -93,9 +99,18 @@ export class ClientEngine {
   #textures: {
     player: Texture | null;
     pirate: Texture | null;
-    asteroid: Texture | null;
+    asteroids: {
+      small: Texture[];
+      medium: Texture[];
+      large: Texture[];
+    };
     bullet: Texture | null;
-  } = { player: null, pirate: null, asteroid: null, bullet: null };
+  } = {
+    player: null,
+    pirate: null,
+    asteroids: { small: [], medium: [], large: [] },
+    bullet: null,
+  };
 
   #ws: WebSocket | null = null;
   #connectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +120,7 @@ export class ClientEngine {
   #simulatedLatencyMs = 0;
   #drawGrid = false;
   #drawWorldBorder = false;
+  #drawColliders = false;
 
   constructor() {
     this.#app = new Application();
@@ -117,6 +133,7 @@ export class ClientEngine {
     // Initialize debug settings from URL params
     this.#drawWorldBorder = this.#resolveWorldBorderFromURL();
     this.#drawGrid = this.#resolveDrawGridFromURL();
+    this.#drawColliders = this.#resolveDrawCollidersFromURL();
   }
 
   #resolveWorldBorderFromURL(): boolean {
@@ -131,6 +148,14 @@ export class ClientEngine {
     const gridParam = params.get("draw-grid");
     if (gridParam === null) return false; // Default to false (disabled) when param is missing
     return gridParam === "true";
+  }
+
+  #resolveDrawCollidersFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get("draw-colliders");
+    if (value === null) return false;
+    return value === "true";
   }
 
   setDrawGrid(value: boolean) {
@@ -161,6 +186,20 @@ export class ClientEngine {
     }
   }
 
+  setDrawColliders(value: boolean) {
+    this.#drawColliders = value;
+    // Update URL param
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("draw-colliders", "true");
+      } else {
+        url.searchParams.set("draw-colliders", "false");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
   getSimulatedLatency(): number {
     return this.#simulatedLatencyMs;
   }
@@ -177,6 +216,10 @@ export class ClientEngine {
     return this.#drawWorldBorder;
   }
 
+  getDrawColliders(): boolean {
+    return this.#drawColliders;
+  }
+
   async initialize(parent: HTMLElement) {
     await this.#app.init({
       background: "#000000",
@@ -189,7 +232,11 @@ export class ClientEngine {
     // Disable CSS-level antialiasing for pixelated retro look
     const canvas = this.#app.canvas;
     canvas.style.imageRendering = "pixelated";
-    canvas.style.setProperty("image-rendering", "-moz-crisp-edges", "important");
+    canvas.style.setProperty(
+      "image-rendering",
+      "-moz-crisp-edges",
+      "important"
+    );
     canvas.style.setProperty("image-rendering", "crisp-edges", "important");
 
     // Set up retro rendering: render game at 0.75x resolution
@@ -309,7 +356,6 @@ export class ClientEngine {
     if (
       !this.#textures.player ||
       !this.#textures.pirate ||
-      !this.#textures.asteroid ||
       !this.#textures.bullet
     ) {
       throw new Error("Textures not loaded");
@@ -343,7 +389,7 @@ export class ClientEngine {
       textures: {
         player: this.#textures.player,
         pirate: this.#textures.pirate,
-        asteroid: this.#textures.asteroid,
+        asteroids: this.#textures.asteroids,
         bullet: this.#textures.bullet,
       },
       player: {
@@ -362,11 +408,17 @@ export class ClientEngine {
         get drawWorldBorder() {
           return self.#drawWorldBorder;
         },
+        get drawColliders() {
+          return self.#drawColliders;
+        },
         setDrawGrid: (value) => {
           self.setDrawGrid(value);
         },
         setDrawWorldBorder: (value) => {
           self.setDrawWorldBorder(value);
+        },
+        setDrawColliders: (value) => {
+          self.setDrawColliders(value);
         },
       },
     };
@@ -420,8 +472,10 @@ export class ClientEngine {
         this.#controls.thrust = false;
       }
     });
-    window.addEventListener("mousedown", () => {
-      this.#controls.fire = true;
+    window.addEventListener("mousedown", (e) => {
+      if (e.button === 0) {
+        this.#controls.fire = true;
+      }
     });
   }
 
@@ -454,8 +508,7 @@ export class ClientEngine {
     this.#ws.onmessage = (eventMessage) => {
       const payload = eventMessage.data;
       this.#withSimulatedLatency(() => {
-        const raw =
-          typeof payload === "string" ? payload : payload.toString();
+        const raw = typeof payload === "string" ? payload : payload.toString();
         const message = JSON.parse(raw) as NetworkEvent;
         this.#handleMessage(message);
       });
@@ -570,7 +623,7 @@ export class ClientEngine {
       type: "player:input",
       sequence: command.sequence,
       input: payloadInput,
-      latency: this.#statsGetter().latency
+      latency: this.#statsGetter().latency,
     }).serialize();
     this.#sendWithLatency(payload);
     return command;
@@ -583,22 +636,45 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, asteroid, bullet] = await Promise.all([
+    const [player, pirate, bullet] = await Promise.all([
       Assets.load<Texture>(playerTextureSrc),
       Assets.load<Texture>(pirateTextureSrc),
-      Assets.load<Texture>(asteroidTextureSrc),
       Assets.load<Texture>(bulletTextureSrc),
+    ]);
+
+    const [
+      asteroidSmall1,
+      asteroidSmall2,
+      asteroidMedium1,
+      asteroidMedium2,
+      asteroidLarge1,
+      asteroidLarge2,
+    ] = await Promise.all([
+      Assets.load<Texture>(asteroidSmall1TextureSrc),
+      Assets.load<Texture>(asteroidSmall2TextureSrc),
+      Assets.load<Texture>(asteroidMedium1TextureSrc),
+      Assets.load<Texture>(asteroidMedium2TextureSrc),
+      Assets.load<Texture>(asteroidLarge1TextureSrc),
+      Assets.load<Texture>(asteroidLarge2TextureSrc),
     ]);
 
     // Ensure all textures use nearest neighbor scaling
     player.source.scaleMode = "nearest";
     pirate.source.scaleMode = "nearest";
-    asteroid.source.scaleMode = "nearest";
     bullet.source.scaleMode = "nearest";
+
+    asteroidSmall1.source.scaleMode = "nearest";
+    asteroidSmall2.source.scaleMode = "nearest";
+    asteroidMedium1.source.scaleMode = "nearest";
+    asteroidMedium2.source.scaleMode = "nearest";
+    asteroidLarge1.source.scaleMode = "nearest";
+    asteroidLarge2.source.scaleMode = "nearest";
 
     this.#textures.player = player;
     this.#textures.pirate = pirate;
-    this.#textures.asteroid = asteroid;
+    this.#textures.asteroids.small = [asteroidSmall1, asteroidSmall2];
+    this.#textures.asteroids.medium = [asteroidMedium1, asteroidMedium2];
+    this.#textures.asteroids.large = [asteroidLarge1, asteroidLarge2];
     this.#textures.bullet = bullet;
   }
 

@@ -1,11 +1,11 @@
-import { Sprite, Container } from "pixi.js";
+import { Container, Sprite, Texture, TextureSource } from "pixi.js";
 
 import type { EntityId, System } from "@/shared/ecs";
-import { lerp } from "@/shared/math/utils";
 import { normalizeAngle } from "@/shared/game/entities/base";
+import { lerp } from "@/shared/math/utils";
 
-import type { ClientServices } from "../types";
 import type { ServerSnapshot } from "../network/snapshot-buffer";
+import type { ClientServices } from "../types";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const TELEPORT_DISTANCE_THRESHOLD = 2000;
@@ -46,8 +46,26 @@ const ensureRenderable = (
       }
       break;
     case "asteroid":
+      const radius = snapshotEntity.radius ?? 0;
+
+      let texture: Texture<TextureSource<any>>;
+
+      if (radius > 15) {
+        texture = services.textures.asteroids.large[
+          Math.floor(Math.random() * services.textures.asteroids.large.length)
+        ]!;
+      } else if (radius > 10) {
+        texture = services.textures.asteroids.medium[
+          Math.floor(Math.random() * services.textures.asteroids.medium.length)
+        ]!;
+      } else {
+        texture = services.textures.asteroids.small[
+          Math.floor(Math.random() * services.textures.asteroids.small.length)
+        ]!;
+      }
+
       sprite = new Sprite({
-        texture: services.textures.asteroid,
+        texture: texture,
         anchor: 0.5,
       });
       sprite.tint = 0x808080;
@@ -64,7 +82,10 @@ const ensureRenderable = (
     container.addChild(sprite);
   }
   services.pixi.camera.addChild(container);
-  const renderable = { ref: container, depth: snapshotEntity.type === "ship" ? 1 : 0 };
+  const renderable = {
+    ref: container,
+    depth: snapshotEntity.type === "ship" ? 1 : 0,
+  };
   services.stores.renderable.set(entityId, renderable);
 
   if (snapshotEntity.id === services.player.id) {
@@ -189,8 +210,7 @@ export const InterpolationSystem: System<ClientServices> = {
       let lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
       const isPlayer = serverId === services.player.id;
 
-      const entityId =
-        services.entityIndex.get(serverId) ?? entities.create();
+      const entityId = services.entityIndex.get(serverId) ?? entities.create();
       services.entityIndex.set(serverId, entityId);
 
       ensureEntity(services, {
@@ -220,16 +240,8 @@ export const InterpolationSystem: System<ClientServices> = {
 
       const velocity = services.stores.velocity.get(entityId);
       if (velocity) {
-        velocity.vx = lerp(
-          source.state.vx,
-          target.state.vx,
-          lerpAlpha
-        );
-        velocity.vy = lerp(
-          source.state.vy,
-          target.state.vy,
-          lerpAlpha
-        );
+        velocity.vx = lerp(source.state.vx, target.state.vx, lerpAlpha);
+        velocity.vy = lerp(source.state.vy, target.state.vy, lerpAlpha);
         velocity.va = lerp(
           source.state.va ?? 0,
           target.state.va ?? 0,
@@ -240,7 +252,8 @@ export const InterpolationSystem: System<ClientServices> = {
       const networkState = services.stores.networkState.get(entityId);
       if (networkState) {
         networkState.lastServerTime = target.serverTime;
-        networkState.predictedServerTime = services.network.predictedServerTime();
+        networkState.predictedServerTime =
+          services.network.predictedServerTime();
         networkState.renderDelay = services.network.renderDelayMs;
         networkState.lastAcknowledgedInput =
           target.state.lastInputSequence ?? networkState.lastAcknowledgedInput;
@@ -255,15 +268,13 @@ export const InterpolationSystem: System<ClientServices> = {
         if (shipControl) {
           if (!isPlayer) {
             shipControl.angle = target.state.angle;
-            shipControl.thrust =
-              target.state.thrust ?? shipControl.thrust;
+            shipControl.thrust = target.state.thrust ?? shipControl.thrust;
           }
           if (
             target.state.lastInputSequence !== undefined &&
             target.state.lastInputSequence > shipControl.lastServerSequence
           ) {
-            shipControl.lastServerSequence =
-              target.state.lastInputSequence;
+            shipControl.lastServerSequence = target.state.lastInputSequence;
           }
         }
         if (isPlayer) {

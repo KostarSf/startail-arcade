@@ -54,7 +54,11 @@ export interface ClientServices extends Record<string, unknown> {
   textures: {
     player: import("pixi.js").Texture;
     pirate: import("pixi.js").Texture;
-    asteroid: import("pixi.js").Texture;
+    asteroids: {
+      small: import("pixi.js").Texture[];
+      medium: import("pixi.js").Texture[];
+      large: import("pixi.js").Texture[];
+    };
     bullet: import("pixi.js").Texture;
   };
   player: {
@@ -76,7 +80,9 @@ export interface ClientServices extends Record<string, unknown> {
   debug: {
     drawGrid: boolean;
     drawWorldBorder: boolean;
+    drawColliders: boolean;
     setDrawGrid: (value: boolean) => void;
     setDrawWorldBorder: (value: boolean) => void;
+    setDrawColliders: (value: boolean) => void;
   };
 }

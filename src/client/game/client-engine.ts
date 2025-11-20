@@ -33,7 +33,9 @@ import asteroidMedium2TextureSrc from "../assets/images/asteroids/medium-02.png"
 import asteroidSmall1TextureSrc from "../assets/images/asteroids/small-01.png";
 import asteroidSmall2TextureSrc from "../assets/images/asteroids/small-02.png";
 
+import bulletHintTextureSrc from "../assets/images/bullet-hint.png";
 import bulletTextureSrc from "../assets/images/bullet.png";
+import hintBwTextureSrc from "../assets/images/hint_bw.png";
 import pirateTextureSrc from "../assets/images/pirate.png";
 import playerTextureSrc from "../assets/images/player.png";
 
@@ -44,6 +46,7 @@ import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { CameraShake } from "./systems/camera-shake";
 import { CameraSystem } from "./systems/camera-system";
 import { GridSystem } from "./systems/grid-system";
+import { HintSystem } from "./systems/hint-system";
 import { InputSystem } from "./systems/input-system";
 import { InterpolationSystem } from "./systems/interpolation-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
@@ -105,11 +108,15 @@ export class ClientEngine {
       large: Texture[];
     };
     bullet: Texture | null;
+    hint: Texture | null;
+    bulletHint: Texture | null;
   } = {
     player: null,
     pirate: null,
     asteroids: { small: [], medium: [], large: [] },
     bullet: null,
+    hint: null,
+    bulletHint: null,
   };
 
   #ws: WebSocket | null = null;
@@ -398,6 +405,8 @@ export class ClientEngine {
         pirate: this.#textures.pirate,
         asteroids: this.#textures.asteroids,
         bullet: this.#textures.bullet,
+        hint: this.#textures.hint!,
+        bulletHint: this.#textures.bulletHint!,
       },
       player: {
         id: null,
@@ -446,6 +455,7 @@ export class ClientEngine {
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
     this.#pipeline.register(RenderSystem);
+    this.#pipeline.register(HintSystem);
     this.#pipeline.register(GridSystem);
     this.#pipeline.register(CameraSystem);
     const now = performance.now();
@@ -667,10 +677,12 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, bullet] = await Promise.all([
+    const [player, pirate, bullet, hint, bulletHint] = await Promise.all([
       Assets.load<Texture>(playerTextureSrc),
       Assets.load<Texture>(pirateTextureSrc),
       Assets.load<Texture>(bulletTextureSrc),
+      Assets.load<Texture>(hintBwTextureSrc),
+      Assets.load<Texture>(bulletHintTextureSrc),
     ]);
 
     const [
@@ -693,6 +705,8 @@ export class ClientEngine {
     player.source.scaleMode = "nearest";
     pirate.source.scaleMode = "nearest";
     bullet.source.scaleMode = "nearest";
+    hint.source.scaleMode = "nearest";
+    bulletHint.source.scaleMode = "nearest";
 
     asteroidSmall1.source.scaleMode = "nearest";
     asteroidSmall2.source.scaleMode = "nearest";
@@ -707,6 +721,8 @@ export class ClientEngine {
     this.#textures.asteroids.medium = [asteroidMedium1, asteroidMedium2];
     this.#textures.asteroids.large = [asteroidLarge1, asteroidLarge2];
     this.#textures.bullet = bullet;
+    this.#textures.hint = hint;
+    this.#textures.bulletHint = bulletHint;
   }
 
   #resolveSimulatedLatency() {

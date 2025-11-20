@@ -19,6 +19,17 @@ import type { CameraShake } from "./systems/camera-shake";
 
 type StatsStore = ReturnType<typeof import("../store").stats>;
 
+export interface DamageTextRequest {
+  amount: number;
+  x: number;
+  y: number;
+}
+
+export interface ExplosionRequest {
+  x: number;
+  y: number;
+}
+
 export interface ControlState {
   angle: number;
   thrust: boolean;
@@ -63,6 +74,7 @@ export interface ClientServices extends Record<string, unknown> {
     glare: import("pixi.js").Texture;
     hint: import("pixi.js").Texture;
     bulletHint: import("pixi.js").Texture;
+    explosion: import("pixi.js").Texture;
   };
   player: {
     id: string | null;
@@ -90,5 +102,13 @@ export interface ClientServices extends Record<string, unknown> {
   };
   world: {
     radius: number;
+  };
+  effectQueues: {
+    damageTexts: DamageTextRequest[];
+    explosions: ExplosionRequest[];
+  };
+  effects: {
+    queueDamageText: (payload: DamageTextRequest) => void;
+    queueExplosion: (payload: ExplosionRequest) => void;
   };
 }

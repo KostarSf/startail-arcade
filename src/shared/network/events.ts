@@ -49,10 +49,13 @@ export interface ServerStateEvent {
     vx: number;
     vy: number;
     va?: number;
+    radius?: number;
     thrust?: boolean;
     lastInputSequence?: number;
-    life?: number;
-    radius?: number;
+    health?: number;
+    maxHealth?: number;
+    energy?: number;
+    maxEnergy?: number;
   }[];
 }
 

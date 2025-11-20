@@ -34,6 +34,7 @@ import asteroidSmall1TextureSrc from "../assets/images/asteroids/small-01.png";
 import asteroidSmall2TextureSrc from "../assets/images/asteroids/small-02.png";
 
 import bulletHintTextureSrc from "../assets/images/bullet-hint.png";
+import explosionTextureSrc from "../assets/images/explosion.png";
 import bulletTextureSrc from "../assets/images/bullet.png";
 import glareTextureSrc from "../assets/images/glare.png";
 import hintBwTextureSrc from "../assets/images/hint_bw.png";
@@ -50,10 +51,16 @@ import { GridSystem } from "./systems/grid-system";
 import { HintSystem } from "./systems/hint-system";
 import { InputSystem } from "./systems/input-system";
 import { InterpolationSystem } from "./systems/interpolation-system";
+import { EffectSystem } from "./systems/effect-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
 import { ParticleSystem } from "./systems/particle-system";
-import type { ClientServices, ControlState } from "./types";
+import type {
+  ClientServices,
+  ControlState,
+  DamageTextRequest,
+  ExplosionRequest,
+} from "./types";
 
 const RENDER_DELAY_MS = 100;
 
@@ -113,6 +120,7 @@ export class ClientEngine {
     glare: Texture | null;
     hint: Texture | null;
     bulletHint: Texture | null;
+    explosion: Texture | null;
   } = {
     player: null,
     pirate: null,
@@ -121,6 +129,7 @@ export class ClientEngine {
     glare: null,
     hint: null,
     bulletHint: null,
+    explosion: null,
   };
 
   #ws: WebSocket | null = null;
@@ -374,11 +383,16 @@ export class ClientEngine {
     if (
       !this.#textures.player ||
       !this.#textures.pirate ||
-      !this.#textures.bullet
+      !this.#textures.bullet ||
+      !this.#textures.explosion
     ) {
       throw new Error("Textures not loaded");
     }
     const self = this;
+    const effectQueues = {
+      damageTexts: [] as DamageTextRequest[],
+      explosions: [] as ExplosionRequest[],
+    };
     this.#services = {
       controls: this.#controls,
       snapshotBuffer: this.#snapshotBuffer,
@@ -412,6 +426,7 @@ export class ClientEngine {
         glare: this.#textures.glare!,
         hint: this.#textures.hint!,
         bulletHint: this.#textures.bulletHint!,
+        explosion: this.#textures.explosion!,
       },
       player: {
         id: null,
@@ -445,6 +460,15 @@ export class ClientEngine {
       world: {
         radius: 2000,
       },
+      effectQueues,
+      effects: {
+        queueDamageText: (payload) => {
+          effectQueues.damageTexts.push(payload);
+        },
+        queueExplosion: (payload) => {
+          effectQueues.explosions.push(payload);
+        },
+      },
     };
   }
 
@@ -460,6 +484,7 @@ export class ClientEngine {
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
     this.#pipeline.register(RenderSystem);
+    this.#pipeline.register(EffectSystem);
     this.#pipeline.register(ParticleSystem);
     this.#pipeline.register(HintSystem);
     this.#pipeline.register(GridSystem);
@@ -575,6 +600,35 @@ export class ClientEngine {
       case "server:state":
         this.#snapshotBuffer.add(message);
         break;
+      case "entity:damage":
+        if (!this.#services) break;
+        {
+          const entityId = this.#services.entityIndex.get(message.entityId);
+          if (entityId === undefined) {
+            break;
+          }
+          this.#services.effects.queueDamageText({
+            amount: message.amount,
+            x: message.x,
+            y: message.y,
+          });
+          const networkState =
+            this.#services.stores.networkState.get(entityId);
+          if (networkState?.state?.type === "ship") {
+            this.#services.effects.queueExplosion({
+              x: message.x,
+              y: message.y,
+            });
+          }
+        }
+        break;
+      case "entity:destroy":
+        if (!this.#services) break;
+        this.#services.effects.queueExplosion({
+          x: message.x,
+          y: message.y,
+        });
+        break;
     }
   }
 
@@ -683,13 +737,14 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, bullet, glare, hint, bulletHint] = await Promise.all([
+    const [player, pirate, bullet, glare, hint, bulletHint, explosion] = await Promise.all([
       Assets.load<Texture>(playerTextureSrc),
       Assets.load<Texture>(pirateTextureSrc),
       Assets.load<Texture>(bulletTextureSrc),
       Assets.load<Texture>(glareTextureSrc),
       Assets.load<Texture>(hintBwTextureSrc),
       Assets.load<Texture>(bulletHintTextureSrc),
+      Assets.load<Texture>(explosionTextureSrc),
     ]);
 
     const [
@@ -715,6 +770,7 @@ export class ClientEngine {
     glare.source.scaleMode = "nearest";
     hint.source.scaleMode = "nearest";
     bulletHint.source.scaleMode = "nearest";
+    explosion.source.scaleMode = "nearest";
 
     asteroidSmall1.source.scaleMode = "nearest";
     asteroidSmall2.source.scaleMode = "nearest";
@@ -732,6 +788,7 @@ export class ClientEngine {
     this.#textures.glare = glare;
     this.#textures.hint = hint;
     this.#textures.bulletHint = bulletHint;
+    this.#textures.explosion = explosion;
   }
 
   #resolveSimulatedLatency() {

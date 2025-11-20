@@ -1,3 +1,4 @@
+import { Vector2 } from "@/shared/math/vector";
 import type { NetworkEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { DT_MS, TPS } from "./constants";
@@ -115,9 +116,7 @@ class EngineNetwork {
 
   connectPlayer(ws: Bun.ServerWebSocket) {
     const player = new ServerPlayer(ws);
-    player.ship.setPosition(Math.random() * 200, Math.random() * 200);
     this.#players.set(ws, player);
-    this.engine.world.spawn(player.ship);
 
     if (!this.engine.running) {
       this.engine.start();
@@ -139,7 +138,7 @@ class EngineNetwork {
     const player = this.#players.get(ws);
     if (!player) return;
 
-    player.ship.remove();
+    player.ship?.remove();
     this.#players.delete(ws);
 
     console.log(`player disconnected: ${player.id}`);
@@ -154,7 +153,7 @@ class EngineNetwork {
 
     switch (message.type) {
       case "player:input":
-        if (player.ship.removed) break;
+        if (!player.ship || player.ship.removed) break;
 
         if (message.input.thrust !== undefined) {
           player.ship.thrust = !!message.input.thrust;
@@ -180,6 +179,21 @@ class EngineNetwork {
         );
 
         break;
+
+      case "player:respawn":
+        if (player.ship && !player.ship.removed) break;
+
+        const newShip = new Ship({ id: player.id });
+        newShip.setPosition(
+          Math.random() * this.engine.world.borderRadius * 2 -
+            this.engine.world.borderRadius,
+          Math.random() * this.engine.world.borderRadius * 2 -
+            this.engine.world.borderRadius
+        );
+        this.engine.world.spawn(newShip);
+        player.ship = newShip;
+
+        break;
     }
   }
 
@@ -195,7 +209,7 @@ class EngineNetwork {
     if (this.#players.size === 0) return;
 
     for (const player of this.#players.values()) {
-      const playerPos = player.ship.position;
+      const playerPos = player.ship?.position ?? Vector2.ZERO;
       const visibleEntities = this.engine.world.query(playerPos, 900).array();
 
       player.ws.send(
@@ -218,13 +232,12 @@ class EngineNetwork {
 class ServerPlayer {
   id: string;
   ws: Bun.ServerWebSocket;
-  ship: Ship;
+  ship: Ship | null = null;
 
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
 
     this.id = id;
     this.ws = ws;
-    this.ship = new Ship({ id });
   }
 }

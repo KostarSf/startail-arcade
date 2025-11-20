@@ -6,6 +6,7 @@ import { updateShipPhysics, type ShipState } from "@/shared/game/entities/ship";
 import type { ClientServices } from "../types";
 
 const cloneShipState = (state: Partial<ShipState>): ShipState => ({
+  name: state.name ?? "unknown",
   type: state.type ?? "ship",
   id: state.id ?? "",
   x: state.x ?? 0,
@@ -100,7 +101,12 @@ export const ReconciliationSystem: System<ClientServices> = {
 
     for (const command of inputBuffer.pending) {
       authoritative.angle = currentInput.angle;
-      currentTime = simulateUntil(authoritative, currentInput, currentTime, command.timestamp);
+      currentTime = simulateUntil(
+        authoritative,
+        currentInput,
+        currentTime,
+        command.timestamp
+      );
       currentInput = command;
       authoritative.angle = currentInput.angle;
       if (command.fire) {
@@ -113,7 +119,12 @@ export const ReconciliationSystem: System<ClientServices> = {
     }
 
     authoritative.angle = currentInput.angle;
-    currentTime = simulateUntil(authoritative, currentInput, currentTime, predictedTime);
+    currentTime = simulateUntil(
+      authoritative,
+      currentInput,
+      currentTime,
+      predictedTime
+    );
 
     transform.x = authoritative.x;
     transform.y = authoritative.y;

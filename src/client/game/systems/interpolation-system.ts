@@ -143,6 +143,17 @@ const removeMissingEntities = (
   const liveIds = new Set(latestSnapshot.entities.map((entity) => entity.id));
   for (const [serverId, entityId] of services.entityIndex.entries()) {
     if (liveIds.has(serverId)) continue;
+
+    // Capture death position BEFORE deleting stores (if this is the player)
+    if (services.player.entityId === entityId) {
+      const transform = services.stores.transform.get(entityId);
+      if (transform && services.player.id) {
+        services.stats().setDeathPosition({ x: transform.x, y: transform.y });
+      }
+      services.player.entityId = null;
+      services.stats().setPlayerObject(null);
+    }
+
     services.entityIndex.delete(serverId);
     const renderable = services.stores.renderable.get(entityId);
     if (renderable?.ref) {
@@ -155,10 +166,6 @@ const removeMissingEntities = (
     services.stores.shipControl.delete(entityId);
     services.stores.networkState.delete(entityId);
     entities.destroy(entityId);
-    if (services.player.entityId === entityId) {
-      services.player.entityId = null;
-      services.stats().setPlayerObject(null);
-    }
   }
 };
 

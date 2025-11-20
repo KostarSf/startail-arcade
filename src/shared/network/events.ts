@@ -19,6 +19,10 @@ export interface PlayerSetIdEvent {
   worldRadius: number;
 }
 
+export interface PlayerRespawnEvent {
+  type: "player:respawn";
+}
+
 export interface PlayerPingEvent {
   type: "player:ping";
   sequence: number;
@@ -57,4 +61,5 @@ export type NetworkEvent =
   | ServerStateEvent
   | PlayerSetIdEvent
   | PlayerPingEvent
-  | ServerPongEvent;
+  | ServerPongEvent
+  | PlayerRespawnEvent;

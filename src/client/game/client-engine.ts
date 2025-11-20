@@ -499,6 +499,10 @@ export class ClientEngine {
       }
     });
     window.addEventListener("mousedown", (e) => {
+      if (!this.#services?.player.entityId || !this.#services.player.id) {
+        return;
+      }
+
       if (e.button === 0) {
         this.#controls.fire = true;
       }
@@ -735,5 +739,22 @@ export class ClientEngine {
     this.#withSimulatedLatency(() => {
       this.#ws?.send(payload);
     });
+  }
+
+  respawn() {
+    if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+
+    // Reset input buffer and sequence
+    this.#inputBuffer.reset();
+    this.#inputSequence = 0;
+
+    // Clear death position when respawning
+    this.#statsGetter().setDeathPosition(null);
+
+    // Send respawn command to server
+    const payload = event({
+      type: "player:respawn",
+    }).serialize();
+    this.#sendWithLatency(payload);
   }
 }

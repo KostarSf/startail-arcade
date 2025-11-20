@@ -11,6 +11,8 @@ type StatsStoreState = {
   fps: number;
   playerId: string | null;
   playerObject: Container | null;
+  /** Position where player died (world coordinates) */
+  deathPosition: { x: number; y: number } | null;
 };
 
 type StatsStoreActions = {
@@ -21,6 +23,7 @@ type StatsStoreActions = {
   setFps: (fps: number) => void;
   setPlayerId: (playerId: string) => void;
   setPlayerObject: (playerObject: Container | null) => void;
+  setDeathPosition: (position: { x: number; y: number } | null) => void;
 };
 
 type StatsStore = StatsStoreState & StatsStoreActions;
@@ -33,6 +36,7 @@ export const useStats = create<StatsStore>((set) => ({
   fps: 0,
   playerId: null,
   playerObject: null,
+  deathPosition: null,
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
@@ -40,6 +44,7 @@ export const useStats = create<StatsStore>((set) => ({
    setFps: (fps: number) => set({ fps }),
   setPlayerId: (playerId: string) => set({ playerId }),
   setPlayerObject: (playerObject: Container | null) => set({ playerObject }),
+  setDeathPosition: (position: { x: number; y: number } | null) => set({ deathPosition: position }),
 }));
 
 export const stats = () => useStats.getState();

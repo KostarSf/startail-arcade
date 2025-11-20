@@ -54,6 +54,7 @@ const SPEED_SHAKE_THRESHOLD = 50;
 
 let lastPlayerPos: Point | null = null;
 let lastCameraCenter: Point | null = null;
+let cameraInitialized = false;
 
 /**
  * Smoothly follows the player ship, applies auto-zoom, and drives parallax
@@ -79,8 +80,56 @@ export const CameraSystem: System<ClientServices> = {
     if (player.entityId === null) {
       lastPlayerPos = null;
       lastCameraCenter = null;
+
+      const renderWidth = services.pixi.renderWidth;
+      const renderHeight = services.pixi.renderHeight;
+
+      // Skip if dimensions are not ready yet
+      if (renderWidth === 0 || renderHeight === 0) {
+        return;
+      }
+
+      const defaultScale = 1.0;
+
+      // Use death position if player died, otherwise show world center (0, 0) on game start
+      const stats = services.stats();
+      const targetWorldPos = stats.deathPosition ?? { x: 0, y: 0 };
+
+      const targetX = targetWorldPos.x * defaultScale - renderWidth / 2;
+      const targetY = targetWorldPos.y * defaultScale - renderHeight / 2;
+
+      // Update shake and get offset
+      const shakeOffset = cameraShake.update(dt);
+
+      // On first frame or if camera hasn't been initialized, set immediately
+      if (!cameraInitialized || (camera.x === 0 && camera.y === 0)) {
+        camera.x = -targetX + shakeOffset.x;
+        camera.y = -targetY + shakeOffset.y;
+        camera.scale.set(defaultScale);
+        cameraInitialized = true;
+      } else {
+        camera.x = -lerp(-camera.x, targetX, dt * 6) + shakeOffset.x;
+        camera.y = -lerp(-camera.y, targetY, dt * 6) + shakeOffset.y;
+        camera.scale.set(lerp(camera.scale.x, defaultScale, dt * 5));
+      }
+
+      // Update starfield
+      starfield.update(
+        dt * 1000,
+        camera.x,
+        camera.y,
+        defaultScale,
+        renderWidth,
+        renderHeight,
+        shakeOffset.x * 0.5,
+        shakeOffset.y * 0.5
+      );
+
       return;
     }
+
+    // Mark camera as initialized once we have a player
+    cameraInitialized = true;
 
     const transform = stores.transform.get(player.entityId);
     const velocity = stores.velocity.get(player.entityId);

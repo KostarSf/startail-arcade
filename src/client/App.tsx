@@ -1,6 +1,7 @@
 import "./index.css";
 import { useStats } from "./store";
 import { DebugDialog } from "./DebugDialog";
+import { clientEngine } from "./engine";
 
 export function App() {
   return (
@@ -8,6 +9,7 @@ export function App() {
       <div className="p-4 z-10">
         <PlayerStats />
       </div>
+      <RespawnButton />
       <DebugDialog />
     </>
   );
@@ -43,6 +45,37 @@ function PlayerStats() {
           </p>
         </>
       ) : null}
+    </div>
+  );
+}
+
+function RespawnButton() {
+  const stats = useStats();
+
+  // Show button only after receiving server:player-initialize (playerId is set)
+  // and when playerObject is null (not spawned yet or destroyed)
+  // Hide button when playerObject exists (player is alive and spawned)
+  const shouldShow = stats.playerId !== null && stats.playerObject === null;
+
+  if (!shouldShow) return null;
+
+  // Show "Respawn" if deathPosition is set (player died), otherwise "Play" (waiting to spawn)
+  const buttonText = stats.deathPosition !== null ? "RESPAWN" : "PLAY";
+
+  const handleClick = () => {
+    // Send respawn command to spawn the player ship
+    // This works for both initial spawn (deathPosition is null) and respawn after death
+    clientEngine.respawn();
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+      <button
+        onClick={handleClick}
+        className="respawn-button pointer-events-auto"
+      >
+        {buttonText}
+      </button>
     </div>
   );
 }

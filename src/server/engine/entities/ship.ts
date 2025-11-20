@@ -22,6 +22,11 @@ export class Ship extends LivingEntity {
 
   #firing = false;
 
+  #energy = 100;
+  #maxEnergy = 100;
+  /** per second */
+  #energyRechargeRate = 20;
+
   constructor(ship: Partial<IShip>) {
     if (!ship.name) {
       ship.name = `ship-${Ship.#nextId++}`;
@@ -66,9 +71,22 @@ export class Ship extends LivingEntity {
       const direction = bullet.velocity.sub(this.velocity).normalize();
       this.velocity = this.velocity.sub(direction.mul(5));
     }
+
+    if (this.#energy < this.#maxEnergy) {
+      let multiplier = 1;
+      if (this.#energy < this.#maxEnergy * 0.7) multiplier = 0.5;
+      if (this.#energy < this.#maxEnergy * 0.3) multiplier = 0.25;
+
+      this.#energy += Math.ceil(this.#energyRechargeRate * multiplier * delta);
+      this.#energy = Math.min(this.#energy, this.#maxEnergy);
+    }
   }
 
   fire() {
+    const consumpsion = 25;
+    if (this.#energy < consumpsion) return;
+
+    this.#energy -= consumpsion;
     this.#firing = true;
   }
 
@@ -98,6 +116,8 @@ export class Ship extends LivingEntity {
       maxHealth: this.maxHealth,
       thrust: this.thrust,
       lastInputSequence: this.lastInputSequence,
+      energy: this.#energy,
+      maxEnergy: this.#maxEnergy,
     };
   }
 }

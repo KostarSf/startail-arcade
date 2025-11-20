@@ -13,6 +13,9 @@ export const HintSystem: System<ClientServices> = {
   tick({ services, time }) {
     const { stores, pixi, player, textures, entityIndex } = services;
 
+    // Use a local time window to avoid precision issues with large time values
+    const localTime = time % 10000; // 10 second window
+
     // No hints if player doesn't exist
     if (!player.entityId || !player.id) {
       // Clean up all hints
@@ -210,9 +213,10 @@ export const HintSystem: System<ClientServices> = {
     for (const [serverId, entityId] of entityIndex.entries()) {
       const transform = stores.transform.get(entityId);
       const networkState = stores.networkState.get(entityId);
+      const velocity = stores.velocity.get(entityId);
 
-      // Skip if not a bullet or missing transform
-      if (!transform || !networkState?.state || networkState.state.type !== "bullet") {
+      // Skip if not a bullet or missing transform/velocity
+      if (!transform || !networkState?.state || networkState.state.type !== "bullet" || !velocity) {
         continue;
       }
 
@@ -224,6 +228,35 @@ export const HintSystem: System<ClientServices> = {
 
       const bulletX = transform.x;
       const bulletY = transform.y;
+
+      // Calculate if bullet is moving toward or away from player
+      // Vector from bullet to player
+      const toPlayerX = playerTransform.x - bulletX;
+      const toPlayerY = playerTransform.y - bulletY;
+      const toPlayerDist = Math.hypot(toPlayerX, toPlayerY);
+
+      // Normalize direction to player
+      const toPlayerDirX = toPlayerDist > 0 ? toPlayerX / toPlayerDist : 0;
+      const toPlayerDirY = toPlayerDist > 0 ? toPlayerY / toPlayerDist : 0;
+
+      // Bullet velocity direction (normalized)
+      const bulletSpeed = Math.hypot(velocity.vx, velocity.vy);
+      const bulletDirX = bulletSpeed > 0 ? velocity.vx / bulletSpeed : 0;
+      const bulletDirY = bulletSpeed > 0 ? velocity.vy / bulletSpeed : 0;
+
+      // Dot product: positive = moving toward player, negative = moving away
+      const dotProduct = toPlayerDirX * bulletDirX + toPlayerDirY * bulletDirY;
+
+      // Skip bullets moving away from player
+      if (dotProduct <= 0) {
+        const bulletHintName = `bullet-hint-${serverId}`;
+        const existingHint = pixi.camera.getChildByName(bulletHintName);
+        if (existingHint) {
+          pixi.camera.removeChild(existingHint);
+          existingHint.destroy();
+        }
+        continue;
+      }
 
       // Check if bullet is outside viewport
       const isOutsideViewport =
@@ -243,7 +276,7 @@ export const HintSystem: System<ClientServices> = {
         continue;
       }
 
-      // Bullet is outside viewport, show hint
+      // Bullet is outside viewport and moving toward player, show hint
       const bulletHintName = `bullet-hint-${serverId}`;
       activeBulletHintNames.add(bulletHintName);
 
@@ -267,11 +300,29 @@ export const HintSystem: System<ClientServices> = {
         bulletHintSprite.rotation = hintPos.rotation;
       }
 
+      // Calculate distance from bullet to player
+      const distanceToPlayer = Math.hypot(toPlayerX, toPlayerY);
+      const maxDistance = 1000;
+      const normalizedDistance = Math.min(distanceToPlayer / maxDistance, 1.0); // 0 (close) to 1 (far)
+
+      // Adjust blink speed: faster when bullet is closer to player
+      // When distance is LOW (close), we want LOW period (fast blink)
+      // When distance is HIGH (far), we want HIGH period (slow blink)
+      const slowPeriod = 350; // slower blink when far from player
+      const fastPeriod = 150; // faster blink when close to player
+      const flickerPeriod =
+        slowPeriod + (fastPeriod - slowPeriod) * (1 - normalizedDistance);
+
       // Discrete flickering effect: toggle between visible (1.0) and dimmed (0.2)
-      // Toggle every 250ms (4 times per second)
-      const flickerPeriod = 250; // milliseconds
-      const flickerState = Math.floor((time / flickerPeriod) % 2);
+      const flickerState = Math.floor((localTime / flickerPeriod) % 2);
       bulletHintSprite.alpha = flickerState === 0 ? 1.0 : 0.2;
+
+      // Adjust scale gradually: slightly larger when bullet is closer to player
+      // Base scale: 2.0, max scale: 2.4 when close
+      const baseScale = 2.0;
+      const maxScale = 2.4;
+      const currentScale = baseScale + (maxScale - baseScale) * (1 - normalizedDistance);
+      bulletHintSprite.scale.set(currentScale);
     }
 
     // Clean up hints for pirates that no longer exist

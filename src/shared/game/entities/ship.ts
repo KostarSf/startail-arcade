@@ -39,7 +39,7 @@ export function updateShipPhysics(
   ship: ShipState,
   options: ShipPhysicsOptions
 ): ShipPhysicsResult {
-  const speed = Math.sqrt(ship.vx ** 2 + ship.vy ** 2);
+  const speed = Math.hypot(ship.vx, ship.vy);
   let drift = 0;
 
   if (speed > 0.01) {
@@ -52,7 +52,11 @@ export function updateShipPhysics(
   if (options.thrust) {
     const multiplier =
       1 -
-      inverseLerp(speed, SHIP_CONSTANTS.limitThreshold, SHIP_CONSTANTS.maxSpeed);
+      inverseLerp(
+        speed,
+        SHIP_CONSTANTS.limitThreshold,
+        SHIP_CONSTANTS.maxSpeed
+      );
 
     const velocity =
       SHIP_CONSTANTS.acceleration +

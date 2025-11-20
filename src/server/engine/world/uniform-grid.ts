@@ -8,11 +8,14 @@ import type { BaseEntity } from "../entities/base-entity";
  */
 export class UniformGrid {
   static CELL_SIZE = 500;
+  // Use a prime multiplier for the key to separate x and y components safely
+  // Assuming map fits within +/- 300 cells (150,000 pixels), 1000 is safe.
+  static KEY_MULTIPLIER = 10000;
 
   /** A map of cell coordinates to the entities in that cell. */
-  #cells = new Map<string, Set<BaseEntity>>();
+  #cells = new Map<number, Set<BaseEntity>>();
   /** A map of entities to their cell coordinates. */
-  #entities = new Map<BaseEntity, string>();
+  #entities = new Map<BaseEntity, number>();
 
   constructor(entities?: BaseEntity[]) {
     if (entities) {
@@ -30,9 +33,13 @@ export class UniformGrid {
       return;
     }
 
-    if (oldIndex) {
-      const oldCell = this.#getOrCreateCell(oldIndex);
-      oldCell.delete(entity);
+    if (oldIndex !== undefined) {
+      const oldCell = this.#cells.get(oldIndex);
+      oldCell?.delete(entity);
+      // Cleanup empty cells to save memory
+      if (oldCell && oldCell.size === 0) {
+        this.#cells.delete(oldIndex);
+      }
     }
 
     const newCell = this.#getOrCreateCell(index);
@@ -42,41 +49,45 @@ export class UniformGrid {
 
   remove(entity: BaseEntity) {
     const index = this.#entities.get(entity);
-    if (!index) {
+    if (index === undefined) {
       return;
     }
 
-    const cell = this.#getOrCreateCell(index);
-    cell.delete(entity);
+    const cell = this.#cells.get(index);
+    cell?.delete(entity);
+    if (cell && cell.size === 0) {
+      this.#cells.delete(index);
+    }
     this.#entities.delete(entity);
   }
 
-  query(pos: Vector2, radius: number) {
-    const indexes = new Set<string>();
+  /**
+   * Returns entities in the cells overlapping the query area.
+   */
+  query(pos: Vector2, radius: number): BaseEntity[] {
     const minX = Math.floor((pos.x - radius) / UniformGrid.CELL_SIZE);
     const maxX = Math.floor((pos.x + radius) / UniformGrid.CELL_SIZE);
     const minY = Math.floor((pos.y - radius) / UniformGrid.CELL_SIZE);
     const maxY = Math.floor((pos.y + radius) / UniformGrid.CELL_SIZE);
 
+    const result: BaseEntity[] = [];
+
     for (let i = minX; i <= maxX; i++) {
       for (let j = minY; j <= maxY; j++) {
-        indexes.add(`${i},${j}`);
+        const key = i * UniformGrid.KEY_MULTIPLIER + j;
+        const cell = this.#cells.get(key);
+        if (cell) {
+          for (const entity of cell) {
+            result.push(entity);
+          }
+        }
       }
     }
 
-    const entities = new Set<BaseEntity>();
-
-    for (const index of indexes) {
-      const cell = this.#getOrCreateCell(index);
-      for (const entity of cell) {
-        entities.add(entity);
-      }
-    }
-
-    return entities;
+    return result;
   }
 
-  #getOrCreateCell(index: string) {
+  #getOrCreateCell(index: number) {
     let cell = this.#cells.get(index);
     if (!cell) {
       cell = new Set<BaseEntity>();
@@ -86,9 +97,9 @@ export class UniformGrid {
   }
 
   #getCellIndex(x: number, y: number) {
-    return `${Math.floor(x / UniformGrid.CELL_SIZE)},${Math.floor(
-      y / UniformGrid.CELL_SIZE
-    )}`;
+    const ix = Math.floor(x / UniformGrid.CELL_SIZE);
+    const iy = Math.floor(y / UniformGrid.CELL_SIZE);
+    return ix * UniformGrid.KEY_MULTIPLIER + iy;
   }
 
   clear() {

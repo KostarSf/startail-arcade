@@ -8,8 +8,11 @@ import type { World } from "../world/world";
 export type IBaseEntity = BaseEntityState;
 
 export abstract class BaseEntity {
+  static #nextId = 1;
+
   type: string;
   id: string;
+  name: string;
 
   x: number;
   y: number;
@@ -47,6 +50,7 @@ export abstract class BaseEntity {
   }
 
   constructor(entity: Partial<IBaseEntity>) {
+    this.name = entity.name ?? `entity-${BaseEntity.#nextId++}`;
     this.type = entity.type ?? "entity";
     this.id = entity.id ?? crypto.randomUUID();
     this.x = entity.x ?? 0;
@@ -62,16 +66,41 @@ export abstract class BaseEntity {
     this.#world = world;
   }
 
-  update(delta: number) {
+  update(world: World, delta: number) {
     integrateMotion(this, delta);
+
+    if (this.x < -world.borderRadius) {
+      this.x += world.borderRadius * 2;
+    }
+    if (this.x > world.borderRadius) {
+      this.x -= world.borderRadius * 2;
+    }
+    if (this.y < -world.borderRadius) {
+      this.y += world.borderRadius * 2;
+    }
+    if (this.y > world.borderRadius) {
+      this.y -= world.borderRadius * 2;
+    }
   }
 
-  onCollision(other: BaseEntity) {
+  onCollision(world: World, other: BaseEntity) {
     // Override in subclasses
+  }
+
+  onCollisionStart(world: World, other: BaseEntity) {
+    console.log(`collision: ${this.name} <-> ${other.name} (started)`);
+  }
+
+  onCollisionEnd(world: World, other: BaseEntity) {
+    console.log(`collision: ${this.name} <-> ${other.name} (ended)`);
   }
 
   remove() {
     this.removed = true;
+  }
+
+  onRemove(world: World) {
+    // console.log(`entity removed: ${this.name}`);
   }
 
   setPosition(x: number, y: number) {

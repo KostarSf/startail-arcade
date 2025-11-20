@@ -2,13 +2,19 @@ import type { Vector2 } from "@/shared/math/vector";
 import type { Engine } from "../engine";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
+import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
   #grid = new UniformGrid();
+  #collisionResolver = new CollisionResolver();
 
   #borderRadius = 2000;
+
+  get borderRadius() {
+    return this.#borderRadius;
+  }
 
   get entities() {
     return Array.from(this.#entities.values());
@@ -51,38 +57,46 @@ export class World {
         entity.initialize(this);
       }
 
-      entity.update(delta);
-
-      if (entity.x < -this.#borderRadius) {
-        entity.x += this.#borderRadius * 2;
-      }
-      if (entity.x > this.#borderRadius) {
-        entity.x -= this.#borderRadius * 2;
-      }
-      if (entity.y < -this.#borderRadius) {
-        entity.y += this.#borderRadius * 2;
-      }
-      if (entity.y > this.#borderRadius) {
-        entity.y -= this.#borderRadius * 2;
-      }
+      entity.update(this, delta);
 
       if (entity.removed) {
+        this.#collisionResolver.removeEntity(this, entity);
+        entity.onRemove(this);
         this.#entities.delete(entity.id);
         this.#grid.remove(entity);
       } else {
         this.#grid.update(entity);
       }
     }
+
+    this.#collisionResolver.update(this);
   }
 
-  /** Query the world for entities within a given radius of a position. */
+  /** Query the world for entities in near chunks. */
   query(pos: Vector2, radius: number) {
-    const entitiesSet = this.#grid.query(pos, radius);
-    return {
-      set: () => entitiesSet,
+    const entitiesArray = this.#grid.query(pos, radius);
+
+    const createAccessor = (entities: BaseEntity[]) => ({
+      set: () => new Set(entities),
       map: () =>
-        new Map(entitiesSet.values().map((entity) => [entity.id, entity])),
-      array: () => Array.from(entitiesSet.values()),
+        new Map(entities.map((entity) => [entity.id, entity])),
+      array: () => entities,
+    });
+
+    return {
+      /** Query the world for entities within a given radius of a position.
+       *
+       * This is more precise than the regular query, but also more expensive. */
+      precise: () => {
+        return createAccessor(
+          entitiesArray.filter((entity) => {
+            const dx = entity.x - pos.x;
+            const dy = entity.y - pos.y;
+            return dx ** 2 + dy ** 2 <= radius ** 2;
+          })
+        );
+      },
+      ...createAccessor(entitiesArray),
     };
   }
 

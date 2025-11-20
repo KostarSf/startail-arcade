@@ -11,7 +11,7 @@ export class World {
   #grid = new UniformGrid();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 3000;
+  #borderRadius = 2000;
 
   #engine: Engine | null = null;
   get engine() {
@@ -44,7 +44,7 @@ export class World {
   initialize(engine: Engine) {
     this.#engine = engine;
 
-    const ASTEROID_COUNT = 50;
+    const ASTEROID_COUNT = 150;
     const ASTEROID_VELOCITY = 50;
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 

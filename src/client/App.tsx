@@ -26,12 +26,12 @@ function PlayerStats() {
       <p className="text-sm">
         FPS: {Math.round(stats.fps || 0)}
       </p>
+      <p className="text-xs text-gray-500">Objects: {stats.objectsCount}</p>
       {/* <p className="text-sm">
         Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
         {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
       </p>
-      <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p>
-      <p className="text-sm">Objects: {stats.objectsCount}</p> */}
+      <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p> */}
       {stats.hasTimeSync ? (
         <>
           <p className="text-xs text-gray-500">

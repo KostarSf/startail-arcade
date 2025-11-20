@@ -35,6 +35,7 @@ import asteroidSmall2TextureSrc from "../assets/images/asteroids/small-02.png";
 
 import bulletHintTextureSrc from "../assets/images/bullet-hint.png";
 import bulletTextureSrc from "../assets/images/bullet.png";
+import glareTextureSrc from "../assets/images/glare.png";
 import hintBwTextureSrc from "../assets/images/hint_bw.png";
 import pirateTextureSrc from "../assets/images/pirate.png";
 import playerTextureSrc from "../assets/images/player.png";
@@ -109,6 +110,7 @@ export class ClientEngine {
       large: Texture[];
     };
     bullet: Texture | null;
+    glare: Texture | null;
     hint: Texture | null;
     bulletHint: Texture | null;
   } = {
@@ -116,6 +118,7 @@ export class ClientEngine {
     pirate: null,
     asteroids: { small: [], medium: [], large: [] },
     bullet: null,
+    glare: null,
     hint: null,
     bulletHint: null,
   };
@@ -406,6 +409,7 @@ export class ClientEngine {
         pirate: this.#textures.pirate,
         asteroids: this.#textures.asteroids,
         bullet: this.#textures.bullet,
+        glare: this.#textures.glare!,
         hint: this.#textures.hint!,
         bulletHint: this.#textures.bulletHint!,
       },
@@ -679,10 +683,11 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, bullet, hint, bulletHint] = await Promise.all([
+    const [player, pirate, bullet, glare, hint, bulletHint] = await Promise.all([
       Assets.load<Texture>(playerTextureSrc),
       Assets.load<Texture>(pirateTextureSrc),
       Assets.load<Texture>(bulletTextureSrc),
+      Assets.load<Texture>(glareTextureSrc),
       Assets.load<Texture>(hintBwTextureSrc),
       Assets.load<Texture>(bulletHintTextureSrc),
     ]);
@@ -707,6 +712,7 @@ export class ClientEngine {
     player.source.scaleMode = "nearest";
     pirate.source.scaleMode = "nearest";
     bullet.source.scaleMode = "nearest";
+    glare.source.scaleMode = "nearest";
     hint.source.scaleMode = "nearest";
     bulletHint.source.scaleMode = "nearest";
 
@@ -723,6 +729,7 @@ export class ClientEngine {
     this.#textures.asteroids.medium = [asteroidMedium1, asteroidMedium2];
     this.#textures.asteroids.large = [asteroidLarge1, asteroidLarge2];
     this.#textures.bullet = bullet;
+    this.#textures.glare = glare;
     this.#textures.hint = hint;
     this.#textures.bulletHint = bulletHint;
   }

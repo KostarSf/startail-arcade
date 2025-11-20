@@ -60,6 +60,7 @@ export interface ClientServices extends Record<string, unknown> {
       large: import("pixi.js").Texture[];
     };
     bullet: import("pixi.js").Texture;
+    glare: import("pixi.js").Texture;
     hint: import("pixi.js").Texture;
     bulletHint: import("pixi.js").Texture;
   };

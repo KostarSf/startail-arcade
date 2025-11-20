@@ -3,6 +3,7 @@ import type { System } from "@/shared/ecs";
 import { Container, Graphics, Sprite, Text } from "pixi.js";
 
 import type { ClientServices } from "../types";
+import { syncShadowsInContainer } from "../utils/shadow-utils";
 
 /**
  * Synchronizes PIXI display objects with ECS transforms each frame.
@@ -28,6 +29,7 @@ export const RenderSystem: System<ClientServices> = {
     // Calculate viewport bounds for glare updates
     const camera = pixi.camera;
     const cameraScale = camera.scale.x || 1;
+    const shadowCameraScale = Math.max(cameraScale, 1);
     const renderWidth = pixi.renderWidth;
     const renderHeight = pixi.renderHeight;
     const screenCenterX = renderWidth / 2;
@@ -199,6 +201,8 @@ export const RenderSystem: System<ClientServices> = {
       container.x = transform.x;
       container.y = transform.y;
       container.rotation = transform.angle;
+      // Keep any sprite-attached shadows aligned with the latest transform.
+      syncShadowsInContainer(container, { cameraScale: shadowCameraScale });
 
       // Update glare for bullets
       const networkState = stores.networkState.get(entity);

@@ -2,6 +2,11 @@ import type { System } from "@/shared/ecs";
 import { Sprite } from "pixi.js";
 
 import type { ClientServices } from "../types";
+import {
+  addShadowToContainer,
+  removeShadowForBase,
+  syncShadowForBase,
+} from "../utils/shadow-utils";
 
 /**
  * Displays hint sprites at the viewport edge pointing toward pirates and bullets
@@ -21,6 +26,7 @@ export const HintSystem: System<ClientServices> = {
       // Clean up all hints
       for (const child of pixi.camera.children) {
         if (child.name?.startsWith("hint-") || child.name?.startsWith("bullet-hint-")) {
+          removeShadowForBase(child as Sprite);
           pixi.camera.removeChild(child);
           child.destroy();
         }
@@ -33,6 +39,7 @@ export const HintSystem: System<ClientServices> = {
 
     const camera = pixi.camera;
     const scale = camera.scale.x || 1;
+    const shadowCameraScale = Math.max(scale, 1);
     const renderWidth = pixi.renderWidth;
     const renderHeight = pixi.renderHeight;
 
@@ -178,6 +185,7 @@ export const HintSystem: System<ClientServices> = {
         const hintName = `hint-${serverId}`;
         const existingHint = pixi.camera.getChildByName(hintName);
         if (existingHint) {
+          removeShadowForBase(existingHint as Sprite);
           pixi.camera.removeChild(existingHint);
           existingHint.destroy();
         }
@@ -197,6 +205,12 @@ export const HintSystem: System<ClientServices> = {
         });
         hintSprite.name = hintName;
         hintSprite.scale.set(3);
+        // Attach a reusable drop shadow so future hint variants can opt-in easily.
+        addShadowToContainer({
+          parent: pixi.camera,
+          base: hintSprite,
+          name: `shadow-${hintName}`,
+        });
         pixi.camera.addChild(hintSprite);
       }
 
@@ -206,6 +220,7 @@ export const HintSystem: System<ClientServices> = {
         hintSprite.x = hintPos.x;
         hintSprite.y = hintPos.y;
         hintSprite.rotation = hintPos.rotation;
+        syncShadowForBase(hintSprite, { cameraScale: shadowCameraScale });
       }
     }
 
@@ -252,6 +267,7 @@ export const HintSystem: System<ClientServices> = {
         const bulletHintName = `bullet-hint-${serverId}`;
         const existingHint = pixi.camera.getChildByName(bulletHintName);
         if (existingHint) {
+          removeShadowForBase(existingHint as Sprite);
           pixi.camera.removeChild(existingHint);
           existingHint.destroy();
         }
@@ -270,6 +286,7 @@ export const HintSystem: System<ClientServices> = {
         const bulletHintName = `bullet-hint-${serverId}`;
         const existingHint = pixi.camera.getChildByName(bulletHintName);
         if (existingHint) {
+          removeShadowForBase(existingHint as Sprite);
           pixi.camera.removeChild(existingHint);
           existingHint.destroy();
         }
@@ -289,6 +306,12 @@ export const HintSystem: System<ClientServices> = {
         });
         bulletHintSprite.name = bulletHintName;
         bulletHintSprite.scale.set(2);
+        // Attach a reusable drop shadow so future hint variants can opt-in easily.
+        addShadowToContainer({
+          parent: pixi.camera,
+          base: bulletHintSprite,
+          name: `shadow-${bulletHintName}`,
+        });
         pixi.camera.addChild(bulletHintSprite);
       }
 
@@ -323,12 +346,14 @@ export const HintSystem: System<ClientServices> = {
       const maxScale = 2.4;
       const currentScale = baseScale + (maxScale - baseScale) * (1 - normalizedDistance);
       bulletHintSprite.scale.set(currentScale);
+      syncShadowForBase(bulletHintSprite, { cameraScale: shadowCameraScale });
     }
 
     // Clean up hints for pirates that no longer exist
     for (const child of pixi.camera.children) {
       if (!child.name?.startsWith("hint-")) continue;
       if (activeHintNames.has(child.name)) continue;
+      removeShadowForBase(child as Sprite);
       pixi.camera.removeChild(child);
       child.destroy();
     }
@@ -337,6 +362,7 @@ export const HintSystem: System<ClientServices> = {
     for (const child of pixi.camera.children) {
       if (!child.name?.startsWith("bullet-hint-")) continue;
       if (activeBulletHintNames.has(child.name)) continue;
+      removeShadowForBase(child as Sprite);
       pixi.camera.removeChild(child);
       child.destroy();
     }

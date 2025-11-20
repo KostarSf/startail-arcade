@@ -6,6 +6,7 @@ import { lerp } from "@/shared/math/utils";
 
 import type { ServerSnapshot } from "../network/snapshot-buffer";
 import type { ClientServices } from "../types";
+import { addShadowToContainer } from "../utils/shadow-utils";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -30,7 +31,7 @@ const ensureRenderable = (
   if (existing?.ref) return existing;
 
   const container = new Container();
-  let sprite: Sprite | null = null;
+  let sprite: Sprite | AnimatedSprite | null = null;
   switch (snapshotEntity.type) {
     case "ship":
       sprite = new Sprite({
@@ -70,37 +71,40 @@ const ensureRenderable = (
       sprite.tint = 0x808080;
       break;
     case "bullet":
-      // Create animated sprite from 16x6 spritesheet (2 frames of 8x6 each)
-      const bulletTexture = services.textures.bullet;
-      const frame1 = new Texture({
-        source: bulletTexture.source,
-        frame: new Rectangle(0, 0, 8, 6),
-      });
-      const frame2 = new Texture({
-        source: bulletTexture.source,
-        frame: new Rectangle(8, 0, 8, 6),
-      });
-      sprite = new AnimatedSprite([frame1, frame2]);
-      sprite.anchor.set(0.5);
-      // Animation speed: 2 frames per 500ms = 4 fps
-      // animationSpeed is frames per second, so 4 fps = 4.0
-      sprite.animationSpeed = 4.0;
-      sprite.play();
+      {
+        // Create animated sprite from 16x6 spritesheet (2 frames of 8x6 each)
+        const bulletTexture = services.textures.bullet;
+        const frame1 = new Texture({
+          source: bulletTexture.source,
+          frame: new Rectangle(0, 0, 8, 6),
+        });
+        const frame2 = new Texture({
+          source: bulletTexture.source,
+          frame: new Rectangle(8, 0, 8, 6),
+        });
+        const bulletSprite = new AnimatedSprite([frame1, frame2]);
+        bulletSprite.anchor.set(0.5);
+        // Animation speed: 2 frames per 500ms = 4 fps
+        // animationSpeed is frames per second, so 4 fps = 4.0
+        bulletSprite.animationSpeed = 4.0;
+        bulletSprite.play();
 
-      // Add glare sprite below bullet so bullet renders on top
-      const glareSprite = new Sprite({
-        texture: services.textures.glare,
-        anchor: 0.5,
-      });
-      glareSprite.name = "glare";
-      glareSprite.rotation = 0; // Keep horizontal
-      container.addChild(glareSprite); // Add first so it renders below
-      container.addChild(sprite); // Add after glare so bullet renders on top
-      sprite = null; // Prevent adding sprite again after switch
+        // Add glare sprite below bullet so bullet renders on top
+        const glareSprite = new Sprite({
+          texture: services.textures.glare,
+          anchor: 0.5,
+        });
+        glareSprite.name = "glare";
+        glareSprite.rotation = 0; // Keep horizontal
+        container.addChild(glareSprite); // Add first so it renders below
+        addShadowToContainer({ parent: container, base: bulletSprite });
+        container.addChild(bulletSprite); // Add after glare and shadow so bullet renders on top
+      }
       break;
   }
 
   if (sprite) {
+    addShadowToContainer({ parent: container, base: sprite });
     container.addChild(sprite);
   }
   services.pixi.camera.addChild(container);

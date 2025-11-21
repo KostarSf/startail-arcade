@@ -12,7 +12,7 @@ interface CameraTarget {
 }
 
 // Time in seconds to reach target (0 = instant, 0.1 = 100ms, etc.)
-let TARGET_POSITION_LERP_TIME = 0.1; // seconds
+let TARGET_POSITION_LERP_TIME = 0.2; // seconds
 let TARGET_SCALE_LERP_TIME = 0.2; // seconds
 
 // Initial target values
@@ -27,9 +27,17 @@ const MAX_ACCELERATION_SHAKE_AMPLITUDE = 2;
 const MIN_SPEED_FOR_SHAKE = 10;
 
 // Zoom constants
-const MAX_ZOOM_WHEN_STILL = 2;
-const MIN_ZOOM_WHEN_MOVING = 1;
+const MAX_ZOOM_WHEN_STILL = 1.9;
+const MIN_ZOOM_WHEN_MOVING = 1.3;
 const PLAYER_SPEED_FOR_MIN_ZOOM = 350; // Speed at which zoom becomes minimal
+
+// Cursor tracking constants
+const CURSOR_INFLUENCE_FACTOR = 0.3; // How much cursor affects target (40%)
+const MAX_CURSOR_OFFSET_DISTANCE = 80; // Maximum distance cursor can offset target
+
+// Velocity tracking constants
+const VELOCITY_INFLUENCE_FACTOR = 0.4; // How much velocity affects target
+const MAX_VELOCITY_OFFSET_DISTANCE = 200; // Maximum distance velocity can offset target
 
 // Camera target state
 let cameraTarget: CameraTarget = {
@@ -47,6 +55,24 @@ let lastPlayerPosition: Point | null = null;
 // Track player death position to keep camera target there until respawn
 let deathPosition: Point | null = null;
 let wasPlayerAlive = false;
+
+/**
+ * Clamps a point's magnitude to a maximum distance while preserving direction.
+ * @param point - Point to clamp
+ * @param maxMagnitude - Maximum magnitude
+ * @returns Clamped point
+ */
+function clampPointMagnitude(point: Point, maxMagnitude: number): Point {
+  const magnitude = Math.hypot(point.x, point.y);
+  if (magnitude === 0 || magnitude <= maxMagnitude) {
+    return point;
+  }
+  const scale = maxMagnitude / magnitude;
+  return {
+    x: point.x * scale,
+    y: point.y * scale,
+  };
+}
 
 /**
  * Calculates camera zoom value based on current player speed.
@@ -114,10 +140,50 @@ function updateCameraTarget(services: ClientServices, dt: number, currentZoom: n
     deathPosition = null;
   }
 
-  // Current behavior: stick target position to player position
-  // This is where we'll add more complex logic based on player actions
-  cameraTarget.x = transform.x;
-  cameraTarget.y = transform.y;
+  // Calculate target position with cursor tracking
+  const shipPosition: Point = { x: transform.x, y: transform.y };
+
+  // Get cursor world position, fallback to ship position if not available
+  const cursorWorld = services.controls.cursorWorld ?? shipPosition;
+
+  // Calculate difference vector: (ship_position - cursor_position) * influence_factor
+  const shipCursorDifference: Point = {
+    x: (shipPosition.x - cursorWorld.x) * CURSOR_INFLUENCE_FACTOR,
+    y: (shipPosition.y - cursorWorld.y) * CURSOR_INFLUENCE_FACTOR,
+  };
+
+  // Clamp the difference magnitude to maximum offset distance
+  const clampedCursorDifference = clampPointMagnitude(
+    shipCursorDifference,
+    MAX_CURSOR_OFFSET_DISTANCE
+  );
+
+  // Calculate velocity offset
+  let velocityOffset: Point = { x: 0, y: 0 };
+  if (velocity) {
+    // Calculate velocity offset: velocity * influence_factor
+    // (velocity already contains direction and speed)
+    const velocityOffsetRaw: Point = {
+      x: velocity.vx * VELOCITY_INFLUENCE_FACTOR,
+      y: velocity.vy * VELOCITY_INFLUENCE_FACTOR,
+    };
+
+    // Clamp velocity offset magnitude to maximum distance
+    velocityOffset = clampPointMagnitude(
+      velocityOffsetRaw,
+      MAX_VELOCITY_OFFSET_DISTANCE
+    );
+  }
+
+  // Target position = ship position + cursor offset + velocity offset
+  cameraTarget.x =
+    shipPosition.x -
+    clampedCursorDifference.x / cameraTarget.scale +
+    velocityOffset.x / cameraTarget.scale;
+  cameraTarget.y =
+    shipPosition.y -
+    clampedCursorDifference.y / cameraTarget.scale +
+    velocityOffset.y / cameraTarget.scale;
 
   // Calculate zoom based on player speed
   if (velocity) {

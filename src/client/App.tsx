@@ -9,7 +9,7 @@ import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
 
-const DEBUG = true;
+const DEBUG = false;
 
 export function App() {
   return (

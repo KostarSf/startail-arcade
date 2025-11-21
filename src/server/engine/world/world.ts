@@ -14,7 +14,7 @@ export class World {
 
   #borderRadius = 5000;
 
-  #maxAsteroids = 500;
+  #maxAsteroids = 1000;
   #currentAsteroids = 0;
 
   #engine: Engine | null = null;

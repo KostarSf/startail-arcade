@@ -9,6 +9,7 @@ export interface PlayerInputEvent {
     thrust?: boolean;
     angle?: number;
     fire?: boolean;
+    firingCompensation?: boolean;
   };
 }
 

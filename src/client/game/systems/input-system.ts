@@ -31,6 +31,9 @@ const normalizeAngleDelta = (current: number, previous: number) => {
  * Captures local controls, mutates the player's ship component immediately,
  * and emits buffered commands to the network layer for reconciliation.
  */
+// Track previous staticCamera state to detect changes
+let previousStaticCamera = false;
+
 export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",
@@ -108,7 +111,16 @@ export const InputSystem: System<ClientServices> = {
       ) >= ANGLE_FORCE_THRESHOLD;
     const angleThrottleElapsed = timeSinceLastAngle >= ANGLE_PACKET_INTERVAL_MS;
 
-    const sendFields = new Set<"thrust" | "angle" | "fire">();
+    const staticCameraChanged = controls.staticCamera !== previousStaticCamera;
+    if (staticCameraChanged) {
+      previousStaticCamera = controls.staticCamera;
+    }
+
+    // firingCompensation is the inverse of staticCamera
+    // Only send when true (when staticCamera is false)
+    const firingCompensation = !controls.staticCamera;
+
+    const sendFields = new Set<"thrust" | "angle" | "fire" | "firingCompensation">();
 
     if (thrustChanged) {
       sendFields.add("thrust");
@@ -120,6 +132,11 @@ export const InputSystem: System<ClientServices> = {
     if (fireTriggered) {
       sendFields.add("fire");
       sendFields.add("angle"); // keep server angle in sync when firing
+    }
+
+    // Send firingCompensation only when it's true (when staticCamera is false)
+    if (firingCompensation) {
+      sendFields.add("firingCompensation");
     }
 
     if (!thrustChanged && !fireTriggered && hasPendingAngle) {
@@ -137,6 +154,7 @@ export const InputSystem: System<ClientServices> = {
         thrust: shipControl.thrust,
         angle: shipControl.angle,
         fire: shipControl.fire,
+        firingCompensation: firingCompensation,
       },
       { fields: Array.from(sendFields) }
     );

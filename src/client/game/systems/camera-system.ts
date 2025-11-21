@@ -56,6 +56,9 @@ let lastPlayerPosition: Point | null = null;
 let deathPosition: Point | null = null;
 let wasPlayerAlive = false;
 
+// Static mode target position (frozen when staticCamera is active)
+let staticModeTargetPosition: Point | null = null;
+
 /**
  * Clamps a point's magnitude to a maximum distance while preserving direction.
  * @param point - Point to clamp
@@ -105,13 +108,54 @@ function calculateZoomFromSpeed(
 }
 
 /**
+ * Checks if ship is out of camera bounds.
+ * @param shipPosition - Ship world position
+ * @param cameraWorldPosition - Camera world position (center)
+ * @param renderWidth - Render width in pixels
+ * @param renderHeight - Render height in pixels
+ * @param cameraScale - Current camera scale
+ * @returns True if ship is out of camera bounds
+ */
+function isShipOutOfBounds(
+  shipPosition: Point,
+  cameraWorldPosition: Point,
+  renderWidth: number,
+  renderHeight: number,
+  cameraScale: number
+): boolean {
+  // Calculate camera bounds in world space
+  const halfWidth = (renderWidth / cameraScale) / 2;
+  const halfHeight = (renderHeight / cameraScale) / 2;
+
+  const left = cameraWorldPosition.x - halfWidth;
+  const right = cameraWorldPosition.x + halfWidth;
+  const top = cameraWorldPosition.y - halfHeight;
+  const bottom = cameraWorldPosition.y + halfHeight;
+
+  // Check if ship is outside bounds
+  return (
+    shipPosition.x < left ||
+    shipPosition.x > right ||
+    shipPosition.y < top ||
+    shipPosition.y > bottom
+  );
+}
+
+/**
  * Updates the camera target based on current player state and actions.
  * This function defines the behavior of where the camera should focus.
  * @param services - Client services
  * @param dt - Delta time in seconds
  * @param currentZoom - Current camera zoom value
  */
-function updateCameraTarget(services: ClientServices, dt: number, currentZoom: number): void {
+function updateCameraTarget(
+  services: ClientServices,
+  dt: number,
+  currentZoom: number,
+  cameraWorldPosition: Point,
+  renderWidth: number,
+  renderHeight: number
+): void {
   const { player, stores } = services;
 
   if (player.entityId === null) {
@@ -142,6 +186,31 @@ function updateCameraTarget(services: ClientServices, dt: number, currentZoom: n
 
   // Calculate target position with cursor tracking
   const shipPosition: Point = { x: transform.x, y: transform.y };
+
+  // Check if ship is out of camera bounds (exit static mode condition)
+  if (services.controls.staticCamera && isShipOutOfBounds(shipPosition, cameraWorldPosition, renderWidth, renderHeight, currentZoom)) {
+    services.controls.staticCamera = false;
+    staticModeTargetPosition = null;
+  }
+
+  // Handle static mode (Shift held)
+  if (services.controls.staticCamera) {
+    // Freeze target position at last position when entering static mode
+    if (staticModeTargetPosition === null) {
+      staticModeTargetPosition = { x: cameraTarget.x, y: cameraTarget.y };
+    }
+
+    // Keep target frozen
+    cameraTarget.x = staticModeTargetPosition.x;
+    cameraTarget.y = staticModeTargetPosition.y;
+
+    // Set scale to 1
+    cameraTarget.scale = 0.9;
+    return;
+  }
+
+  // Clear static mode target when exiting static mode
+  staticModeTargetPosition = null;
 
   // Get cursor world position, fallback to ship position if not available
   const cursorWorld = services.controls.cursorWorld ?? shipPosition;
@@ -292,9 +361,21 @@ export const CameraSystem: System<ClientServices> = {
 
     wasPlayerAlive = isPlayerAlive;
 
-    // Update camera target based on player state and actions
+    // Calculate current camera world position (before any updates)
     const currentZoom = camera.scale.x;
-    updateCameraTarget(services, dt, currentZoom);
+    const cameraWorldX = (-camera.x + renderWidth / 2) / currentZoom;
+    const cameraWorldY = (-camera.y + renderHeight / 2) / currentZoom;
+    const cameraWorldPosition: Point = { x: cameraWorldX, y: cameraWorldY };
+
+    // Update camera target based on player state and actions
+    updateCameraTarget(
+      services,
+      dt,
+      currentZoom,
+      cameraWorldPosition,
+      renderWidth,
+      renderHeight
+    );
 
     // Update shake amplitudes based on player state
     updateShakeAmplitudes(services);
@@ -413,7 +494,8 @@ export const CameraSystem: System<ClientServices> = {
       renderWidth,
       renderHeight,
       shakeOffset.x * 0.5,
-      shakeOffset.y * 0.5
+      shakeOffset.y * 0.5,
+      services.controls.staticCamera
     );
   },
 };

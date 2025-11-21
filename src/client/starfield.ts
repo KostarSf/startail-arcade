@@ -20,7 +20,7 @@ class Star {
     this.parallaxFactor = Math.random() * 0.55 + 0.05; // от 0.05 до 0.9
     this.baseMaxBrightness = Math.random() * 0.3 + 0.7; // от 0.6 до 1.0
     this.minBrightnessRatio = Math.random() * 0.4 + 0.1; // от 0.5 до 0.8
-    this.size = Math.random() * 3 + 2; // от 0.7 до 1.5 пикселя
+    this.size = Math.random() * 2 + 1; // от 0.7 до 1.5 пикселя
     this.lifetime = Math.random() * 5000 + 3000; // от 5000 до 20000 мс (5-20 секунд)
     this.age = 0;
     this.flickerTimer = 0;
@@ -48,7 +48,8 @@ class Star {
     screenWidth: number,
     screenHeight: number,
     scaleInfluence: number,
-    baseScale: number
+    baseScale: number,
+    staticCameraMode: boolean = false
   ) {
     // Обновляем позицию с учетом параллакса
     // cameraWorldX и cameraWorldY - это мировая позиция камеры (передается напрямую)
@@ -106,8 +107,10 @@ class Star {
     this.graphics.x = screenX;
     this.graphics.y = screenY;
 
-    // Компенсируем масштаб камеры, чтобы размер звезды был фиксированным на экране
-    this.graphics.scale.set(1 / cameraScale);
+    // Масштабируем звезды с коэффициентом: когда камера x2, звезды x1.5
+    // Используем линейную интерполяцию: при scale=1 -> starScale=1, при scale=2 -> starScale=1.5
+    const starScaleFactor = 0.5 * (1 + cameraScale); // 1 -> 1.0, 2 -> 1.5
+    this.graphics.scale.set(starScaleFactor);
 
     // Обновляем возраст звезды
     // deltaTime - это количество миллисекунд с предыдущего кадра
@@ -130,7 +133,10 @@ class Star {
     }
 
     // Вычисляем текущие min и max яркости с учетом жизненного цикла
-    const currentMaxBrightness = this.baseMaxBrightness * lifeMultiplier;
+    // В статическом режиме камеры уменьшаем максимальную яркость до 0.7
+    const maxBrightnessCap = staticCameraMode ? 0.4 : 0.7;
+    const cappedBaseMaxBrightness = Math.min(this.baseMaxBrightness, maxBrightnessCap);
+    const currentMaxBrightness = cappedBaseMaxBrightness * lifeMultiplier;
     const currentMinBrightness = currentMaxBrightness * this.minBrightnessRatio;
 
     // Обновляем мерцание
@@ -191,7 +197,8 @@ export class Starfield {
     screenWidth: number,
     screenHeight: number,
     shakeOffsetX: number = 0,
-    shakeOffsetY: number = 0
+    shakeOffsetY: number = 0,
+    staticCameraMode: boolean = false
   ) {
     // Перемещаем контейнер звезд так, чтобы его центр следовал за камерой
     // Позиция камеры в экранных координатах - это центр экрана
@@ -214,7 +221,8 @@ export class Starfield {
         screenWidth,
         screenHeight,
         this.scaleInfluence,
-        this.baseScale
+        this.baseScale,
+        staticCameraMode
       );
 
       if (star.isExpired()) {

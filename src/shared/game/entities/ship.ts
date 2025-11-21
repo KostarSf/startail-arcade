@@ -10,6 +10,7 @@ export interface ShipState extends BaseEntityState {
 export interface ShipPhysicsOptions {
   thrust: boolean;
   fire: boolean;
+  compensatedFire: boolean;
   delta: number;
 }
 
@@ -102,11 +103,15 @@ export function updateShipPhysics(
 
   const cos = Math.cos(ship.angle);
   const sin = Math.sin(ship.angle);
-  // vector from angle
-  const velocity = new Vector2(cos, sin)
+
+  let velocity = new Vector2(cos, sin)
     .normalize()
-    .mul(SHIP_CONSTANTS.bulletSpeed + speed * 0.5)
-    .add(ship.vx, ship.vy);
+    .mul(SHIP_CONSTANTS.bulletSpeed + speed * 0.5);
+
+  if (options.compensatedFire) {
+    velocity = velocity.add(ship.vx, ship.vy);
+  }
+
   const bullet: BulletSpawnState = {
     x: ship.x + cos * SHIP_CONSTANTS.bulletOffset,
     y: ship.y + sin * SHIP_CONSTANTS.bulletOffset,

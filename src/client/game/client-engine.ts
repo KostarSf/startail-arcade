@@ -101,6 +101,7 @@ export class ClientEngine {
     angle: 0,
     thrust: false,
     fire: false,
+    staticCamera: false,
     cursorScreen: null,
     cursorWorld: null,
     lastAnglePacketTime: 0,
@@ -576,10 +577,16 @@ export class ClientEngine {
       if (e.code === "Space") {
         this.#controls.fire = true;
       }
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+        this.#controls.staticCamera = true;
+      }
     });
     window.addEventListener("keyup", (e) => {
       if (e.code === "KeyW") {
         this.#controls.thrust = false;
+      }
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+        this.#controls.staticCamera = false;
       }
     });
     window.addEventListener("mousedown", (e) => {
@@ -740,8 +747,9 @@ export class ClientEngine {
       thrust: boolean;
       angle: number;
       fire: boolean;
+      firingCompensation?: boolean;
     },
-    options?: { fields?: Array<"thrust" | "angle" | "fire"> }
+    options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation"> }
   ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
     const command: ShipInputCommand = {
@@ -761,6 +769,9 @@ export class ClientEngine {
     }
     if (includeFields.includes("fire") && command.fire) {
       payloadInput.fire = command.fire;
+    }
+    if (includeFields.includes("firingCompensation") && input.firingCompensation !== undefined && input.firingCompensation) {
+      payloadInput.firingCompensation = input.firingCompensation;
     }
 
     if (Object.keys(payloadInput).length === 0) {

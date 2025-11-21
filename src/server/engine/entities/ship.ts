@@ -21,6 +21,7 @@ export class Ship extends LivingEntity {
   lastInputSequence = -1;
 
   #firing = false;
+  #compensatedFire = false;
 
   #energy = 100;
   #maxEnergy = 100;
@@ -59,7 +60,7 @@ export class Ship extends LivingEntity {
 
     const result = updateShipPhysics(this, {
       thrust: this.thrust,
-      fire: this.#consumeFire(),
+      ...this.#consumeFire(),
       delta,
     });
 
@@ -82,17 +83,26 @@ export class Ship extends LivingEntity {
     }
   }
 
-  fire() {
+  /**
+   * Fire a bullet.
+   * @param compensateMotion - If true, compensate for the ship's motion when firing.
+   */
+  fire(compensateMotion = false) {
     const consumpsion = 25;
     if (this.#energy < consumpsion) return;
 
     this.#energy -= consumpsion;
     this.#firing = true;
+    this.#compensatedFire = compensateMotion;
   }
 
   #consumeFire() {
-    const firing = this.#firing;
+    const firing = {
+      fire: this.#firing,
+      compensatedFire: this.#firing ? this.#compensatedFire : false,
+    };
     this.#firing = false;
+    this.#compensatedFire = false;
     return firing;
   }
 

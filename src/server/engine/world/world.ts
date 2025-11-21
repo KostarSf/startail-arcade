@@ -80,14 +80,16 @@ export class World {
   update(delta: number) {
     const start = performance.now();
 
-    console.log(
-      "limit:",
-      delta * 1000,
-      "\tactual:",
-      Math.round(this.lastTickDuration * 100) / 100,
-      "\tavailable:",
-      Math.floor(delta * 1000 - this.lastTickDuration)
-    );
+    if (this.engine.debug.ticksDuration) {
+      console.log(
+        "limit:",
+        delta * 1000,
+        "\tactual:",
+        Math.round(this.lastTickDuration * 100) / 100,
+        "\tavailable:",
+        Math.floor(delta * 1000 - this.lastTickDuration)
+      );
+    }
 
     for (const entity of this.#entities.values()) {
       if (!entity.initialized) {

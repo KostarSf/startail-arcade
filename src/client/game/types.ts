@@ -34,6 +34,7 @@ export interface ControlState {
   angle: number;
   thrust: boolean;
   fire: boolean;
+  staticCamera: boolean;
   cursorScreen: { x: number; y: number } | null;
   cursorWorld: { x: number; y: number } | null;
   lastAnglePacketTime: number;
@@ -86,8 +87,9 @@ export interface ClientServices extends Record<string, unknown> {
         thrust: boolean;
         angle: number;
         fire: boolean;
+        firingCompensation?: boolean;
       },
-      options?: { fields?: Array<"thrust" | "angle" | "fire"> }
+      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation"> }
     ) => ShipInputCommand | null;
     predictedServerTime: () => number;
     renderDelayMs: number;

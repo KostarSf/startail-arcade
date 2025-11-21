@@ -9,6 +9,7 @@ export class Engine {
   debug = {
     collisions: false,
     lifecycle: false,
+    ticksDuration: false,
   };
 
   network: EngineNetwork;
@@ -162,7 +163,7 @@ class EngineNetwork {
           player.ship.angle = message.input.angle;
         }
         if (message.input.fire) {
-          player.ship.fire();
+          player.ship.fire(message.input.firingCompensation);
         }
         player.ship.lastInputSequence = message.sequence;
 

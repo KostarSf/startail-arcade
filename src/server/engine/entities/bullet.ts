@@ -32,6 +32,7 @@ export class Bullet extends BaseEntity {
       bullet.name = `bullet-${Bullet.#nextId++}`;
     }
     bullet.radius = 3;
+    bullet.continuousCollision = true;
 
     super(bullet);
     this.#ownerId = bullet.ownerId ?? null;

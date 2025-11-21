@@ -106,22 +106,7 @@ export class World {
     this.#currentAsteroids++;
   }
 
-  lastTickDuration = 0;
-
   update(delta: number) {
-    const start = performance.now();
-
-    if (this.engine.debug.ticksDuration) {
-      console.log(
-        "limit:",
-        delta * 1000,
-        "\tactual:",
-        Math.round(this.lastTickDuration * 100) / 100,
-        "\tavailable:",
-        Math.floor(delta * 1000 - this.lastTickDuration)
-      );
-    }
-
     this.#refillAsteroids();
 
     for (const entity of this.#entities.values()) {
@@ -150,8 +135,6 @@ export class World {
     }
 
     this.#collisionResolver.update(this);
-
-    this.lastTickDuration = performance.now() - start;
   }
 
   #ticksAfterLastRefill = 0;

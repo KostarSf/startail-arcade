@@ -146,6 +146,8 @@ export class ClientEngine {
   #drawColliders = false;
   #fpsSampleFrames = 0;
   #fpsLastSampleTime = 0;
+  #connectionAttempts = 0;
+  #maxConnectionAttempts = 5;
 
   constructor() {
     this.#app = new Application();
@@ -619,17 +621,38 @@ export class ClientEngine {
       clearTimeout(this.#connectTimeout);
       this.#connectTimeout = null;
     }
+
+    this.#connectionAttempts++;
+
+    if (this.#connectionAttempts > this.#maxConnectionAttempts) {
+      console.error('[net] Max connection attempts reached, giving up');
+      this.#statsGetter().setConnectionError(true);
+      return;
+    }
+
     const wsUrl =
       `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
         window.location.host
       }/ws`;
+    console.log(`[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`);
+
     this.#ws = new WebSocket(wsUrl);
+
     this.#ws.onopen = () => {
+      console.log('[net] Connected successfully');
+      this.#connectionAttempts = 0; // Reset on successful connection
+      this.#statsGetter().setConnectionError(false);
       this.#pingTicker.start();
     };
+
+    this.#ws.onerror = (error) => {
+      console.error('[net] WebSocket error:', error);
+    };
+
     this.#ws.onclose = () => {
       this.#handleDisconnect();
     };
+
     this.#ws.onmessage = (eventMessage) => {
       const payload = eventMessage.data;
       this.#withSimulatedLatency(() => {
@@ -656,6 +679,7 @@ export class ClientEngine {
         this.#snapshotBuffer.add(message);
         // Update leaderboard data
         this.#statsGetter().setPlayers(message.players);
+        this.#statsGetter().setTickDuration(message.tickDuration);
         break;
       case "server:respawn-denied":
         this.#statsGetter().setRespawnError(message.reason);

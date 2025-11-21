@@ -14,6 +14,7 @@ const DEBUG = false;
 export function App() {
   return (
     <>
+      <ConnectionError />
       <div className="p-4 z-10">
         <PlayerStats />
       </div>
@@ -79,6 +80,9 @@ function PlayerStats() {
         <>
           <p className="text-xs text-gray-500">
             Ping: {Math.floor((stats.latency / 2) * 100) / 100}
+          </p>
+          <p className="text-xs text-gray-500">
+            Tick: {Math.round(stats.tickDuration)}ms
           </p>
           {DEBUG ? (
             <>
@@ -264,6 +268,31 @@ function Radar() {
           />
         );
       })}
+    </div>
+  );
+}
+
+function ConnectionError() {
+  const stats = useStats();
+
+  if (!stats.connectionError) return null;
+
+  return (
+    <div className="connection-error-overlay">
+      <div className="connection-error-container">
+        <div className="connection-error-title">CONNECTION FAILED</div>
+        <div className="connection-error-message">
+          Unable to connect to the game server.
+          <br />
+          Please check your connection and try again.
+        </div>
+        <button
+          onClick={() => window.location.reload()}
+          className="connection-error-button"
+        >
+          RELOAD PAGE
+        </button>
+      </div>
     </div>
   );
 }

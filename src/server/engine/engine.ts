@@ -25,6 +25,7 @@ export class Engine {
   #lastTime = 0;
   #accumulatedTime = 0;
   #ticksSinceLastRadar = 0;
+  #lastTickDuration = 0;
 
   get tick() {
     return this.#tick;
@@ -40,6 +41,10 @@ export class Engine {
 
   get serverTime() {
     return performance.now() - this.#startTime;
+  }
+
+  get lastTickDuration() {
+    return this.#lastTickDuration;
   }
 
   constructor() {
@@ -89,6 +94,19 @@ export class Engine {
   }
 
   #update(dt: number) {
+    const tickStart = performance.now();
+
+    if (this.debug.ticksDuration) {
+      console.log(
+        "limit:",
+        dt * 1000,
+        "\tactual:",
+        Math.round(this.lastTickDuration * 100) / 100,
+        "\tavailable:",
+        Math.floor(dt * 1000 - this.lastTickDuration)
+      );
+    }
+
     this.#tick++;
     this.#world.update(dt);
     this.network.sendServerState();
@@ -103,6 +121,8 @@ export class Engine {
     if (this.network.playerCount === 0) {
       this.stop();
     }
+
+    this.#lastTickDuration = performance.now() - tickStart;
   }
 }
 
@@ -364,6 +384,7 @@ class EngineNetwork {
         event({
           type: "server:state",
           serverTime: this.engine.serverTime,
+          tickDuration: this.engine.lastTickDuration,
           entities: visibleEntities.map((entity) => entity.toJSON()),
           players: playersData,
         }).serialize()

@@ -46,6 +46,7 @@ export interface ServerPongEvent {
 export interface ServerStateEvent {
   type: "server:state";
   serverTime: number;
+  tickDuration: number;
   entities: {
     name: string;
     type: EntityType;

@@ -395,3 +395,111 @@ canvas {
   background: white;
   box-shadow: 0 0 2px white;
 }
+
+/* Connection Error Overlay */
+.connection-error-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  pointer-events: auto;
+}
+
+.connection-error-container {
+  background-color: #000000;
+  border: 4px solid #ff0000;
+  padding: 32px 40px;
+  max-width: 500px;
+  box-shadow:
+    0 0 0 4px #000000,
+    6px 6px 0 0 #ff0000,
+    0 0 30px rgba(255, 0, 0, 0.5);
+  font-family: "Press Start 2P", monospace;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+  animation: errorPulse 2s ease-in-out infinite;
+}
+
+@keyframes errorPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 4px #000000,
+      6px 6px 0 0 #ff0000,
+      0 0 30px rgba(255, 0, 0, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px #000000,
+      6px 6px 0 0 #ff0000,
+      0 0 50px rgba(255, 0, 0, 0.8);
+  }
+}
+
+.connection-error-title {
+  font-size: 16px;
+  color: #ff0000;
+  text-align: center;
+  margin-bottom: 24px;
+  letter-spacing: 2px;
+  text-shadow: 3px 3px 0 #400000;
+  animation: errorBlink 1s step-start infinite;
+}
+
+@keyframes errorBlink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0.7;
+  }
+}
+
+.connection-error-message {
+  font-size: 10px;
+  color: #ffffff;
+  text-align: center;
+  line-height: 1.8;
+  margin-bottom: 28px;
+  letter-spacing: 1px;
+}
+
+.connection-error-button {
+  display: block;
+  margin: 0 auto;
+  padding: 12px 24px;
+  background-color: #ff0000;
+  border: 3px solid #ffffff;
+  color: #ffffff;
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  cursor: pointer;
+  letter-spacing: 1.5px;
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffffff;
+  transition: all 0.1s;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+}
+
+.connection-error-button:hover {
+  background-color: #cc0000;
+  transform: translate(1px, 1px);
+  box-shadow:
+    0 0 0 2px #000000,
+    3px 3px 0 0 #ffffff;
+}
+
+.connection-error-button:active {
+  transform: translate(2px, 2px);
+  box-shadow:
+    0 0 0 2px #000000,
+    2px 2px 0 0 #ffffff;
+}

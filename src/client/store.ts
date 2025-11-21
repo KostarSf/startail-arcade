@@ -30,6 +30,10 @@ type StatsStoreState = {
   }> | null;
   /** World radius for radar calculations */
   worldRadius: number;
+  /** Last server tick duration in milliseconds */
+  tickDuration: number;
+  /** Connection error state */
+  connectionError: boolean;
 };
 
 type StatsStoreActions = {
@@ -45,6 +49,8 @@ type StatsStoreActions = {
   setRespawnError: (error: string | null) => void;
   setRadarData: (data: Array<{ type: "player" | "ship"; x: number; y: number }> | null) => void;
   setWorldRadius: (radius: number) => void;
+  setTickDuration: (tickDuration: number) => void;
+  setConnectionError: (error: boolean) => void;
 };
 
 type StatsStore = StatsStoreState & StatsStoreActions;
@@ -62,6 +68,8 @@ export const useStats = create<StatsStore>((set) => ({
   respawnError: null,
   radarData: null,
   worldRadius: 5000,
+  tickDuration: 0,
+  connectionError: false,
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
@@ -74,6 +82,8 @@ export const useStats = create<StatsStore>((set) => ({
   setRespawnError: (error: string | null) => set({ respawnError: error }),
   setRadarData: (data: Array<{ type: "player" | "ship"; x: number; y: number }> | null) => set({ radarData: data }),
   setWorldRadius: (radius: number) => set({ worldRadius: radius }),
+  setTickDuration: (tickDuration: number) => set({ tickDuration }),
+  setConnectionError: (error: boolean) => set({ connectionError: error }),
 }));
 
 export const stats = () => useStats.getState();

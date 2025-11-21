@@ -14,6 +14,8 @@ export class Asteroid extends LivingEntity {
 
   static #nextId = 1;
 
+  override radius: number;
+
   constructor(asteroid: Partial<IAsteroid>) {
     if (!asteroid.name) {
       asteroid.name = `asteroid-${Asteroid.#nextId++}`;
@@ -23,6 +25,7 @@ export class Asteroid extends LivingEntity {
 
     this.maxHealth = asteroid.maxHealth ?? 100;
     this.health = asteroid.health ?? this.maxHealth;
+    this.radius = asteroid.radius ?? 10;
   }
 
   protected override onDamage(
@@ -30,6 +33,11 @@ export class Asteroid extends LivingEntity {
     amount: number,
     source?: BaseEntity
   ): number {
+    if (source && source instanceof Bullet) {
+      const relativeVelocity = source.velocity.sub(this.velocity);
+      this.velocity = this.velocity.add(relativeVelocity.mul(0.04));
+    }
+
     return amount;
   }
 
@@ -44,6 +52,43 @@ export class Asteroid extends LivingEntity {
         direction.mul(relativeSpeed * 0.2).neg()
       );
       return;
+    }
+  }
+
+  override onCollisionStart(world: World, other: BaseEntity): void {
+    if (other instanceof Asteroid) {
+      // Simple rigid body collision: exchange velocities based on mass (assume mass proportional to radius^2)
+      const m1 = this.radius * this.radius;
+      const m2 = other.radius * other.radius;
+
+      // Relative position and velocity
+      const normal = other.position.sub(this.position).normalize();
+      const relativeVelocity = this.velocity.sub(other.velocity);
+      const velAlongNormal = relativeVelocity.dot(normal);
+
+      // Only resolve if moving toward each other
+      if (velAlongNormal < 0) return;
+
+      // Coefficient of restitution (bounciness), 0 = inelastic, 1 = elastic
+      const restitution = 0.7;
+
+      // Impulse scalar
+      const j = (-(1 + restitution) * velAlongNormal) / (1 / m1 + 1 / m2);
+
+      // Apply impulse only to this asteroid
+      const impulse = normal.mul(j);
+
+      this.velocity = this.velocity.add(impulse.div(m1));
+
+    // If collision is at high speed, take damage proportional to impact speed
+    const impactSpeed = Math.abs(velAlongNormal);
+    const DAMAGE_SPEED_THRESHOLD = 50; // minimum speed before damage is applied
+    if (impactSpeed > DAMAGE_SPEED_THRESHOLD) {
+      const damage = Math.floor((impactSpeed - DAMAGE_SPEED_THRESHOLD) * 0.3); // tune multiplier as needed
+      if (damage > 0) {
+        this.takeDamage(world, damage, other);
+      }
+    }
     }
   }
 

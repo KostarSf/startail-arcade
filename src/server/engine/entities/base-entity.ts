@@ -101,17 +101,55 @@ export abstract class BaseEntity {
   update(world: World, delta: number) {
     integrateMotion(this, delta);
 
-    if (this.x < -world.borderRadius) {
-      this.x += world.borderRadius * 2;
+    const borderRadius = world.borderRadius;
+    const wrapThreshold = 500; // Wrap if more than 500 units beyond border
+
+    // Check X-axis wrapping
+    const beyondLeftBorder = this.x < -borderRadius;
+    const beyondRightBorder = this.x > borderRadius;
+    const isBeyondBorderX = beyondLeftBorder || beyondRightBorder;
+
+    if (isBeyondBorderX) {
+      const distanceBeyondBorder = beyondLeftBorder
+        ? -borderRadius - this.x
+        : this.x - borderRadius;
+
+      const isMovingTowardsEdge =
+        (beyondLeftBorder && this.vx < 0) ||
+        (beyondRightBorder && this.vx > 0);
+
+      // Wrap if more than threshold away OR if moving towards edge
+      if (distanceBeyondBorder > wrapThreshold || isMovingTowardsEdge) {
+        if (beyondLeftBorder) {
+          this.x = borderRadius; // Wrap to right edge
+        } else {
+          this.x = -borderRadius; // Wrap to left edge
+        }
+      }
     }
-    if (this.x > world.borderRadius) {
-      this.x -= world.borderRadius * 2;
-    }
-    if (this.y < -world.borderRadius) {
-      this.y += world.borderRadius * 2;
-    }
-    if (this.y > world.borderRadius) {
-      this.y -= world.borderRadius * 2;
+
+    // Check Y-axis wrapping
+    const beyondTopBorder = this.y < -borderRadius;
+    const beyondBottomBorder = this.y > borderRadius;
+    const isBeyondBorderY = beyondTopBorder || beyondBottomBorder;
+
+    if (isBeyondBorderY) {
+      const distanceBeyondBorder = beyondTopBorder
+        ? -borderRadius - this.y
+        : this.y - borderRadius;
+
+      const isMovingTowardsEdge =
+        (beyondTopBorder && this.vy < 0) ||
+        (beyondBottomBorder && this.vy > 0);
+
+      // Wrap if more than threshold away OR if moving towards edge
+      if (distanceBeyondBorder > wrapThreshold || isMovingTowardsEdge) {
+        if (beyondTopBorder) {
+          this.y = borderRadius; // Wrap to bottom edge
+        } else {
+          this.y = -borderRadius; // Wrap to top edge
+        }
+      }
     }
   }
 

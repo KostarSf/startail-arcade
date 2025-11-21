@@ -10,6 +10,7 @@ export class Engine {
     collisions: false,
     lifecycle: false,
     ticksDuration: false,
+    asteroids: false,
   };
 
   network: EngineNetwork;

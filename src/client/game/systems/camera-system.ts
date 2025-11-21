@@ -5,60 +5,192 @@ import type { ClientServices } from "../types";
 
 type Point = { x: number; y: number };
 
-const clamp = (value: number, min: number, max: number) =>
-  Math.max(min, Math.min(max, value));
+interface CameraTarget {
+  x: number;
+  y: number;
+  scale: number;
+}
 
-const averagePoint = (points: Point[]): Point => {
-  if (points.length === 0) {
-    return { x: 0, y: 0 };
-  }
-  const sum = points.reduce(
-    (acc, point) => {
-      acc.x += point.x;
-      acc.y += point.y;
-      return acc;
-    },
-    { x: 0, y: 0 }
-  );
-  return {
-    x: sum.x / points.length,
-    y: sum.y / points.length,
-  };
-};
+// Time in seconds to reach target (0 = instant, 0.1 = 100ms, etc.)
+let TARGET_POSITION_LERP_TIME = 0.1; // seconds
+let TARGET_SCALE_LERP_TIME = 0.2; // seconds
 
-const clampPointToRadius = (
-  origin: Point,
-  target: Point,
-  maxRadius: number
-): Point => {
-  const dx = target.x - origin.x;
-  const dy = target.y - origin.y;
-  const distance = Math.hypot(dx, dy);
+// Initial target values
+const INITIAL_TARGET_X = 0;
+const INITIAL_TARGET_Y = 0;
+const INITIAL_TARGET_SCALE = 1;
 
-  if (distance === 0 || distance <= maxRadius) {
-    return target;
-  }
-
-  const scale = maxRadius / distance;
-  return {
-    x: origin.x + dx * scale,
-    y: origin.y + dy * scale,
-  };
-};
-
-const MAX_CAMERA_TARGET_RADIUS = 150;
-const MOVING_SPEED_THRESHOLD = 10;
-
-// Speed threshold for continuous shake (from 50)
+// Shake constants
 const SPEED_SHAKE_THRESHOLD = 50;
+const MAX_PLAYER_SPEED = 500;
+const MAX_ACCELERATION_SHAKE_AMPLITUDE = 2;
+const MIN_SPEED_FOR_SHAKE = 10;
 
-let lastPlayerPos: Point | null = null;
-let lastCameraCenter: Point | null = null;
+// Zoom constants
+const MAX_ZOOM_WHEN_STILL = 2;
+const MIN_ZOOM_WHEN_MOVING = 1;
+const PLAYER_SPEED_FOR_MIN_ZOOM = 350; // Speed at which zoom becomes minimal
+
+// Camera target state
+let cameraTarget: CameraTarget = {
+  x: INITIAL_TARGET_X,
+  y: INITIAL_TARGET_Y,
+  scale: INITIAL_TARGET_SCALE,
+};
+
+// Track if camera has been initialized
 let cameraInitialized = false;
 
+// Track last player position to detect warping
+let lastPlayerPosition: Point | null = null;
+
+// Track player death position to keep camera target there until respawn
+let deathPosition: Point | null = null;
+let wasPlayerAlive = false;
+
 /**
- * Smoothly follows the player ship, applies auto-zoom, and drives parallax
- * starfield updates based on the active camera transform.
+ * Calculates camera zoom value based on current player speed.
+ * Uses linear interpolation between max zoom (when still) and min zoom (when moving).
+ * @param currentSpeed - Current player speed
+ * @param targetSpeed - Target speed at which zoom becomes minimal
+ * @param dt - Delta time in seconds
+ * @param currentZoom - Current zoom value to lerp from
+ * @returns Zoom value between MIN_ZOOM_WHEN_MOVING and MAX_ZOOM_WHEN_STILL
+ */
+function calculateZoomFromSpeed(
+  currentSpeed: number,
+  targetSpeed: number,
+  dt: number,
+  currentZoom: number
+): number {
+  // Clamp speed to [0, targetSpeed] for interpolation
+  const clampedSpeed = Math.max(0, Math.min(currentSpeed, targetSpeed));
+
+  // Linear interpolation: 0 speed = max zoom, targetSpeed = min zoom
+  const t = clampedSpeed / targetSpeed;
+  const targetZoom = lerp(MAX_ZOOM_WHEN_STILL, MIN_ZOOM_WHEN_MOVING, t);
+
+
+  const scaleLerpFactor = Math.min(1 - Math.exp(-dt / 0.03), 1);
+
+  // Lerp from current zoom to target zoom
+  // For now, use lerp factor of 1 (instant) to preserve same behavior
+  return lerp(currentZoom, targetZoom, scaleLerpFactor);
+}
+
+/**
+ * Updates the camera target based on current player state and actions.
+ * This function defines the behavior of where the camera should focus.
+ * @param services - Client services
+ * @param dt - Delta time in seconds
+ * @param currentZoom - Current camera zoom value
+ */
+function updateCameraTarget(services: ClientServices, dt: number, currentZoom: number): void {
+  const { player, stores } = services;
+
+  if (player.entityId === null) {
+    // Player is dead or not spawned - reset target scale to initial
+    cameraTarget.scale = INITIAL_TARGET_SCALE;
+
+    // Keep target position at death position until respawn
+    if (deathPosition) {
+      cameraTarget.x = deathPosition.x;
+      cameraTarget.y = deathPosition.y;
+    }
+    return;
+  }
+
+  // Player is on stage - update target based on player's current state
+  const transform = stores.transform.get(player.entityId);
+  const velocity = stores.velocity.get(player.entityId);
+  const shipControl = stores.shipControl.get(player.entityId);
+
+  if (!transform) {
+    return;
+  }
+
+  // If player just respawned (was dead, now alive), clear death position
+  if (deathPosition !== null) {
+    deathPosition = null;
+  }
+
+  // Current behavior: stick target position to player position
+  // This is where we'll add more complex logic based on player actions
+  cameraTarget.x = transform.x;
+  cameraTarget.y = transform.y;
+
+  // Calculate zoom based on player speed
+  if (velocity) {
+    const speed = Math.hypot(velocity.vx, velocity.vy);
+    cameraTarget.scale = calculateZoomFromSpeed(
+      speed,
+      PLAYER_SPEED_FOR_MIN_ZOOM,
+      dt,
+      currentZoom
+    );
+  } else {
+    // If no velocity, lerp to max zoom (still)
+    cameraTarget.scale = lerp(currentZoom, MAX_ZOOM_WHEN_STILL, 1);
+  }
+}
+
+/**
+ * Updates shake amplitudes based on player state and actions.
+ */
+function updateShakeAmplitudes(services: ClientServices): void {
+  const { player, stores, cameraShake } = services;
+
+  if (player.entityId === null) {
+    // Disable shake when player is dead
+    cameraShake.setContinuousShake(0);
+    cameraShake.setAccelerationShake(0);
+    return;
+  }
+
+  const transform = stores.transform.get(player.entityId);
+  const velocity = stores.velocity.get(player.entityId);
+  const shipControl = stores.shipControl.get(player.entityId);
+
+  if (!velocity) {
+    return;
+  }
+
+  const speed = Math.hypot(velocity.vx, velocity.vy);
+
+  // Continuous shake when moving fast
+  if (speed >= SPEED_SHAKE_THRESHOLD) {
+    const speedShakeAmplitude =
+      inverseLerp(speed, SPEED_SHAKE_THRESHOLD, MAX_PLAYER_SPEED) * 0.2;
+    cameraShake.setContinuousShake(speedShakeAmplitude);
+  } else {
+    cameraShake.setContinuousShake(0);
+  }
+
+  // Acceleration shake while thrusting
+  if (shipControl && shipControl.thrust && transform) {
+    // Calculate drift (angle difference between ship facing and velocity direction)
+    let drift = 0;
+    if (speed > 0.01) {
+      const velocityAngle = Math.atan2(velocity.vy, velocity.vx);
+      let angleDiff = Math.abs(transform.angle - velocityAngle);
+      angleDiff = Math.min(angleDiff, Math.PI * 2 - angleDiff);
+      drift = inverseLerp(angleDiff, 0, Math.PI); // 0 = aligned, 1 = perpendicular
+    }
+
+    const speedFactor = inverseLerp(speed, MIN_SPEED_FOR_SHAKE, MAX_PLAYER_SPEED);
+    const driftFactor = 1.0 + drift; // Range: 1.0 (no drift) to 2.0 (max drift)
+    const accelerationShakeAmplitude =
+      MAX_ACCELERATION_SHAKE_AMPLITUDE * speedFactor * driftFactor;
+
+    cameraShake.setAccelerationShake(accelerationShakeAmplitude);
+  } else {
+    cameraShake.setAccelerationShake(0);
+  }
+}
+
+/**
+ * Camera system that smoothly follows a target position and scale,
+ * applies shake effects, and updates the starfield.
  */
 export const CameraSystem: System<ClientServices> = {
   id: "camera-system",
@@ -67,223 +199,145 @@ export const CameraSystem: System<ClientServices> = {
   tick({ services, dt }) {
     const {
       pixi: { app, camera, starfield },
-      player,
-      world,
-      stores,
-      controls,
       cameraShake,
     } = services;
 
     app.canvas.width = window.innerWidth;
     app.canvas.height = window.innerHeight;
 
-    if (player.entityId === null) {
-      lastPlayerPos = null;
-      lastCameraCenter = null;
-
-      const renderWidth = services.pixi.renderWidth;
-      const renderHeight = services.pixi.renderHeight;
-
-      // Skip if dimensions are not ready yet
-      if (renderWidth === 0 || renderHeight === 0) {
-        return;
-      }
-
-      const defaultScale = 1.0;
-
-      // Use death position if player died, otherwise show world center (0, 0) on game start
-      const stats = services.stats();
-      const targetWorldPos = stats.deathPosition ?? { x: 0, y: 0 };
-
-      const targetX = targetWorldPos.x * defaultScale - renderWidth / 2;
-      const targetY = targetWorldPos.y * defaultScale - renderHeight / 2;
-
-      // Update shake and get offset
-      const shakeOffset = cameraShake.update(dt);
-
-      // On first frame or if camera hasn't been initialized, set immediately
-      if (!cameraInitialized || (camera.x === 0 && camera.y === 0)) {
-        camera.x = -targetX + shakeOffset.x;
-        camera.y = -targetY + shakeOffset.y;
-        camera.scale.set(defaultScale);
-        cameraInitialized = true;
-      } else {
-        camera.x = -lerp(-camera.x, targetX, dt * 6) + shakeOffset.x;
-        camera.y = -lerp(-camera.y, targetY, dt * 6) + shakeOffset.y;
-        camera.scale.set(lerp(camera.scale.x, defaultScale, dt * 5));
-      }
-
-      // Update starfield
-      starfield.update(
-        dt * 1000,
-        camera.x,
-        camera.y,
-        defaultScale,
-        renderWidth,
-        renderHeight,
-        shakeOffset.x * 0.5,
-        shakeOffset.y * 0.5
-      );
-
-      return;
-    }
-
-    // Mark camera as initialized once we have a player
-    cameraInitialized = true;
-
-    const transform = stores.transform.get(player.entityId);
-    const velocity = stores.velocity.get(player.entityId);
-    const shipControl = stores.shipControl.get(player.entityId);
-    if (!transform || !velocity) {
-      lastPlayerPos = null;
-      lastCameraCenter = null;
-      return;
-    }
-
-    const currentPlayerPos: Point = { x: transform.x, y: transform.y };
-    const worldRadius = world.radius;
-    let didTeleport = false;
-
-    if (lastPlayerPos) {
-      const dx = currentPlayerPos.x - lastPlayerPos.x;
-      const dy = currentPlayerPos.y - lastPlayerPos.y;
-      const distance = Math.hypot(dx, dy);
-      if (distance > worldRadius) {
-        didTeleport = true;
-      }
-    }
-
-    const speed = Math.hypot(velocity.vx, velocity.vy);
-    const MIN_CAMERA_ZOOM = 1.2;
-    const MAX_CAMERA_ZOOM = 1.9;
-    const MAX_PLAYER_SPEED = 500;
-    const targetScale = clamp(
-      MAX_CAMERA_ZOOM - inverseLerp(speed, 0, MAX_PLAYER_SPEED),
-      MIN_CAMERA_ZOOM,
-      MAX_CAMERA_ZOOM
-    );
-    const currentScale = camera.scale.x;
-    const newScale = lerp(currentScale, targetScale, dt * 5);
-
-    // Continuous shake when moving fast (speed >= 50)
-    // Amplitude scales with speed from 0 (at 50) to very small (at max speed)
-    if (speed >= SPEED_SHAKE_THRESHOLD) {
-      const speedShakeAmplitude = inverseLerp(
-        speed,
-        SPEED_SHAKE_THRESHOLD,
-        MAX_PLAYER_SPEED
-      ) * 0.2; // Almost completely removed, max 0.2 pixels
-      cameraShake.setContinuousShake(speedShakeAmplitude);
-    } else {
-      cameraShake.setContinuousShake(0);
-    }
-
-    // Continuous shake while accelerating (thrust is active)
-    // Amplitude depends on speed and drift
-    if (shipControl && shipControl.thrust) {
-      // Calculate drift (angle difference between ship facing and velocity direction)
-      let drift = 0;
-      if (speed > 0.01) {
-        const velocityAngle = Math.atan2(velocity.vy, velocity.vx);
-        let angleDiff = Math.abs(transform.angle - velocityAngle);
-        angleDiff = Math.min(angleDiff, Math.PI * 2 - angleDiff);
-        drift = inverseLerp(angleDiff, 0, Math.PI); // 0 = aligned, 1 = perpendicular
-      }
-
-      // Base amplitude scales with speed (smaller at low speed)
-      const MAX_ACCELERATION_SHAKE_AMPLITUDE = 2; // Max amplitude at high speed
-      const MIN_SPEED_FOR_SHAKE = 10; // Minimum speed to start feeling shake
-      const speedFactor = inverseLerp(speed, MIN_SPEED_FOR_SHAKE, MAX_PLAYER_SPEED);
-
-      // Drift factor: higher drift = more shake (1.0 base + up to 1.0 from drift)
-      const driftFactor = 1.0 + drift; // Range: 1.0 (no drift) to 2.0 (max drift)
-
-      // Final amplitude = base * speed factor * drift factor
-      const accelerationShakeAmplitude = MAX_ACCELERATION_SHAKE_AMPLITUDE * speedFactor * driftFactor;
-
-      cameraShake.setAccelerationShake(accelerationShakeAmplitude);
-    } else {
-      cameraShake.setAccelerationShake(0);
-    }
-
-    const cursorWorld =
-      controls.cursorWorld ?? {
-        x: transform.x,
-        y: transform.y,
-      };
-
     const renderWidth = services.pixi.renderWidth;
     const renderHeight = services.pixi.renderHeight;
 
-    const shipTarget: Point =
-      speed > MOVING_SPEED_THRESHOLD
-        ? {
-            x: transform.x + velocity.vx,
-            y: transform.y + velocity.vy,
-          }
-        : {
-            x: transform.x,
-            y: transform.y,
-          };
+    // Skip if dimensions are not ready yet
+    if (renderWidth === 0 || renderHeight === 0) {
+      return;
+    }
 
-    // Calculate center point on ship-cursor segment, then average with ship position
-    // This gives cursor half the influence (25% instead of 50%)
-    const shipCursorMidpoint: Point = {
-      x: (shipTarget.x + cursorWorld.x) / 2,
-      y: (shipTarget.y + cursorWorld.y) / 2,
-    };
-    const averagedTarget = averagePoint([shipTarget, shipCursorMidpoint]);
-    const clampedTarget = clampPointToRadius(
-      { x: transform.x, y: transform.y },
-      averagedTarget,
-      MAX_CAMERA_TARGET_RADIUS
-    );
+    // Detect if player just died and capture death position
+    const isPlayerAlive = services.player.entityId !== null;
 
-    const targetX = clampedTarget.x * newScale - renderWidth / 2;
-    const targetY = clampedTarget.y * newScale - renderHeight / 2;
+    // If player just died (was alive, now dead), capture death position
+    if (wasPlayerAlive && !isPlayerAlive) {
+      // Use last known position from previous frame
+      if (lastPlayerPosition) {
+        deathPosition = { x: lastPlayerPosition.x, y: lastPlayerPosition.y };
+      }
+    }
+
+    wasPlayerAlive = isPlayerAlive;
+
+    // Update camera target based on player state and actions
+    const currentZoom = camera.scale.x;
+    updateCameraTarget(services, dt, currentZoom);
+
+    // Update shake amplitudes based on player state
+    updateShakeAmplitudes(services);
+
+    // Detect if player warped (teleported to other side of game field)
+    let playerWarped = false;
+    let playerWarpDelta: Point | null = null;
+    if (services.player.entityId !== null) {
+      const transform = services.stores.transform.get(services.player.entityId);
+      if (transform && lastPlayerPosition) {
+        const dx = transform.x - lastPlayerPosition.x;
+        const dy = transform.y - lastPlayerPosition.y;
+        const distance = Math.hypot(dx, dy);
+        // If player moved more than world radius, they warped
+        if (distance > services.world.radius) {
+          playerWarped = true;
+          playerWarpDelta = { x: dx, y: dy };
+        }
+      }
+    } else {
+      // Reset last position when player dies
+      lastPlayerPosition = null;
+    }
+
+    // Initialize camera to target position on first frame
+    if (!cameraInitialized) {
+      const targetCameraX = cameraTarget.x * cameraTarget.scale - renderWidth / 2;
+      const targetCameraY = cameraTarget.y * cameraTarget.scale - renderHeight / 2;
+      camera.x = -targetCameraX;
+      camera.y = -targetCameraY;
+      camera.scale.set(cameraTarget.scale);
+      cameraInitialized = true;
+    } else if (playerWarped && playerWarpDelta) {
+      // Player warped - preserve camera's lerping state by applying the same delta
+      // Convert current camera screen position to world position
+      const currentScale = camera.scale.x;
+      const currentCameraWorldX = (-camera.x + renderWidth / 2) / currentScale;
+      const currentCameraWorldY = (-camera.y + renderHeight / 2) / currentScale;
+
+      // Apply the player's warp delta to camera world position
+      const newCameraWorldX = currentCameraWorldX + playerWarpDelta.x;
+      const newCameraWorldY = currentCameraWorldY + playerWarpDelta.y;
+
+      // Convert back to screen coordinates
+      camera.x = -(newCameraWorldX * cameraTarget.scale - renderWidth / 2);
+      camera.y = -(newCameraWorldY * cameraTarget.scale - renderHeight / 2);
+      camera.scale.set(cameraTarget.scale);
+    } else {
+      // Get current camera world-space center point (before scale change)
+      const oldScale = camera.scale.x;
+      const currentCameraWorldX = (-camera.x + renderWidth / 2) / oldScale;
+      const currentCameraWorldY = (-camera.y + renderHeight / 2) / oldScale;
+
+      // Lerp camera scale to target
+      let newScale: number;
+      if (TARGET_SCALE_LERP_TIME === 0) {
+        // Instant snap
+        newScale = cameraTarget.scale;
+        camera.scale.set(newScale);
+      } else {
+        // Exponential decay lerp over specified time
+        const scaleLerpFactor = Math.min(1 - Math.exp(-dt / TARGET_SCALE_LERP_TIME), 1);
+        newScale = lerp(oldScale, cameraTarget.scale, scaleLerpFactor);
+        camera.scale.set(newScale);
+      }
+
+      // Adjust camera position to maintain same world-space center when scale changes
+      // This prevents bouncing when zoom changes dynamically
+      const adjustedCameraX = -(currentCameraWorldX * newScale - renderWidth / 2);
+      const adjustedCameraY = -(currentCameraWorldY * newScale - renderHeight / 2);
+
+      // Calculate position target using the new scale
+      const targetCameraX = cameraTarget.x * newScale - renderWidth / 2;
+      const targetCameraY = cameraTarget.y * newScale - renderHeight / 2;
+
+      // Smoothly lerp camera position to target (starting from adjusted position)
+      if (TARGET_POSITION_LERP_TIME === 0) {
+        // Instant snap
+        camera.x = -targetCameraX;
+        camera.y = -targetCameraY;
+      } else {
+        // Exponential decay lerp over specified time
+        const positionLerpFactor = Math.min(1 - Math.exp(-dt / TARGET_POSITION_LERP_TIME), 1);
+        camera.x = -lerp(-adjustedCameraX, targetCameraX, positionLerpFactor);
+        camera.y = -lerp(-adjustedCameraY, targetCameraY, positionLerpFactor);
+      }
+    }
+
+    // Update last player position AFTER processing warp
+    if (services.player.entityId !== null) {
+      const transform = services.stores.transform.get(services.player.entityId);
+      if (transform) {
+        lastPlayerPosition = { x: transform.x, y: transform.y };
+      }
+    }
 
     // Update shake and get offset
     const shakeOffset = cameraShake.update(dt);
 
-    const canPreserveOffset = didTeleport && lastPlayerPos && lastCameraCenter;
+    // Apply shake offset to camera position
+    camera.x += shakeOffset.x;
+    camera.y += shakeOffset.y;
 
-    if (canPreserveOffset) {
-      const deltaPlayerX = currentPlayerPos.x - lastPlayerPos!.x;
-      const deltaPlayerY = currentPlayerPos.y - lastPlayerPos!.y;
-
-      const newCameraCenterX = lastCameraCenter!.x + deltaPlayerX;
-      const newCameraCenterY = lastCameraCenter!.y + deltaPlayerY;
-
-      const teleportBaseCameraX =
-        newCameraCenterX * newScale - renderWidth / 2;
-      const teleportBaseCameraY =
-        newCameraCenterY * newScale - renderHeight / 2;
-
-      camera.x = -teleportBaseCameraX + shakeOffset.x;
-      camera.y = -teleportBaseCameraY + shakeOffset.y;
-    } else {
-      camera.x = -lerp(-camera.x, targetX, dt * 6) + shakeOffset.x;
-      camera.y = -lerp(-camera.y, targetY, dt * 6) + shakeOffset.y;
-    }
-
-    camera.scale.set(newScale);
-
-    const baseCameraXCurrent = -(camera.x - shakeOffset.x);
-    const baseCameraYCurrent = -(camera.y - shakeOffset.y);
-
-    const centerWorldX =
-      (baseCameraXCurrent + renderWidth / 2) / newScale;
-    const centerWorldY =
-      (baseCameraYCurrent + renderHeight / 2) / newScale;
-
-    lastPlayerPos = { x: currentPlayerPos.x, y: currentPlayerPos.y };
-    lastCameraCenter = { x: centerWorldX, y: centerWorldY };
-
+    // Update starfield with camera position and shake offset
     starfield.update(
       dt * 1000,
       camera.x,
       camera.y,
-      newScale,
+      camera.scale.x,
       renderWidth,
       renderHeight,
       shakeOffset.x * 0.5,

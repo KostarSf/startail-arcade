@@ -325,6 +325,11 @@ export const CameraSystem: System<ClientServices> = {
       }
     }
 
+    // Calculate camera's current lerped world position (before shake is applied)
+    // This is the smooth position the camera is actually at, not the target
+    const currentCameraWorldX = (-camera.x + renderWidth / 2) / camera.scale.x;
+    const currentCameraWorldY = (-camera.y + renderHeight / 2) / camera.scale.x;
+
     // Update shake and get offset
     const shakeOffset = cameraShake.update(dt);
 
@@ -332,11 +337,12 @@ export const CameraSystem: System<ClientServices> = {
     camera.x += shakeOffset.x;
     camera.y += shakeOffset.y;
 
-    // Update starfield with camera position and shake offset
+    // Update starfield with camera's lerped world position (not target) and shake offset
+    // This ensures stars move smoothly with the camera, not teleport when target changes
     starfield.update(
       dt * 1000,
-      camera.x,
-      camera.y,
+      currentCameraWorldX,
+      currentCameraWorldY,
       camera.scale.x,
       renderWidth,
       renderHeight,

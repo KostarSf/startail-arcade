@@ -42,27 +42,22 @@ class Star {
 
   update(
     deltaTime: number,
-    cameraX: number,
-    cameraY: number,
+    cameraWorldX: number,
+    cameraWorldY: number,
     cameraScale: number,
     screenWidth: number,
     screenHeight: number,
-    scaleInfluence: number
+    scaleInfluence: number,
+    baseScale: number
   ) {
     // Обновляем позицию с учетом параллакса
-    // cameraX и cameraY - это позиция камеры (отрицательные значения)
+    // cameraWorldX и cameraWorldY - это мировая позиция камеры (передается напрямую)
     // Звезды находятся вне контейнера камеры, поэтому работаем напрямую с экранными координатами
 
-    // Используем базовый масштаб для уменьшения влияния изменения масштаба камеры
-    const baseScale = 1.5; // базовый масштаб для звезд
+    // Calculate effective scale for parallax effect only
     // Интерполируем между базовым масштабом и текущим масштабом камеры с учетом scaleInfluence
     // scaleInfluence контролирует влияние масштаба: 0 - полностью нивелируется, 1 - полное следование
     const effectiveScale = baseScale + (cameraScale - baseScale) * scaleInfluence;
-
-    // Вычисляем мировую позицию камеры с учетом effectiveScale
-    // При scaleInfluence = 0 используем baseScale, чтобы позиция не менялась при изменении масштаба
-    const cameraWorldX = -cameraX / effectiveScale;
-    const cameraWorldY = -cameraY / effectiveScale;
 
     // Вычисляем смещение звезды от камеры в мировых координатах
     let worldOffsetX = this.x - cameraWorldX;
@@ -168,6 +163,7 @@ export class Starfield {
   private stars: Star[] = [];
   private container: Container;
   private scaleInfluence: number; // влияние масштаба камеры на параллакс звезд (0-1)
+  private baseScale = 1.5; // Fixed reference scale for camera world position calculation
 
   constructor(count: number, worldWidth: number, worldHeight: number, scaleInfluence: number = 0.5) {
     this.scaleInfluence = scaleInfluence; // 0 - масштаб полностью нивелируется, 1 - полное следование масштабу
@@ -189,8 +185,8 @@ export class Starfield {
 
   update(
     deltaTime: number,
-    cameraX: number,
-    cameraY: number,
+    cameraWorldX: number,
+    cameraWorldY: number,
     cameraScale: number,
     screenWidth: number,
     screenHeight: number,
@@ -212,12 +208,13 @@ export class Starfield {
 
       star.update(
         deltaTime,
-        cameraX,
-        cameraY,
+        cameraWorldX,
+        cameraWorldY,
         cameraScale,
         screenWidth,
         screenHeight,
-        this.scaleInfluence
+        this.scaleInfluence,
+        this.baseScale
       );
 
       if (star.isExpired()) {
@@ -238,10 +235,8 @@ export class Starfield {
 
       // Создаем новую звезду на случайной позиции относительно камеры
       // Сначала создаем звезду, чтобы узнать её parallaxFactor
-      const cameraWorldX = -cameraX / cameraScale;
-      const cameraWorldY = -cameraY / cameraScale;
-      const viewWorldWidth = screenWidth / cameraScale;
-      const viewWorldHeight = screenHeight / cameraScale;
+      const viewWorldWidth = screenWidth / this.baseScale;
+      const viewWorldHeight = screenHeight / this.baseScale;
 
       // Создаем звезду с временной позицией
       const newStar = new Star(0, 0);
@@ -250,8 +245,7 @@ export class Starfield {
       // Для звезд с маленьким parallaxFactor нужна большая область генерации
       // чтобы они покрывали весь экран после применения параллакса
       // Если parallaxFactor = 0.1, то область должна быть в 10 раз больше
-      const baseScale = 1.5;
-      const effectiveScale = baseScale + (cameraScale - baseScale) * parallaxFactor * this.scaleInfluence;
+      const effectiveScale = this.baseScale + (cameraScale - this.baseScale) * parallaxFactor * this.scaleInfluence;
       // Вычисляем размер области генерации так, чтобы после применения параллакса
       // звезда могла появиться в любой точке экрана
       const generationWorldWidth = (viewWorldWidth * 2) / (parallaxFactor * effectiveScale / cameraScale);

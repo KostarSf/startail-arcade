@@ -1,3 +1,4 @@
+import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
 import { TPS } from "../constants";
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
@@ -35,7 +36,7 @@ export class Bullet extends BaseEntity {
     super(bullet);
     this.#ownerId = bullet.ownerId ?? null;
     this.life = bullet.life ?? Bullet.lifeSpan;
-    this.damage = bullet.damage ?? 25;
+    this.damage = bullet.damage ?? 10;
   }
 
   override initialize(world: World) {
@@ -68,7 +69,16 @@ export class Bullet extends BaseEntity {
     if (other === this.#owner) return;
 
     if (other instanceof LivingEntity) {
-      other.takeDamage(world, this.damage, this);
+      const speedFactor = Math.max(
+        (this.velocity.sub(other.velocity).length() -
+          SHIP_CONSTANTS.bulletSpeed -
+          100) /
+          1000,
+        0
+      );
+      const additionalDamage = Math.floor(this.damage * speedFactor * 6);
+
+      other.takeDamage(world, this.damage + additionalDamage, this);
       this.remove();
     }
   }

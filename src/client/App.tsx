@@ -34,6 +34,10 @@ function GameTagline() {
     stats.playerObject === null &&
     stats.deathPosition === null;
 
+  const showComponent = stats.playerObject === null;
+
+  if (!showComponent) return null;
+
   return (
     <div className="fixed top-20 left-0 right-0 flex justify-center z-40 pointer-events-none">
       <div className="game-tagline pointer-events-none">

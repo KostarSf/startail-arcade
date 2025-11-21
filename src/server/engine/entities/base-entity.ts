@@ -6,7 +6,9 @@ import {
 import { Vector2 } from "@/shared/math/vector";
 import type { World } from "../world/world";
 
-export type IBaseEntity = BaseEntityState;
+export type IBaseEntity = BaseEntityState & {
+  continuousCollision?: boolean;
+};
 
 export abstract class BaseEntity {
   static #nextId = 1;
@@ -27,6 +29,21 @@ export abstract class BaseEntity {
 
   /** Radius in pixels for collision detection */
   radius: number | undefined;
+
+  continuousCollision: boolean;
+
+  /** Previous position */
+  #prevPos: Vector2 | null = null;
+  get prevPos() {
+    return this.#prevPos ?? this.position;
+  }
+
+  /** True if the entity has moved since the last update */
+  get moved() {
+    const dx = this.x - this.prevPos.x;
+    const dy = this.y - this.prevPos.y;
+    return dx ** 2 + dy ** 2 > 0.0001;
+  }
 
   get position() {
     return new Vector2(this.x, this.y);
@@ -60,11 +77,13 @@ export abstract class BaseEntity {
     this.id = entity.id ?? crypto.randomUUID();
     this.x = entity.x ?? 0;
     this.y = entity.y ?? 0;
+    this.#prevPos = new Vector2(this.x, this.y);
     this.angle = entity.angle ?? 0;
     this.vx = entity.vx ?? 0;
     this.vy = entity.vy ?? 0;
     this.va = entity.va ?? 0;
     this.radius = entity.radius ?? undefined;
+    this.continuousCollision = entity.continuousCollision ?? false;
   }
 
   initialize(world: World) {
@@ -73,6 +92,10 @@ export abstract class BaseEntity {
     if (world.engine.debug.lifecycle) {
       console.log(`entity initialized: ${this.name}`);
     }
+  }
+
+  preUpdate(world: World, delta: number) {
+    this.#prevPos = this.position;
   }
 
   update(world: World, delta: number) {

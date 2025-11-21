@@ -11,7 +11,7 @@ export class World {
   #grid = new UniformGrid();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 4000;
+  #borderRadius = 5000;
 
   #engine: Engine | null = null;
   get engine() {
@@ -44,7 +44,7 @@ export class World {
   initialize(engine: Engine) {
     this.#engine = engine;
 
-    const ASTEROID_COUNT = 200;
+    const ASTEROID_COUNT = 500;
     const ASTEROID_VELOCITY = 50;
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 
@@ -75,12 +75,29 @@ export class World {
     }
   }
 
+  lastTickDuration = 0;
+
   update(delta: number) {
+    const start = performance.now();
+
+    console.log(
+      "limit:",
+      delta * 1000,
+      "\tactual:",
+      Math.round(this.lastTickDuration * 100) / 100,
+      "\tavailable:",
+      Math.floor(delta * 1000 - this.lastTickDuration)
+    );
+
     for (const entity of this.#entities.values()) {
       if (!entity.initialized) {
         entity.initialize(this);
       }
 
+      entity.preUpdate(this, delta);
+    }
+
+    for (const entity of this.#entities.values()) {
       entity.update(this, delta);
 
       if (entity.removed) {
@@ -94,6 +111,8 @@ export class World {
     }
 
     this.#collisionResolver.update(this);
+
+    this.lastTickDuration = performance.now() - start;
   }
 
   /** Query the world for entities in near chunks. */

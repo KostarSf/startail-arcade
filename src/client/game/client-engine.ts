@@ -625,28 +625,29 @@ export class ClientEngine {
     this.#connectionAttempts++;
 
     if (this.#connectionAttempts > this.#maxConnectionAttempts) {
-      console.error('[net] Max connection attempts reached, giving up');
+      console.error("[net] Max connection attempts reached, giving up");
       this.#statsGetter().setConnectionError(true);
       return;
     }
 
-    const wsUrl =
-      `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
-        window.location.host
-      }/ws`;
-    console.log(`[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`);
+    const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
+      window.location.host
+    }/ws`;
+    console.log(
+      `[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`
+    );
 
     this.#ws = new WebSocket(wsUrl);
 
     this.#ws.onopen = () => {
-      console.log('[net] Connected successfully');
+      console.log("[net] Connected successfully");
       this.#connectionAttempts = 0; // Reset on successful connection
       this.#statsGetter().setConnectionError(false);
       this.#pingTicker.start();
     };
 
     this.#ws.onerror = (error) => {
-      console.error('[net] WebSocket error:', error);
+      console.error("[net] WebSocket error:", error);
     };
 
     this.#ws.onclose = () => {
@@ -782,7 +783,9 @@ export class ClientEngine {
       fire: boolean;
       firingCompensation?: boolean;
     },
-    options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation"> }
+    options?: {
+      fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation">;
+    }
   ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
     const command: ShipInputCommand = {
@@ -802,9 +805,13 @@ export class ClientEngine {
     }
     if (includeFields.includes("fire") && command.fire) {
       payloadInput.fire = command.fire;
-    }
-    if (includeFields.includes("firingCompensation") && input.firingCompensation !== undefined && input.firingCompensation) {
-      payloadInput.firingCompensation = input.firingCompensation;
+
+      if (
+        includeFields.includes("firingCompensation") &&
+        input.firingCompensation !== undefined
+      ) {
+        payloadInput.firingCompensation = input.firingCompensation;
+      }
     }
 
     if (Object.keys(payloadInput).length === 0) {

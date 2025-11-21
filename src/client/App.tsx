@@ -17,10 +17,36 @@ export function App() {
       <div className="p-4 z-10">
         <PlayerStats />
       </div>
+      <GameTagline />
       <RespawnButton />
       <HelpButton />
       {DEBUG ? <DebugDialog /> : null}
     </>
+  );
+}
+
+function GameTagline() {
+  const stats = useStats();
+
+  // Only show tagline when player is not spawned (when respawn button would show)
+  const showTagline =
+    stats.playerId !== null &&
+    stats.playerObject === null &&
+    stats.deathPosition === null;
+
+  return (
+    <div className="fixed top-20 left-0 right-0 flex justify-center z-40 pointer-events-none">
+      <div className="game-tagline pointer-events-none">
+        <h1 className="game-title">STARTAIL ARCADE</h1>
+        {showTagline ? (
+          <>
+            <p className="tagline-line">Destroy asteroids.</p>
+            <p className="tagline-line">Eliminate rivals.</p>
+            <p className="tagline-line">Climb the leaderboard.</p>
+          </>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

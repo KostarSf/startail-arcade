@@ -14,11 +14,11 @@ canvas {
   color: #ffffff;
   border: 3px solid #ffffff;
   padding: 20px 40px;
-  font-size: 32px;
-  font-weight: bold;
-  font-family: monospace;
+  font-size: 16px;
+  font-weight: normal;
+  font-family: "Press Start 2P", monospace;
   text-transform: uppercase;
-  letter-spacing: 4px;
+  letter-spacing: 2px;
   cursor: pointer;
 
   /* Pixelated font rendering */
@@ -60,11 +60,11 @@ canvas {
   color: #ffffff;
   border: 3px solid #ffffff;
   padding: 12px 20px;
-  font-size: 18px;
-  font-weight: bold;
-  font-family: monospace;
+  font-size: 12px;
+  font-weight: normal;
+  font-family: "Press Start 2P", monospace;
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
   min-width: 300px;
   text-align: center;
 
@@ -101,6 +101,44 @@ canvas {
   letter-spacing: normal;
 }
 
+/* Game tagline - catchy retro style */
+.game-tagline {
+  text-align: center;
+  font-family: "Press Start 2P", monospace;
+  font-weight: normal;
+  color: #ffffff;
+
+  /* Pixelated font rendering */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+.game-title {
+  font-size: 32px;
+  color: #ffff00;
+  line-height: 1.6;
+  letter-spacing: 2px;
+  margin: 0 0 24px 0;
+  text-shadow:
+    3px 3px 0 #404040,
+    6px 6px 0 #404040;
+  font-weight: normal;
+}
+
+.tagline-line {
+  font-size: 12px;
+  line-height: 2;
+  letter-spacing: 1px;
+  margin: 8px 0;
+  text-shadow:
+    2px 2px 0 #404040;
+}
+
 /* Help button - square button with question mark */
 .help-button {
   width: 40px;
@@ -108,9 +146,9 @@ canvas {
   background-color: #000000;
   color: #ffffff;
   border: 3px solid #ffffff;
-  font-size: 24px;
-  font-weight: bold;
-  font-family: monospace;
+  font-size: 20px;
+  font-weight: normal;
+  font-family: "Press Start 2P", monospace;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -175,14 +213,15 @@ canvas {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  font-family: monospace;
-  font-size: 14px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 8px;
   color: #ffffff;
   white-space: nowrap;
+  line-height: 1.8;
 }
 
 .help-key {
-  font-weight: bold;
+  font-weight: normal;
   text-transform: uppercase;
   color: #ffffff;
   min-width: 70px;

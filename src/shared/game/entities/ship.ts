@@ -1,5 +1,6 @@
 import { inverseLerp } from "@/shared/math/utils";
 
+import { Vector2 } from "@/shared/math/vector";
 import type { BaseEntityState } from "./base";
 
 export interface ShipState extends BaseEntityState {
@@ -29,9 +30,9 @@ export interface ShipPhysicsResult {
 export const SHIP_CONSTANTS = {
   maxSpeed: 250,
   limitThreshold: 150,
-  startBoost: 5,
-  driftBoost: 2,
-  acceleration: 50,
+  startBoost: 8,
+  driftBoost: 5,
+  acceleration: 60,
   bulletSpeed: 350,
   bulletOffset: 10,
 };
@@ -51,7 +52,8 @@ export function updateShipPhysics(
   }
 
   if (options.thrust) {
-    const multiplier =
+    // If the ship is moving faster than the limit threshold, slow down.
+    const maxSpeedLimiter =
       1 -
       inverseLerp(
         speed,
@@ -67,8 +69,16 @@ export function updateShipPhysics(
         (1 - drift) +
       SHIP_CONSTANTS.acceleration * SHIP_CONSTANTS.driftBoost * drift;
 
-    const ax = Math.cos(ship.angle) * velocity * multiplier * options.delta;
-    const ay = Math.sin(ship.angle) * velocity * multiplier * options.delta;
+    const ax =
+      Math.cos(ship.angle) *
+      velocity *
+      (maxSpeedLimiter + drift) *
+      options.delta;
+    const ay =
+      Math.sin(ship.angle) *
+      velocity *
+      (maxSpeedLimiter + drift) *
+      options.delta;
 
     ship.vx += ax;
     ship.vy += ay;
@@ -92,12 +102,17 @@ export function updateShipPhysics(
 
   const cos = Math.cos(ship.angle);
   const sin = Math.sin(ship.angle);
+  // vector from angle
+  const velocity = new Vector2(cos, sin)
+    .normalize()
+    .mul(SHIP_CONSTANTS.bulletSpeed + speed * 0.5)
+    .add(ship.vx, ship.vy);
   const bullet: BulletSpawnState = {
     x: ship.x + cos * SHIP_CONSTANTS.bulletOffset,
     y: ship.y + sin * SHIP_CONSTANTS.bulletOffset,
     angle: ship.angle,
-    vx: cos * SHIP_CONSTANTS.bulletSpeed + ship.vx,
-    vy: sin * SHIP_CONSTANTS.bulletSpeed + ship.vy,
+    vx: velocity.x,
+    vy: velocity.y,
   };
 
   return { fired: true, bullet };

@@ -68,7 +68,7 @@ const ensureRenderable = (
         texture: texture,
         anchor: 0.5,
       });
-      sprite.tint = 0x808080;
+      sprite.tint = 0xa0a0a0;
       break;
     case "bullet":
       {

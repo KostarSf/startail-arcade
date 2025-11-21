@@ -46,7 +46,7 @@ const clampPointToRadius = (
   };
 };
 
-const MAX_CAMERA_TARGET_RADIUS = 100;
+const MAX_CAMERA_TARGET_RADIUS = 150;
 const MOVING_SPEED_THRESHOLD = 10;
 
 // Speed threshold for continuous shake (from 50)
@@ -154,9 +154,9 @@ export const CameraSystem: System<ClientServices> = {
     }
 
     const speed = Math.hypot(velocity.vx, velocity.vy);
-    const MIN_CAMERA_ZOOM = 0.7;
-    const MAX_CAMERA_ZOOM = 1.7;
-    const MAX_PLAYER_SPEED = 350;
+    const MIN_CAMERA_ZOOM = 1.2;
+    const MAX_CAMERA_ZOOM = 1.9;
+    const MAX_PLAYER_SPEED = 500;
     const targetScale = clamp(
       MAX_CAMERA_ZOOM - inverseLerp(speed, 0, MAX_PLAYER_SPEED),
       MIN_CAMERA_ZOOM,

@@ -1,7 +1,9 @@
-import "./index.css";
-import { useStats } from "./store";
 import { DebugDialog } from "./DebugDialog";
 import { clientEngine } from "./engine";
+import "./index.css";
+import { useStats } from "./store";
+
+const DEBUG = true;
 
 export function App() {
   return (
@@ -10,7 +12,7 @@ export function App() {
         <PlayerStats />
       </div>
       <RespawnButton />
-      {/* <DebugDialog /> */}
+      {DEBUG ? <DebugDialog /> : null}
     </>
   );
 }
@@ -22,27 +24,33 @@ function PlayerStats() {
 
   return (
     <div className="font-mono">
-      {/* <p className="text-sm">Player ID: {stats.playerId}</p> */}
-      <p className="text-sm">
-        FPS: {Math.round(stats.fps || 0)}
-      </p>
+      {DEBUG ? <p className="text-sm">Player ID: {stats.playerId}</p> : null}
+      <p className="text-sm">FPS: {Math.round(stats.fps || 0)}</p>
       <p className="text-xs text-gray-500">Objects: {stats.objectsCount}</p>
-      {/* <p className="text-sm">
-        Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
-        {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
-      </p>
-      <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p> */}
+      {DEBUG ? (
+        <>
+          <p className="text-sm">
+            Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
+            {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
+          </p>
+          <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p>
+        </>
+      ) : null}
       {stats.hasTimeSync ? (
         <>
           <p className="text-xs text-gray-500">
             Ping: {Math.floor((stats.latency / 2) * 100) / 100}
           </p>
-          {/* <p className="text-xs text-gray-500">
-            Offset: {Math.floor(stats.offset * 100) / 100}
-          </p>
-          <p className="text-xs text-gray-500">
-            Server Time Estimated: {predictedServerTime}
-          </p> */}
+          {DEBUG ? (
+            <>
+              <p className="text-xs text-gray-500">
+                Offset: {Math.floor(stats.offset * 100) / 100}
+              </p>
+              <p className="text-xs text-gray-500">
+                Server Time Estimated: {predictedServerTime}
+              </p>
+            </>
+          ) : null}
         </>
       ) : null}
     </div>

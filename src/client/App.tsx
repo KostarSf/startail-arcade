@@ -18,6 +18,7 @@ export function App() {
         <PlayerStats />
       </div>
       <GameTagline />
+      <Leaderboard />
       <RespawnButton />
       <HelpButton />
       {DEBUG ? <DebugDialog /> : null}
@@ -140,11 +141,87 @@ function RespawnButton() {
           placeholder="Enter your name"
           maxLength={20}
         />
+        {stats.respawnError && (
+          <div className="respawn-error">{stats.respawnError}</div>
+        )}
       </div>
       <button type="submit" className="respawn-button pointer-events-auto">
         {buttonText}
       </button>
     </form>
+  );
+}
+
+function Leaderboard() {
+  const stats = useStats();
+
+  // Only show leaderboard when player is alive
+  if (!stats.playerObject) return null;
+
+  // Filter alive players and sort by score descending
+  const alivePlayers = stats.players
+    .filter((p) => p.alive)
+    .sort((a, b) => b.score - a.score);
+
+  // Take top 5
+  let topPlayers = alivePlayers.slice(0, 5);
+
+  // Always show local player - if not in top 5, add as 6th
+  const currentPlayer = stats.players.find((p) => p.id === stats.playerId);
+  const isPlayerInTop5 = topPlayers.some((p) => p.id === stats.playerId);
+
+  if (currentPlayer && currentPlayer.alive && !isPlayerInTop5) {
+    topPlayers = [...topPlayers, currentPlayer];
+  }
+
+  // Calculate score range for normalization
+  const maxScore = topPlayers[0]?.score ?? 0;
+  const minScore = topPlayers[topPlayers.length - 1]?.score ?? 0;
+  const scoreRange = maxScore - minScore;
+
+  // Total player count
+  const totalPlayers = stats.players.length;
+
+  return (
+    <div className="fixed top-4 right-4 z-10 pointer-events-none">
+      <div className="leaderboard">
+        <div className="leaderboard-title">TOP PLAYERS</div>
+        <div className="leaderboard-list">
+          {topPlayers.map((player, index) => {
+            const isCurrentPlayer = player.id === stats.playerId;
+            const normalizedScore =
+              scoreRange > 0 ? (player.score - minScore) / scoreRange : 1;
+            const barWidth = Math.max(normalizedScore * 240, 24); // Min 24px
+
+            // Show separator before 6th player if it's the current player
+            const showSeparator = index === 5 && isCurrentPlayer;
+
+            // Calculate player's actual rank in all alive players
+            const playerRank = alivePlayers.findIndex((p) => p.id === player.id) + 1;
+
+            return (
+              <div key={player.id}>
+                {showSeparator && <div className="leaderboard-separator" />}
+                <div className="leaderboard-item">
+                  <div
+                    className={`leaderboard-bar ${isCurrentPlayer ? "current-player" : ""}`}
+                    style={{ width: `${barWidth}px` }}
+                  />
+                  <div className="leaderboard-text">
+                    <span className="leaderboard-rank">#{playerRank}</span>
+                    <span className="leaderboard-name">{player.name}</span>
+                    <span className="leaderboard-score">{player.score}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="leaderboard-footer">
+          PLAYERS: {totalPlayers}
+        </div>
+      </div>
+    </div>
   );
 }
 

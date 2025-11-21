@@ -226,5 +226,6 @@ export class World {
     this.#engine = null;
     this.#entities.clear();
     this.#grid.clear();
+    this.#currentAsteroids = 0;
   }
 }

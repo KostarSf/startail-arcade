@@ -56,15 +56,13 @@ const spawnDamageText = (
     text: `-${Math.round(payload.amount)}`,
     style: {
       fill: 0xfff18a,
-      fontFamily: "Courier New, monospace",
-      fontSize: 12,
-      fontWeight: "900",
+      fontFamily: "Press Start 2P, monospace",
+      fontSize: 6,
       stroke: { color: 0x000000, width: 2 },
-      letterSpacing: 1,
-      lineHeight: 12,
     },
   });
   text.anchor.set(0.5, 1);
+  text.resolution = 2;
   text.roundPixels = true;
   if (text.texture?.source) {
     text.texture.source.scaleMode = "nearest";

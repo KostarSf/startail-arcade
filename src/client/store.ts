@@ -13,6 +13,15 @@ type StatsStoreState = {
   playerObject: Container | null;
   /** Position where player died (world coordinates) */
   deathPosition: { x: number; y: number } | null;
+  /** Leaderboard data */
+  players: Array<{
+    id: string;
+    name: string;
+    score: number;
+    alive: boolean;
+  }>;
+  /** Respawn error message */
+  respawnError: string | null;
 };
 
 type StatsStoreActions = {
@@ -24,6 +33,8 @@ type StatsStoreActions = {
   setPlayerId: (playerId: string) => void;
   setPlayerObject: (playerObject: Container | null) => void;
   setDeathPosition: (position: { x: number; y: number } | null) => void;
+  setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => void;
+  setRespawnError: (error: string | null) => void;
 };
 
 type StatsStore = StatsStoreState & StatsStoreActions;
@@ -37,14 +48,18 @@ export const useStats = create<StatsStore>((set) => ({
   playerId: null,
   playerObject: null,
   deathPosition: null,
+  players: [],
+  respawnError: null,
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
   setObjectsCount: (objectsCount: number) => set({ objectsCount }),
-   setFps: (fps: number) => set({ fps }),
+  setFps: (fps: number) => set({ fps }),
   setPlayerId: (playerId: string) => set({ playerId }),
   setPlayerObject: (playerObject: Container | null) => set({ playerObject }),
   setDeathPosition: (position: { x: number; y: number } | null) => set({ deathPosition: position }),
+  setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => set({ players }),
+  setRespawnError: (error: string | null) => set({ respawnError: error }),
 }));
 
 export const stats = () => useStats.getState();

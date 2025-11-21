@@ -233,3 +233,131 @@ canvas {
   text-align: right;
   white-space: nowrap;
 }
+
+/* Leaderboard styles */
+.leaderboard {
+  background-color: rgba(0, 0, 0, 0.85);
+  border: 3px solid #ffffff;
+  padding: 14px;
+  min-width: 320px;
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffffff;
+  font-family: "Press Start 2P", monospace;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+}
+
+.leaderboard-title {
+  font-size: 12px;
+  color: #ffff00;
+  text-align: center;
+  margin-bottom: 14px;
+  letter-spacing: 1.2px;
+  text-shadow: 2px 2px 0 #404040;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.leaderboard-separator {
+  height: 2px;
+  background-color: #ffffff;
+  margin: 7px 0;
+  opacity: 0.3;
+}
+
+.leaderboard-item {
+  position: relative;
+  height: 24px;
+  display: flex;
+  align-items: center;
+}
+
+.leaderboard-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background-color: #ffffff;
+  box-shadow: 2px 2px 0 0 rgba(255, 255, 255, 0.3);
+  transition: width 0.3s ease;
+}
+
+.leaderboard-bar.current-player {
+  background-color: #ffff00;
+  box-shadow: 2px 2px 0 0 rgba(255, 255, 0, 0.3);
+}
+
+.leaderboard-text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 10px;
+  font-size: 8px;
+  letter-spacing: 0.6px;
+  pointer-events: none;
+}
+
+.leaderboard-rank {
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 20px;
+  text-shadow: 1px 1px 0px black, -1px 1px 0px black, 1px -1px 0px black, -1px -1px 0px black;
+}
+
+.leaderboard-name {
+  white-space: nowrap;
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+  text-shadow: 1px 1px 0px black, -1px 1px 0px black, 1px -1px 0px black, -1px -1px 0px black;
+}
+
+.leaderboard-score {
+  color: #ffffff;
+  margin-left: 8px;
+  white-space: nowrap;
+  font-weight: bold;
+  text-shadow: 1px 1px 0px black, -1px 1px 0px black, 1px -1px 0px black, -1px -1px 0px black;
+}
+
+.leaderboard-footer {
+  font-size: 8px;
+  color: #cccccc;
+  text-align: center;
+  padding-top: 10px;
+  border-top: 2px solid #ffffff;
+  letter-spacing: 1.2px;
+}
+
+/* Respawn error message */
+.respawn-error {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background-color: #000000;
+  border: 2px solid #ff0000;
+  color: #ff0000;
+  font-family: "Press Start 2P", monospace;
+  font-size: 8px;
+  text-align: center;
+  letter-spacing: 1px;
+  box-shadow:
+    0 0 0 2px #000000,
+    3px 3px 0 0 #ff0000;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+}

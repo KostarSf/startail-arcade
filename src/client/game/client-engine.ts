@@ -653,6 +653,11 @@ export class ClientEngine {
         break;
       case "server:state":
         this.#snapshotBuffer.add(message);
+        // Update leaderboard data
+        this.#statsGetter().setPlayers(message.players);
+        break;
+      case "server:respawn-denied":
+        this.#statsGetter().setRespawnError(message.reason);
         break;
       case "entity:damage":
         if (!this.#services) break;
@@ -888,8 +893,9 @@ export class ClientEngine {
     this.#inputBuffer.reset();
     this.#inputSequence = 0;
 
-    // Clear death position when respawning
+    // Clear death position and respawn error when respawning
     this.#statsGetter().setDeathPosition(null);
+    this.#statsGetter().setRespawnError(null);
 
     // Send respawn command to server
     const payload = event({

@@ -77,6 +77,25 @@ export const RenderSystem: System<ClientServices> = {
       return gfx;
     };
 
+    const ensureTextChild = (parent: Container, childName: string) => {
+      let text = parent.getChildByName(childName) as Text | null;
+      if (!text) {
+        text = new Text({
+          text: "",
+          style: {
+            fill: 0xffffff,
+            fontSize: 6,
+            fontFamily: "Press Start 2P, monospace",
+          },
+        });
+        text.name = childName;
+        text.anchor.set(0.5, 1);
+        text.resolution = 2;
+        parent.addChild(text);
+      }
+      return text;
+    };
+
     const updateShipBars = (
       entityId: number,
       transform: { x: number; y: number },
@@ -87,6 +106,7 @@ export const RenderSystem: System<ClientServices> = {
         maxEnergy?: number;
         radius?: number;
         id: string;
+        name: string;
       },
       isPlayer: boolean
     ) => {
@@ -100,6 +120,17 @@ export const RenderSystem: System<ClientServices> = {
       const barHeight = 3;
       const healthYOffset = -(shipRadius + 16);
       const energyYOffset = healthYOffset + barHeight + 2;
+
+      // Add name label above health bar for enemy ships
+      if (!isPlayer) {
+        const nameLabel = ensureTextChild(uiContainer, "name-label");
+        nameLabel.text = shipState.name || "Unknown";
+        nameLabel.y = healthYOffset - 3; // 3px above health bar
+        nameLabel.x = 0;
+        nameLabel.style.fontSize = 6;
+      } else {
+        removeChildByName(uiContainer, "name-label");
+      }
 
       const getBackgroundRect = (baseY: number) => ({
         x: -barWidth / 2 - barBackgroundPadding.left,

@@ -12,9 +12,15 @@ export interface Damageable {
 export abstract class LivingEntity extends BaseEntity implements Damageable {
   health = 100;
   maxHealth = 100;
+  earnablePoints = 0;
+  #lastDamageSource: BaseEntity | undefined = undefined;
 
   get isAlive() {
     return this.health > 0 && !this.removed;
+  }
+
+  get lastDamageSource() {
+    return this.#lastDamageSource;
   }
 
   takeDamage(world: World, amount: number, source?: BaseEntity) {
@@ -24,6 +30,7 @@ export abstract class LivingEntity extends BaseEntity implements Damageable {
     if (damage <= 0) return;
 
     this.health -= damage;
+    this.#lastDamageSource = source;
 
     world.broadcast(
       event({
@@ -37,14 +44,7 @@ export abstract class LivingEntity extends BaseEntity implements Damageable {
 
     if (!this.isAlive) {
       this.remove();
-      world.broadcast(
-        event({
-          type: "entity:destroy",
-          entityId: this.id,
-          x: this.position.x,
-          y: this.position.y,
-        })
-      );
+      world.engine.network.handleEntityDestroyed(world, this, source);
     }
   }
 

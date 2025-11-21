@@ -25,6 +25,11 @@ export interface PlayerRespawnEvent {
   name: string;
 }
 
+export interface ServerRespawnDeniedEvent {
+  type: "server:respawn-denied";
+  reason: string;
+}
+
 export interface PlayerPingEvent {
   type: "player:ping";
   sequence: number;
@@ -59,6 +64,12 @@ export interface ServerStateEvent {
     energy?: number;
     maxEnergy?: number;
   }[];
+  players: {
+    id: string;
+    name: string;
+    score: number;
+    alive: boolean;
+  }[];
 }
 
 export interface EntityDamageEvent {
@@ -76,6 +87,8 @@ export interface EntityDestroyEvent {
   x: number;
   y: number;
   sourceId?: string;
+  playerId?: string;
+  score?: number;
 }
 
 export type NetworkEvent =
@@ -85,5 +98,6 @@ export type NetworkEvent =
   | PlayerPingEvent
   | ServerPongEvent
   | PlayerRespawnEvent
+  | ServerRespawnDeniedEvent
   | EntityDamageEvent
   | EntityDestroyEvent;

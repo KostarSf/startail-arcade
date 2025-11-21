@@ -881,7 +881,7 @@ export class ClientEngine {
     });
   }
 
-  respawn() {
+  respawn(name: string) {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
 
     // Reset input buffer and sequence
@@ -894,6 +894,7 @@ export class ClientEngine {
     // Send respawn command to server
     const payload = event({
       type: "player:respawn",
+      name: name,
     }).serialize();
     this.#sendWithLatency(payload);
   }

@@ -22,6 +22,7 @@ export interface PlayerSetIdEvent {
 
 export interface PlayerRespawnEvent {
   type: "player:respawn";
+  name: string;
 }
 
 export interface PlayerPingEvent {

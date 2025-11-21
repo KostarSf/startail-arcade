@@ -53,3 +53,144 @@ canvas {
     0 0 0 2px #000000,
     0 0 0 0 #ffffff;
 }
+
+/* Name input field - retro pixelated style */
+.name-input {
+  background-color: #000000;
+  color: #ffffff;
+  border: 3px solid #ffffff;
+  padding: 12px 20px;
+  font-size: 18px;
+  font-weight: bold;
+  font-family: monospace;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  min-width: 300px;
+  text-align: center;
+
+  /* Pixelated font rendering */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+
+  /* Retro game input appearance */
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffffff;
+
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.name-input:focus {
+  outline: none;
+  background-color: #ffffff;
+  color: #000000;
+  transform: translate(2px, 2px);
+  box-shadow:
+    0 0 0 2px #000000,
+    2px 2px 0 0 #ffffff;
+}
+
+.name-input::placeholder {
+  color: #666666;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Help button - square button with question mark */
+.help-button {
+  width: 40px;
+  height: 40px;
+  background-color: #000000;
+  color: #ffffff;
+  border: 3px solid #ffffff;
+  font-size: 24px;
+  font-weight: bold;
+  font-family: monospace;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Pixelated font rendering */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+
+  /* Retro game button appearance */
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffffff;
+
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.help-button:hover {
+  background-color: #ffffff;
+  color: #000000;
+  transform: translate(2px, 2px);
+  box-shadow:
+    0 0 0 2px #000000,
+    2px 2px 0 0 #ffffff;
+}
+
+.help-button:active {
+  transform: translate(4px, 4px);
+  box-shadow:
+    0 0 0 2px #000000,
+    0 0 0 0 #ffffff;
+}
+
+/* Help dialog */
+.help-dialog {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background-color: #000000;
+  border: 3px solid #ffffff;
+  padding: 12px;
+  min-width: 240px;
+  white-space: nowrap;
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffffff;
+}
+
+.help-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.help-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  font-family: monospace;
+  font-size: 14px;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.help-key {
+  font-weight: bold;
+  text-transform: uppercase;
+  color: #ffffff;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.help-action {
+  color: #cccccc;
+  text-align: right;
+  white-space: nowrap;
+}

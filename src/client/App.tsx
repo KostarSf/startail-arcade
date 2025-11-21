@@ -19,6 +19,7 @@ export function App() {
       </div>
       <GameTagline />
       <Leaderboard />
+      <Radar />
       <RespawnButton />
       <HelpButton />
       {DEBUG ? <DebugDialog /> : null}
@@ -221,6 +222,48 @@ function Leaderboard() {
           PLAYERS: {totalPlayers}
         </div>
       </div>
+    </div>
+  );
+}
+
+function Radar() {
+  const stats = useStats();
+
+  // Only show radar when player is alive
+  if (!stats.playerObject || !stats.radarData) return null;
+
+  // Account for border (3px) and padding (3px) - inner space is 144x144
+  const radarSize = 144;
+  const worldRadius = stats.worldRadius;
+
+  return (
+    <div className="radar-container">
+      {stats.radarData.map((point, index) => {
+        // Calculate normalized position (0 to 1)
+        const normalizedX = (point.x + worldRadius) / (2 * worldRadius);
+        const normalizedY = (point.y + worldRadius) / (2 * worldRadius);
+
+        // Convert to radar pixel position
+        const radarX = normalizedX * radarSize;
+        const radarY = normalizedY * radarSize;
+
+        const isPlayer = point.type === "player";
+        const dotSize = isPlayer ? 4 : 3;
+
+        return (
+          <div
+            key={`${point.type}-${index}`}
+            className={`radar-dot ${isPlayer ? "radar-dot-player" : "radar-dot-ship"}`}
+            style={{
+              left: `${radarX}px`,
+              top: `${radarY}px`,
+              width: `${dotSize}px`,
+              height: `${dotSize}px`,
+              transform: `translate(-${dotSize / 2}px, -${dotSize / 2}px)`,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -361,3 +361,37 @@ canvas {
   font-smooth: never;
   text-rendering: optimizeSpeed;
 }
+
+/* Radar styles */
+.radar-container {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  width: 150px;
+  height: 150px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 3px solid #ffffff;
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffffff;
+  z-index: 10;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 3px;
+}
+
+.radar-dot {
+  position: absolute;
+  border-radius: 50%;
+  transition: all 0.1s ease-out;
+}
+
+.radar-dot-player {
+  background: #fbbf24;
+  box-shadow: 0 0 4px #fbbf24;
+}
+
+.radar-dot-ship {
+  background: white;
+  box-shadow: 0 0 2px white;
+}

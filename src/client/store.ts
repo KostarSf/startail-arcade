@@ -22,6 +22,14 @@ type StatsStoreState = {
   }>;
   /** Respawn error message */
   respawnError: string | null;
+  /** Radar data */
+  radarData: Array<{
+    type: "player" | "ship";
+    x: number;
+    y: number;
+  }> | null;
+  /** World radius for radar calculations */
+  worldRadius: number;
 };
 
 type StatsStoreActions = {
@@ -35,6 +43,8 @@ type StatsStoreActions = {
   setDeathPosition: (position: { x: number; y: number } | null) => void;
   setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => void;
   setRespawnError: (error: string | null) => void;
+  setRadarData: (data: Array<{ type: "player" | "ship"; x: number; y: number }> | null) => void;
+  setWorldRadius: (radius: number) => void;
 };
 
 type StatsStore = StatsStoreState & StatsStoreActions;
@@ -50,6 +60,8 @@ export const useStats = create<StatsStore>((set) => ({
   deathPosition: null,
   players: [],
   respawnError: null,
+  radarData: null,
+  worldRadius: 5000,
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
@@ -60,6 +72,8 @@ export const useStats = create<StatsStore>((set) => ({
   setDeathPosition: (position: { x: number; y: number } | null) => set({ deathPosition: position }),
   setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => set({ players }),
   setRespawnError: (error: string | null) => set({ respawnError: error }),
+  setRadarData: (data: Array<{ type: "player" | "ship"; x: number; y: number }> | null) => set({ radarData: data }),
+  setWorldRadius: (radius: number) => set({ worldRadius: radius }),
 }));
 
 export const stats = () => useStats.getState();

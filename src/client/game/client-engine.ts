@@ -650,6 +650,7 @@ export class ClientEngine {
         this.#services.player.id = message.playerId;
         this.#services.world.radius = message.worldRadius;
         this.#statsGetter().setPlayerId(message.playerId);
+        this.#statsGetter().setWorldRadius(message.worldRadius);
         break;
       case "server:state":
         this.#snapshotBuffer.add(message);
@@ -686,6 +687,9 @@ export class ClientEngine {
           x: message.x,
           y: message.y,
         });
+        break;
+      case "server:radar":
+        this.#statsGetter().setRadarData(message.data);
         break;
     }
   }

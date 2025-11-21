@@ -24,6 +24,7 @@ export class Engine {
   #startTime = 0;
   #lastTime = 0;
   #accumulatedTime = 0;
+  #ticksSinceLastRadar = 0;
 
   get tick() {
     return this.#tick;
@@ -91,6 +92,13 @@ export class Engine {
     this.#tick++;
     this.#world.update(dt);
     this.network.sendServerState();
+
+    // Send radar data every second (TPS ticks)
+    this.#ticksSinceLastRadar++;
+    if (this.#ticksSinceLastRadar >= TPS) {
+      this.#ticksSinceLastRadar = 0;
+      this.network.sendRadarData();
+    }
 
     if (this.network.playerCount === 0) {
       this.stop();
@@ -358,6 +366,39 @@ class EngineNetwork {
           serverTime: this.engine.serverTime,
           entities: visibleEntities.map((entity) => entity.toJSON()),
           players: playersData,
+        }).serialize()
+      );
+    }
+  }
+
+  sendRadarData() {
+    if (!this.#bunServer) {
+      throw new Error("Bun server not set");
+    }
+
+    if (this.#players.size === 0) return;
+
+    // Get all alive players
+    const alivePlayers = this.players.filter((p) => p.isAlive);
+
+    // Send radar data to each alive player
+    for (const player of alivePlayers) {
+      const radarData: Array<{ type: "player" | "ship"; x: number; y: number }> = [];
+
+      for (const p of alivePlayers) {
+        if (!p.ship) continue;
+
+        radarData.push({
+          type: p.id === player.id ? "player" : "ship",
+          x: Math.round(p.ship.position.x * 10) / 10,
+          y: Math.round(p.ship.position.y * 10) / 10,
+        });
+      }
+
+      player.ws.send(
+        event({
+          type: "server:radar",
+          data: radarData,
         }).serialize()
       );
     }

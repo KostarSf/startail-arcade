@@ -91,6 +91,15 @@ export interface EntityDestroyEvent {
   score?: number;
 }
 
+export interface ServerRadarEvent {
+  type: "server:radar";
+  data: Array<{
+    type: "player" | "ship";
+    x: number;
+    y: number;
+  }>;
+}
+
 export type NetworkEvent =
   | PlayerInputEvent
   | ServerStateEvent
@@ -100,4 +109,5 @@ export type NetworkEvent =
   | PlayerRespawnEvent
   | ServerRespawnDeniedEvent
   | EntityDamageEvent
-  | EntityDestroyEvent;
+  | EntityDestroyEvent
+  | ServerRadarEvent;

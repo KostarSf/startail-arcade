@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <title>Not Supported - StarTail Arcade</title>
+    <style>
+      body {
+        font-family: 'Press Start 2P', cursive;
+        background-color: #000;
+        color: #fff;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+        padding: 20px;
+        text-align: center;
+      }
+      .container {
+        max-width: 600px;
+      }
+      h1 {
+        font-size: 24px;
+        margin-bottom: 30px;
+        color: #ff6b6b;
+      }
+      p {
+        font-size: 12px;
+        line-height: 1.8;
+        margin-bottom: 20px;
+        color: #ccc;
+      }
+      .icon {
+        font-size: 48px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">🚫</div>
+      <h1>NOT SUPPORTED</h1>
+      <p>
+        This game currently works on PC only.
+      </p>
+      <p>
+        Please visit us on a desktop or laptop computer to play.
+      </p>
+    </div>
+    <script>
+      (async function checkSupport() {
+        try {
+          const response = await fetch("/check-support");
+          const data = await response.json();
+          if (data.supported) {
+            window.location.href = "/";
+          }
+        } catch (error) {
+          console.error("Failed to check support:", error);
+        }
+      })();
+    </script>
+  </body>
+</html>

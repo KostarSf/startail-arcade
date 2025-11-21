@@ -1,8 +1,23 @@
 import { serve } from "bun";
 
 import index from "./client/index.html";
+import notSupported from "./client/not-supported.html";
 import { Engine } from "./server/engine/engine";
 import type { NetworkEvent } from "./shared/network/events";
+
+function isMobileUserAgent(userAgent: string): boolean {
+  const mobilePatterns = [
+    /Android/i,
+    /webOS/i,
+    /iPhone/i,
+    /iPad/i,
+    /iPod/i,
+    /BlackBerry/i,
+    /Windows Phone/i,
+    /Mobile/i,
+  ];
+  return mobilePatterns.some((pattern) => pattern.test(userAgent));
+}
 
 const engine = new Engine();
 
@@ -20,6 +35,18 @@ if (process.env.NODE_ENV !== "production") {
 
 const server = serve({
   routes: {
+    "/not-supported": notSupported,
+    "/check-support": (req) => {
+      console.log(req.url)
+      const userAgent = req.headers.get("user-agent") || "";
+      const isMobile = isMobileUserAgent(userAgent);
+      return new Response(
+        JSON.stringify({ supported: !isMobile }),
+        {
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    },
     "/ws": (req, server) => {
       if (server.upgrade(req)) {
         return new Response(null, { status: 101 });

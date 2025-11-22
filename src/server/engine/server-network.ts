@@ -393,8 +393,12 @@ export class ServerNetwork {
       // Use camera view bounds with 10% offset
       const expandedWidth = player.cameraViewBounds.width * 1.25;
       const expandedHeight = player.cameraViewBounds.height * 1.25;
+
       return {
-        queryRadius: Math.max(expandedWidth, expandedHeight) / 2,
+        queryRadius: Math.min(
+          Math.max(expandedWidth, expandedHeight) / 2,
+          1300
+        ),
         queryPos: new Vector2(
           player.cameraViewBounds.centerX,
           player.cameraViewBounds.centerY
@@ -474,7 +478,9 @@ export class ServerNetwork {
           removedSet.add(playerShip.id);
         } else {
           // Always include player ship updates if not in view
-          const wasPreviouslyVisible = player.lastSeenEntityIds.has(playerShip.id);
+          const wasPreviouslyVisible = player.lastSeenEntityIds.has(
+            playerShip.id
+          );
           const hasChanged = playerShip.changed;
           if (!wasPreviouslyVisible || hasChanged) {
             updated.push(playerShip.toJSON());

@@ -71,6 +71,14 @@ let lastSentCameraBounds: {
 const CAMERA_BOUNDS_THROTTLE_MS = 100;
 let lastCameraBoundsSendTime = 0;
 
+// Track camera velocity for extrapolation
+let lastCameraPosition: { x: number; y: number; time: number } | null = null;
+let cameraVelocity: { vx: number; vy: number } = { vx: 0, vy: 0 };
+// Smoothed velocity to reduce sudden changes
+let smoothedVelocity: { vx: number; vy: number } = { vx: 0, vy: 0 };
+const VELOCITY_SMOOTHING_FACTOR = 0.3; // How much to blend new velocity (0-1, lower = more smoothing)
+const MAX_EXTRAPOLATION_TIME_MS = 100; // Maximum time to extrapolate forward (ms)
+
 /**
  * Clamps a point's magnitude to a maximum distance while preserving direction.
  * @param point - Point to clamp
@@ -217,7 +225,7 @@ function updateCameraTarget(
     cameraTarget.y = staticModeTargetPosition.y;
 
     // Set scale to 1
-    cameraTarget.scale = 0.9;
+    cameraTarget.scale = 1.1;
     return;
   }
 
@@ -489,6 +497,28 @@ export const CameraSystem: System<ClientServices> = {
     const currentCameraWorldX = (-camera.x + renderWidth / 2) / camera.scale.x;
     const currentCameraWorldY = (-camera.y + renderHeight / 2) / camera.scale.x;
 
+    // Track camera velocity for extrapolation
+    const now = performance.now();
+    if (lastCameraPosition) {
+      const dtSeconds = (now - lastCameraPosition.time) / 1000;
+      if (dtSeconds > 0 && dtSeconds < 1) {
+        // Calculate instantaneous velocity in world units per second
+        const instantVx = (currentCameraWorldX - lastCameraPosition.x) / dtSeconds;
+        const instantVy = (currentCameraWorldY - lastCameraPosition.y) / dtSeconds;
+
+        // Smooth velocity to reduce sudden changes (exponential moving average)
+        cameraVelocity.vx = instantVx;
+        cameraVelocity.vy = instantVy;
+        smoothedVelocity.vx = smoothedVelocity.vx * (1 - VELOCITY_SMOOTHING_FACTOR) + instantVx * VELOCITY_SMOOTHING_FACTOR;
+        smoothedVelocity.vy = smoothedVelocity.vy * (1 - VELOCITY_SMOOTHING_FACTOR) + instantVy * VELOCITY_SMOOTHING_FACTOR;
+      }
+    }
+    lastCameraPosition = {
+      x: currentCameraWorldX,
+      y: currentCameraWorldY,
+      time: now,
+    };
+
     // Update shake and get offset
     const shakeOffset = cameraShake.update(dt);
 
@@ -521,7 +551,6 @@ export const CameraSystem: System<ClientServices> = {
       const threshold = minDimension * 0.05; // 5% of minimum dimension
 
       // Check if enough time has passed since last send (throttle to max 10 per second)
-      const now = performance.now();
       const timeSinceLastSend = now - lastCameraBoundsSendTime;
       const throttleElapsed = timeSinceLastSend >= CAMERA_BOUNDS_THROTTLE_MS;
 
@@ -533,10 +562,21 @@ export const CameraSystem: System<ClientServices> = {
         Math.abs(viewWidth - lastSentCameraBounds.width) > threshold ||
         Math.abs(viewHeight - lastSentCameraBounds.height) > threshold;
 
+      // Calculate delta time since last send (in seconds) for extrapolation
+      // Cap extrapolation time to prevent over-extrapolation when camera slows down
+      const extrapolationTimeMs = Math.min(timeSinceLastSend, MAX_EXTRAPOLATION_TIME_MS);
+      const deltaTimeSeconds = extrapolationTimeMs / 1000;
+
+      // Use smoothed velocity for more conservative extrapolation
+      // This reduces the impact of sudden velocity changes (like when camera slows down)
+      const extrapolatedX = currentCameraWorldX + smoothedVelocity.vx * deltaTimeSeconds;
+      const extrapolatedY = currentCameraWorldY + smoothedVelocity.vy * deltaTimeSeconds;
+
       // Force send immediately if player warped (bypasses both throttle and threshold)
       // Otherwise, only send if position changed AND throttle elapsed
       if (playerWarped) {
         // Warp detected - send immediately regardless of throttle or threshold
+        // Don't extrapolate on warp since position changed instantly
         const viewBounds = {
           centerX: currentCameraWorldX,
           centerY: currentCameraWorldY,
@@ -548,9 +588,10 @@ export const CameraSystem: System<ClientServices> = {
         lastCameraBoundsSendTime = now;
       } else if (throttleElapsed && positionChanged) {
         // Normal movement - respect throttle and threshold
+        // Send extrapolated position to account for network latency
         const viewBounds = {
-          centerX: currentCameraWorldX,
-          centerY: currentCameraWorldY,
+          centerX: extrapolatedX,
+          centerY: extrapolatedY,
           width: viewWidth,
           height: viewHeight,
         };
@@ -562,6 +603,9 @@ export const CameraSystem: System<ClientServices> = {
       // Reset last sent bounds when player dies
       lastSentCameraBounds = null;
       lastCameraBoundsSendTime = 0;
+      lastCameraPosition = null;
+      cameraVelocity = { vx: 0, vy: 0 };
+      smoothedVelocity = { vx: 0, vy: 0 };
     }
   },
 };

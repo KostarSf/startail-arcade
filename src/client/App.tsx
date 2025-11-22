@@ -319,7 +319,7 @@ function ConnectionError() {
         <div className="connection-error-message">
           Unable to connect to the game server.
           <br />
-          Please check your connection and try again.
+          Please wait a bit and try again.
         </div>
         <button
           onClick={() => window.location.reload()}

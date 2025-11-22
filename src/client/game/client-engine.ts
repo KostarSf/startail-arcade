@@ -141,6 +141,9 @@ export class ClientEngine {
   #inputSequence = 0;
   #pingSequence = 0;
   #pingTicker = new Ticker();
+  #networkStatsTicker = new Ticker();
+  #inboundBytes = 0;
+  #outboundBytes = 0;
   #simulatedLatencyMs = 0;
   #drawGrid = false;
   #drawWorldBorder = false;
@@ -623,6 +626,17 @@ export class ClientEngine {
       }).serialize();
       this.#sendWithLatency(payload);
     });
+
+    this.#networkStatsTicker.minFPS = 0;
+    this.#networkStatsTicker.maxFPS = 1;
+    this.#networkStatsTicker.add(() => {
+      const inboundKB = this.#inboundBytes / 1000;
+      const outboundKB = this.#outboundBytes / 1000;
+      this.#statsGetter().setInboundBytes(inboundKB);
+      this.#statsGetter().setOutboundBytes(outboundKB);
+      this.#inboundBytes = 0;
+      this.#outboundBytes = 0;
+    });
   }
 
   #connect() {
@@ -653,6 +667,10 @@ export class ClientEngine {
       this.#connectionAttempts = 0; // Reset on successful connection
       this.#statsGetter().setConnectionError(false);
       this.#pingTicker.start();
+      this.#networkStatsTicker.start();
+      // Reset network stats counters on connect
+      this.#inboundBytes = 0;
+      this.#outboundBytes = 0;
     };
 
     this.#ws.onerror = (error) => {
@@ -663,10 +681,23 @@ export class ClientEngine {
       this.#handleDisconnect();
     };
 
-    this.#ws.onmessage = async (eventMessage) =>
+    this.#ws.onmessage = async (eventMessage) => {
+      this.#trackInboundBytes(eventMessage.data);
       await this.#networkDecoder.process(eventMessage, (message) =>
         this.#handleMessage(message)
       );
+    };
+  }
+
+  #trackInboundBytes(data: string | ArrayBuffer | Blob) {
+    if (typeof data === "string") {
+      const encoder = new TextEncoder();
+      this.#inboundBytes += encoder.encode(data).length;
+    } else if (data instanceof ArrayBuffer) {
+      this.#inboundBytes += data.byteLength;
+    } else if (data instanceof Blob) {
+      this.#inboundBytes += data.size;
+    }
   }
 
   #handleMessage(message: NetworkEvent) {
@@ -748,6 +779,7 @@ export class ClientEngine {
 
   #handleDisconnect() {
     this.#pingTicker.stop();
+    this.#networkStatsTicker.stop();
     this.#ws = null;
     this.#snapshotBuffer.clear();
     this.#inputBuffer.reset();
@@ -759,6 +791,10 @@ export class ClientEngine {
     statsStore.setHasTimeSync(false);
     statsStore.setObjectsCount(0);
     statsStore.setPlayerObject(null);
+    statsStore.setInboundBytes(0);
+    statsStore.setOutboundBytes(0);
+    this.#inboundBytes = 0;
+    this.#outboundBytes = 0;
     if (this.#services) {
       this.#services.player.entityId = null;
       this.#services.player.id = null;
@@ -920,6 +956,11 @@ export class ClientEngine {
 
   #sendWithLatency(payload: string) {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+    setTimeout(() => {
+      // Track outbound bytes
+      const encoder = new TextEncoder();
+      this.#outboundBytes += encoder.encode(payload).length;
+    });
     this.#withSimulatedLatency(() => {
       this.#ws?.send(payload);
     });

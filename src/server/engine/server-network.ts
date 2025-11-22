@@ -24,6 +24,13 @@ export class ServerPlayer {
 
   needFullState = true;
 
+  cameraViewBounds: {
+    centerX: number;
+    centerY: number;
+    width: number;
+    height: number;
+  } | null = null;
+
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
 
@@ -250,6 +257,15 @@ export class ServerNetwork {
 
         break;
 
+      case "player:camera-bounds":
+        player.cameraViewBounds = message.viewBounds;
+        console.log(
+          "camera bounds",
+          message.viewBounds.centerX,
+          message.viewBounds.centerY
+        );
+        break;
+
       case "player:respawn":
         if (player.ship && !player.ship.removed) break;
 
@@ -312,6 +328,9 @@ export class ServerNetwork {
 
     for (const player of this.#players.values()) {
       const needFullState = this.#needFullState(player);
+      if (needFullState) {
+        console.log("full state");
+      }
 
       player.ws.send(
         event({
@@ -335,13 +354,24 @@ export class ServerNetwork {
     return (
       this.#engine.debug.disablePartialStateUpdates ||
       fullStateRequested ||
+      player.ship?.wasWarped ||
       this.engine.tick % this.#keyframesRate === 0
     );
   }
 
   #getFullState(player: ServerPlayer): FullServerState {
-    const playerPos = player.ship?.position ?? Vector2.ZERO;
-    const visibleEntities = this.engine.world.query(playerPos, 900).array();
+    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
+
+    const visibleEntities = this.engine.world
+      .query(queryPos, queryRadius)
+      .array();
+
+    if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
+      const playerShip = this.#engine.world.find(player.ship.id);
+      if (playerShip && !playerShip.removed) {
+        visibleEntities.push(playerShip);
+      }
+    }
 
     return {
       type: "full",
@@ -349,14 +379,47 @@ export class ServerNetwork {
     };
   }
 
+  #calculateCameraViewBounds(player: ServerPlayer) {
+    if (player.cameraViewBounds) {
+      // Use camera view bounds with 10% offset
+      const expandedWidth = player.cameraViewBounds.width * 1.1;
+      const expandedHeight = player.cameraViewBounds.height * 1.1;
+      return {
+        queryRadius: Math.max(expandedWidth, expandedHeight) / 2,
+        queryPos: new Vector2(
+          player.cameraViewBounds.centerX,
+          player.cameraViewBounds.centerY
+        ),
+      };
+    }
+
+    // Fallback to player position with fixed radius
+    return {
+      queryPos: player.ship?.position ?? Vector2.ZERO,
+      queryRadius: 900,
+    };
+  }
+
   #getPartialState(player: ServerPlayer): PartialServerState {
-    const playerPos = player.ship?.position ?? Vector2.ZERO;
+    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
+
     const visibleEntities = this.engine.world
-      .queryChanged(playerPos, 900)
+      .queryChanged(queryPos, queryRadius)
       .array();
 
     const updated: GenericNetEntityState[] = [];
     const removed: string[] = [];
+
+    if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
+      const playerShip = this.#engine.world.find(player.ship.id);
+      if (playerShip) {
+        if (playerShip.removed) {
+          removed.push(playerShip.id);
+        } else {
+          updated.push(playerShip.toJSON());
+        }
+      }
+    }
 
     for (const entity of visibleEntities) {
       if (entity.removed) {
@@ -371,6 +434,11 @@ export class ServerNetwork {
       updated,
       removed,
     };
+  }
+
+  #playerInView(player: ServerPlayer, queryPos: Vector2, queryRadius: number) {
+    if (!player.ship) return false;
+    return player.ship.position.distance(queryPos) < queryRadius;
   }
 
   #getRadarData() {

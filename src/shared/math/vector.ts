@@ -107,6 +107,11 @@ export class Vector2 {
     );
   }
 
+  /** The distance between the vector and another vector. */
+  distance(vector: Vector2): number {
+    return Math.hypot(vector.x - this.x, vector.y - this.y);
+  }
+
   /** Clones the vector. */
   clone(): Vector2 {
     return new Vector2(this.x, this.y);

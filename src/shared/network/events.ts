@@ -91,6 +91,16 @@ export interface EntityDestroyEvent {
   score?: number;
 }
 
+export interface PlayerCameraBoundsEvent {
+  type: "player:camera-bounds";
+  viewBounds: {
+    centerX: number;
+    centerY: number;
+    width: number;
+    height: number;
+  };
+}
+
 export type NetworkEvent =
   | PlayerInputEvent
   | ServerStateEvent
@@ -100,4 +110,5 @@ export type NetworkEvent =
   | PlayerRespawnEvent
   | ServerRespawnDeniedEvent
   | EntityDamageEvent
-  | EntityDestroyEvent;
+  | EntityDestroyEvent
+  | PlayerCameraBoundsEvent;

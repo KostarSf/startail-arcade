@@ -88,9 +88,21 @@ export interface ClientServices extends Record<string, unknown> {
         angle: number;
         fire: boolean;
         firingCompensation?: boolean;
+        viewBounds?: {
+          centerX: number;
+          centerY: number;
+          width: number;
+          height: number;
+        };
       },
-      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation"> }
+      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds"> }
     ) => ShipInputCommand | null;
+    sendCameraBounds: (viewBounds: {
+      centerX: number;
+      centerY: number;
+      width: number;
+      height: number;
+    }) => void;
     predictedServerTime: () => number;
     renderDelayMs: number;
   };

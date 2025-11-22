@@ -59,6 +59,18 @@ let wasPlayerAlive = false;
 // Static mode target position (frozen when staticCamera is active)
 let staticModeTargetPosition: Point | null = null;
 
+// Track last sent camera bounds to detect significant changes
+let lastSentCameraBounds: {
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+} | null = null;
+
+// Throttle camera bounds events to max 10 per second (100ms minimum interval)
+const CAMERA_BOUNDS_THROTTLE_MS = 100;
+let lastCameraBoundsSendTime = 0;
+
 /**
  * Clamps a point's magnitude to a maximum distance while preserving direction.
  * @param point - Point to clamp
@@ -497,5 +509,49 @@ export const CameraSystem: System<ClientServices> = {
       shakeOffset.y * 0.5,
       services.controls.staticCamera
     );
+
+    // Check if camera bounds should be sent to server
+    // Only send if player is alive and camera is initialized
+    // Use camera position before shake (currentCameraWorldX/Y) since shake is visual only
+    if (services.player.id && services.player.entityId !== null && cameraInitialized) {
+      const cameraScale = camera.scale.x;
+      const viewWidth = renderWidth / cameraScale;
+      const viewHeight = renderHeight / cameraScale;
+      const minDimension = Math.min(viewWidth, viewHeight);
+      const threshold = minDimension * 0.05; // 5% of minimum dimension
+
+      // Check if enough time has passed since last send (throttle to max 10 per second)
+      const now = performance.now();
+      const timeSinceLastSend = now - lastCameraBoundsSendTime;
+      const throttleElapsed = timeSinceLastSend >= CAMERA_BOUNDS_THROTTLE_MS;
+
+      // Check if camera position changed significantly
+      const positionChanged =
+        !lastSentCameraBounds ||
+        Math.abs(currentCameraWorldX - lastSentCameraBounds.centerX) > threshold ||
+        Math.abs(currentCameraWorldY - lastSentCameraBounds.centerY) > threshold ||
+        Math.abs(viewWidth - lastSentCameraBounds.width) > threshold ||
+        Math.abs(viewHeight - lastSentCameraBounds.height) > threshold;
+
+      // Force send immediately if player warped (bypasses throttle)
+      // Otherwise, only send if position changed AND throttle elapsed
+      const shouldSend = playerWarped || (throttleElapsed && positionChanged);
+
+      if (shouldSend) {
+        const viewBounds = {
+          centerX: currentCameraWorldX,
+          centerY: currentCameraWorldY,
+          width: viewWidth,
+          height: viewHeight,
+        };
+        services.network.sendCameraBounds(viewBounds);
+        lastSentCameraBounds = viewBounds;
+        lastCameraBoundsSendTime = now;
+      }
+    } else if (!services.player.id || services.player.entityId === null) {
+      // Reset last sent bounds when player dies
+      lastSentCameraBounds = null;
+      lastCameraBoundsSendTime = 0;
+    }
   },
 };

@@ -34,6 +34,12 @@ export abstract class BaseEntity {
 
   changed = true;
 
+  #wasWarped = false;
+  /** True if the entity was warped since the last update */
+  get wasWarped() {
+    return this.#wasWarped;
+  }
+
   /** Previous position */
   #prevPos: Vector2 | null = null;
   get prevPos() {
@@ -114,6 +120,8 @@ export abstract class BaseEntity {
   }
 
   update(world: World, delta: number) {
+    this.#wasWarped = false;
+
     integrateMotion(this, delta);
 
     const borderRadius = world.borderRadius;
@@ -140,6 +148,7 @@ export abstract class BaseEntity {
           this.x = -borderRadius; // Wrap to left edge
         }
         this.markChanged();
+        this.#wasWarped = true;
       }
     }
 
@@ -164,6 +173,7 @@ export abstract class BaseEntity {
           this.y = -borderRadius; // Wrap to top edge
         }
         this.markChanged();
+        this.#wasWarped = true;
       }
     }
   }

@@ -466,6 +466,7 @@ export class ClientEngine {
       },
       network: {
         sendInput: (input, options) => this.#sendInput(input, options),
+        sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
         predictedServerTime: () => this.#predictedServerTime(),
         renderDelayMs: RENDER_DELAY_MS,
       },
@@ -822,9 +823,15 @@ export class ClientEngine {
       angle: number;
       fire: boolean;
       firingCompensation?: boolean;
+      viewBounds?: {
+        centerX: number;
+        centerY: number;
+        width: number;
+        height: number;
+      };
     },
     options?: {
-      fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation">;
+      fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds">;
     }
   ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
@@ -964,6 +971,20 @@ export class ClientEngine {
     this.#withSimulatedLatency(() => {
       this.#ws?.send(payload);
     });
+  }
+
+  #sendCameraBounds(viewBounds: {
+    centerX: number;
+    centerY: number;
+    width: number;
+    height: number;
+  }) {
+    if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+    const payload = event({
+      type: "player:camera-bounds",
+      viewBounds,
+    }).serialize();
+    this.#sendWithLatency(payload);
   }
 
   respawn(name: string) {

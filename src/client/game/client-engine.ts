@@ -38,12 +38,18 @@ import bulletTextureSrc from "../assets/images/bullet.png";
 import explosionTextureSrc from "../assets/images/explosion.png";
 import glareTextureSrc from "../assets/images/glare.png";
 import hintBwTextureSrc from "../assets/images/hint_bw.png";
+import jetstreamTextureSrc from "../assets/images/jetstream.png";
+import pirateDamaged1TextureSrc from "../assets/images/pirate-damaged-1.png";
+import pirateDamaged2TextureSrc from "../assets/images/pirate-damaged-2.png";
 import pirateTextureSrc from "../assets/images/pirate.png";
+import playerDamaged1TextureSrc from "../assets/images/player-damaged-1.png";
+import playerDamaged2TextureSrc from "../assets/images/player-damaged-2.png";
 import playerTextureSrc from "../assets/images/player.png";
 
 import { Starfield } from "../starfield";
 import { stats } from "../store";
 import { InputBuffer } from "./network/input-buffer";
+import { NetworkDecoder } from "./network/network-decoder";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { EdgeOfWorldFilter } from "./shaders/edge-of-world-filter";
 import { CameraShake } from "./systems/camera-shake";
@@ -113,7 +119,11 @@ export class ClientEngine {
 
   #textures: {
     player: Texture | null;
+    playerDamaged1: Texture | null;
+    playerDamaged2: Texture | null;
     pirate: Texture | null;
+    pirateDamaged1: Texture | null;
+    pirateDamaged2: Texture | null;
     asteroids: {
       small: Texture[];
       medium: Texture[];
@@ -124,15 +134,21 @@ export class ClientEngine {
     hint: Texture | null;
     bulletHint: Texture | null;
     explosion: Texture | null;
+    jetstream: Texture | null;
   } = {
     player: null,
+    playerDamaged1: null,
+    playerDamaged2: null,
     pirate: null,
+    pirateDamaged1: null,
+    pirateDamaged2: null,
     asteroids: { small: [], medium: [], large: [] },
     bullet: null,
     glare: null,
     hint: null,
     bulletHint: null,
     explosion: null,
+    jetstream: null,
   };
 
   #ws: WebSocket | null = null;
@@ -140,6 +156,9 @@ export class ClientEngine {
   #inputSequence = 0;
   #pingSequence = 0;
   #pingTicker = new Ticker();
+  #networkStatsTicker = new Ticker();
+  #inboundBytes = 0;
+  #outboundBytes = 0;
   #simulatedLatencyMs = 0;
   #drawGrid = false;
   #drawWorldBorder = false;
@@ -148,6 +167,12 @@ export class ClientEngine {
   #fpsLastSampleTime = 0;
   #connectionAttempts = 0;
   #maxConnectionAttempts = 5;
+
+  #networkDecoder: NetworkDecoder;
+
+  get simulatedLatencyMs() {
+    return this.#simulatedLatencyMs;
+  }
 
   constructor() {
     this.#app = new Application();
@@ -161,6 +186,8 @@ export class ClientEngine {
     this.#drawWorldBorder = this.#resolveWorldBorderFromURL();
     this.#drawGrid = this.#resolveDrawGridFromURL();
     this.#drawColliders = this.#resolveDrawCollidersFromURL();
+
+    this.#networkDecoder = new NetworkDecoder(this);
   }
 
   #resolveWorldBorderFromURL(): boolean {
@@ -440,13 +467,18 @@ export class ClientEngine {
       stats: this.#statsGetter,
       textures: {
         player: this.#textures.player,
+        playerDamaged1: this.#textures.playerDamaged1!,
+        playerDamaged2: this.#textures.playerDamaged2!,
         pirate: this.#textures.pirate,
+        pirateDamaged1: this.#textures.pirateDamaged1!,
+        pirateDamaged2: this.#textures.pirateDamaged2!,
         asteroids: this.#textures.asteroids,
         bullet: this.#textures.bullet,
         glare: this.#textures.glare!,
         hint: this.#textures.hint!,
         bulletHint: this.#textures.bulletHint!,
         explosion: this.#textures.explosion!,
+        jetstream: this.#textures.jetstream!,
       },
       player: {
         id: null,
@@ -454,6 +486,7 @@ export class ClientEngine {
       },
       network: {
         sendInput: (input, options) => this.#sendInput(input, options),
+        sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
         predictedServerTime: () => this.#predictedServerTime(),
         renderDelayMs: RENDER_DELAY_MS,
       },
@@ -614,6 +647,17 @@ export class ClientEngine {
       }).serialize();
       this.#sendWithLatency(payload);
     });
+
+    this.#networkStatsTicker.minFPS = 0;
+    this.#networkStatsTicker.maxFPS = 1;
+    this.#networkStatsTicker.add(() => {
+      const inboundKB = this.#inboundBytes / 1000;
+      const outboundKB = this.#outboundBytes / 1000;
+      this.#statsGetter().setInboundBytes(inboundKB);
+      this.#statsGetter().setOutboundBytes(outboundKB);
+      this.#inboundBytes = 0;
+      this.#outboundBytes = 0;
+    });
   }
 
   #connect() {
@@ -644,6 +688,10 @@ export class ClientEngine {
       this.#connectionAttempts = 0; // Reset on successful connection
       this.#statsGetter().setConnectionError(false);
       this.#pingTicker.start();
+      this.#networkStatsTicker.start();
+      // Reset network stats counters on connect
+      this.#inboundBytes = 0;
+      this.#outboundBytes = 0;
     };
 
     this.#ws.onerror = (error) => {
@@ -654,14 +702,23 @@ export class ClientEngine {
       this.#handleDisconnect();
     };
 
-    this.#ws.onmessage = (eventMessage) => {
-      const payload = eventMessage.data;
-      this.#withSimulatedLatency(() => {
-        const raw = typeof payload === "string" ? payload : payload.toString();
-        const message = JSON.parse(raw) as NetworkEvent;
-        this.#handleMessage(message);
-      });
+    this.#ws.onmessage = async (eventMessage) => {
+      this.#trackInboundBytes(eventMessage.data);
+      await this.#networkDecoder.process(eventMessage, (message) =>
+        this.#handleMessage(message)
+      );
     };
+  }
+
+  #trackInboundBytes(data: string | ArrayBuffer | Blob) {
+    if (typeof data === "string") {
+      const encoder = new TextEncoder();
+      this.#inboundBytes += encoder.encode(data).length;
+    } else if (data instanceof ArrayBuffer) {
+      this.#inboundBytes += data.byteLength;
+    } else if (data instanceof Blob) {
+      this.#inboundBytes += data.size;
+    }
   }
 
   #handleMessage(message: NetworkEvent) {
@@ -678,9 +735,11 @@ export class ClientEngine {
         break;
       case "server:state":
         this.#snapshotBuffer.add(message);
-        // Update leaderboard data
         this.#statsGetter().setPlayers(message.players);
         this.#statsGetter().setTickDuration(message.tickDuration);
+        if (message.radar) {
+          this.#statsGetter().setRadarData(message.radar);
+        }
         break;
       case "server:respawn-denied":
         this.#statsGetter().setRespawnError(message.reason);
@@ -713,9 +772,6 @@ export class ClientEngine {
           y: message.y,
         });
         break;
-      case "server:radar":
-        this.#statsGetter().setRadarData(message.data);
-        break;
     }
   }
 
@@ -744,6 +800,7 @@ export class ClientEngine {
 
   #handleDisconnect() {
     this.#pingTicker.stop();
+    this.#networkStatsTicker.stop();
     this.#ws = null;
     this.#snapshotBuffer.clear();
     this.#inputBuffer.reset();
@@ -755,6 +812,10 @@ export class ClientEngine {
     statsStore.setHasTimeSync(false);
     statsStore.setObjectsCount(0);
     statsStore.setPlayerObject(null);
+    statsStore.setInboundBytes(0);
+    statsStore.setOutboundBytes(0);
+    this.#inboundBytes = 0;
+    this.#outboundBytes = 0;
     if (this.#services) {
       this.#services.player.entityId = null;
       this.#services.player.id = null;
@@ -782,9 +843,15 @@ export class ClientEngine {
       angle: number;
       fire: boolean;
       firingCompensation?: boolean;
+      viewBounds?: {
+        centerX: number;
+        centerY: number;
+        width: number;
+        height: number;
+      };
     },
     options?: {
-      fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation">;
+      fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds">;
     }
   ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
@@ -834,16 +901,33 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, bullet, glare, hint, bulletHint, explosion] =
-      await Promise.all([
-        Assets.load<Texture>(playerTextureSrc),
-        Assets.load<Texture>(pirateTextureSrc),
-        Assets.load<Texture>(bulletTextureSrc),
-        Assets.load<Texture>(glareTextureSrc),
-        Assets.load<Texture>(hintBwTextureSrc),
-        Assets.load<Texture>(bulletHintTextureSrc),
-        Assets.load<Texture>(explosionTextureSrc),
-      ]);
+    const [
+      player,
+      playerDamaged1,
+      playerDamaged2,
+      pirate,
+      pirateDamaged1,
+      pirateDamaged2,
+      bullet,
+      glare,
+      hint,
+      bulletHint,
+      explosion,
+      jetstream,
+    ] = await Promise.all([
+      Assets.load<Texture>(playerTextureSrc),
+      Assets.load<Texture>(playerDamaged1TextureSrc),
+      Assets.load<Texture>(playerDamaged2TextureSrc),
+      Assets.load<Texture>(pirateTextureSrc),
+      Assets.load<Texture>(pirateDamaged1TextureSrc),
+      Assets.load<Texture>(pirateDamaged2TextureSrc),
+      Assets.load<Texture>(bulletTextureSrc),
+      Assets.load<Texture>(glareTextureSrc),
+      Assets.load<Texture>(hintBwTextureSrc),
+      Assets.load<Texture>(bulletHintTextureSrc),
+      Assets.load<Texture>(explosionTextureSrc),
+      Assets.load<Texture>(jetstreamTextureSrc),
+    ]);
 
     const [
       asteroidSmall1,
@@ -863,12 +947,17 @@ export class ClientEngine {
 
     // Ensure all textures use nearest neighbor scaling
     player.source.scaleMode = "nearest";
+    playerDamaged1.source.scaleMode = "nearest";
+    playerDamaged2.source.scaleMode = "nearest";
     pirate.source.scaleMode = "nearest";
+    pirateDamaged1.source.scaleMode = "nearest";
+    pirateDamaged2.source.scaleMode = "nearest";
     bullet.source.scaleMode = "nearest";
     glare.source.scaleMode = "nearest";
     hint.source.scaleMode = "nearest";
     bulletHint.source.scaleMode = "nearest";
     explosion.source.scaleMode = "nearest";
+    jetstream.source.scaleMode = "nearest";
 
     asteroidSmall1.source.scaleMode = "nearest";
     asteroidSmall2.source.scaleMode = "nearest";
@@ -878,7 +967,11 @@ export class ClientEngine {
     asteroidLarge2.source.scaleMode = "nearest";
 
     this.#textures.player = player;
+    this.#textures.playerDamaged1 = playerDamaged1;
+    this.#textures.playerDamaged2 = playerDamaged2;
     this.#textures.pirate = pirate;
+    this.#textures.pirateDamaged1 = pirateDamaged1;
+    this.#textures.pirateDamaged2 = pirateDamaged2;
     this.#textures.asteroids.small = [asteroidSmall1, asteroidSmall2];
     this.#textures.asteroids.medium = [asteroidMedium1, asteroidMedium2];
     this.#textures.asteroids.large = [asteroidLarge1, asteroidLarge2];
@@ -887,6 +980,7 @@ export class ClientEngine {
     this.#textures.hint = hint;
     this.#textures.bulletHint = bulletHint;
     this.#textures.explosion = explosion;
+    this.#textures.jetstream = jetstream;
   }
 
   #resolveSimulatedLatency() {
@@ -916,9 +1010,28 @@ export class ClientEngine {
 
   #sendWithLatency(payload: string) {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+
+    // Track outbound bytes
+    const encoder = new TextEncoder();
+    this.#outboundBytes += encoder.encode(payload).length;
+
     this.#withSimulatedLatency(() => {
       this.#ws?.send(payload);
     });
+  }
+
+  #sendCameraBounds(viewBounds: {
+    centerX: number;
+    centerY: number;
+    width: number;
+    height: number;
+  }) {
+    if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+    const payload = event({
+      type: "player:camera-bounds",
+      viewBounds,
+    }).serialize();
+    this.#sendWithLatency(payload);
   }
 
   respawn(name: string) {

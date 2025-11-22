@@ -62,35 +62,58 @@ function PlayerStats() {
 
   const predictedServerTime = Math.floor(performance.now() + stats.offset);
 
+  const formatNetworkSpeed = (kbPerSecond: number): string => {
+    const roundedKbPerSecond = kbPerSecond.toFixed(1);
+
+    const kbitPerSecond = kbPerSecond * 8;
+    if (kbitPerSecond >= 1000) {
+      const mbitPerSecond = kbitPerSecond / 1000;
+      return `${mbitPerSecond.toFixed(1)}mbit / ${roundedKbPerSecond}kb`;
+    }
+    return `${Math.round(kbitPerSecond)}kbit / ${roundedKbPerSecond}kb`;
+  };
+
+  const serverTickDuration = stats.tickDuration.toFixed(1);
+  const serverTps = Math.min(
+    Math.round((1000 / stats.tickDuration) * 10) / 10,
+    20
+  );
+
   return (
     <div className="font-mono">
       {DEBUG ? <p className="text-sm">Player ID: {stats.playerId}</p> : null}
       <p className="text-sm">FPS: {Math.round(stats.fps || 0)}</p>
-      <p className="text-xs text-gray-500">Objects: {stats.objectsCount}</p>
+      <p className="text-xs text-gray-500">objects: {stats.objectsCount}</p>
       {DEBUG ? (
         <>
           <p className="text-sm">
-            Position: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
+            pos: {Math.floor((stats.playerObject?.x ?? 0) * 10) / 10},{" "}
             {Math.floor((stats.playerObject?.y ?? 0) * 10) / 10}
           </p>
-          <p className="text-sm">Rotation: {stats.playerObject?.rotation}</p>
+          <p className="text-sm">rot: {stats.playerObject?.rotation}</p>
         </>
       ) : null}
       {stats.hasTimeSync ? (
         <>
           <p className="text-xs text-gray-500">
-            Ping: {Math.floor((stats.latency / 2) * 100) / 100}
+            income: {formatNetworkSpeed(stats.inboundBytesPerSecond)}
           </p>
           <p className="text-xs text-gray-500">
-            Tick: {Math.round(stats.tickDuration)}ms
+            outcome: {formatNetworkSpeed(stats.outboundBytesPerSecond)}
+          </p>
+          <p className="text-xs text-gray-500">
+            tps: {serverTps} / {serverTickDuration}ms
+          </p>
+          <p className="text-xs text-gray-500">
+            ping: {(stats.latency / 2).toFixed(1)}
           </p>
           {DEBUG ? (
             <>
               <p className="text-xs text-gray-500">
-                Offset: {Math.floor(stats.offset * 100) / 100}
+                offset: {Math.floor(stats.offset * 100) / 100}
               </p>
               <p className="text-xs text-gray-500">
-                Server Time Estimated: {predictedServerTime}
+                server time: {predictedServerTime}
               </p>
             </>
           ) : null}
@@ -106,12 +129,27 @@ function RespawnButton() {
 
   // Generate default unique 2-word name on mount
   useEffect(() => {
-    const defaultName = uniqueNamesGenerator({
-      dictionaries: [adjectives, animals],
-      separator: " ",
-      length: 2,
-      style: "capital",
-    });
+    let defaultName: string | undefined;
+
+    let attempts = 0;
+
+    while (
+      !defaultName ||
+      defaultName.length > 20 ||
+      stats.players.some((p) => p.name === defaultName)
+    ) {
+      defaultName = uniqueNamesGenerator({
+        dictionaries: [adjectives, animals],
+        separator: " ",
+        length: 2,
+        style: "capital",
+      });
+
+      attempts++;
+
+      if (attempts > 10) break;
+    }
+
     setPlayerName(defaultName);
   }, []);
 
@@ -202,14 +240,17 @@ function Leaderboard() {
             const showSeparator = index === 5 && isCurrentPlayer;
 
             // Calculate player's actual rank in all alive players
-            const playerRank = alivePlayers.findIndex((p) => p.id === player.id) + 1;
+            const playerRank =
+              alivePlayers.findIndex((p) => p.id === player.id) + 1;
 
             return (
               <div key={player.id}>
                 {showSeparator && <div className="leaderboard-separator" />}
                 <div className="leaderboard-item">
                   <div
-                    className={`leaderboard-bar ${isCurrentPlayer ? "current-player" : ""}`}
+                    className={`leaderboard-bar ${
+                      isCurrentPlayer ? "current-player" : ""
+                    }`}
                     style={{ width: `${barWidth}px` }}
                   />
                   <div className="leaderboard-text">
@@ -222,9 +263,7 @@ function Leaderboard() {
             );
           })}
         </div>
-        <div className="leaderboard-footer">
-          PLAYERS: {totalPlayers}
-        </div>
+        <div className="leaderboard-footer">PLAYERS: {totalPlayers}</div>
       </div>
     </div>
   );
@@ -257,7 +296,9 @@ function Radar() {
         return (
           <div
             key={`${point.type}-${index}`}
-            className={`radar-dot ${isPlayer ? "radar-dot-player" : "radar-dot-ship"}`}
+            className={`radar-dot ${
+              isPlayer ? "radar-dot-player" : "radar-dot-ship"
+            }`}
             style={{
               left: `${radarX}px`,
               top: `${radarY}px`,
@@ -284,7 +325,7 @@ function ConnectionError() {
         <div className="connection-error-message">
           Unable to connect to the game server.
           <br />
-          Please check your connection and try again.
+          Please wait a bit and try again.
         </div>
         <button
           onClick={() => window.location.reload()}

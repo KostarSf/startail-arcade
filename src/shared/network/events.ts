@@ -1,4 +1,4 @@
-import type { EntityType } from "../game/entities/base";
+import type { GenericNetEntityState } from "../game/entities/base";
 
 export interface PlayerInputEvent {
   type: "player:input";
@@ -47,31 +47,30 @@ export interface ServerStateEvent {
   type: "server:state";
   serverTime: number;
   tickDuration: number;
-  entities: {
-    name: string;
-    type: EntityType;
-    id: string;
-    x: number;
-    y: number;
-    angle: number;
-    vx: number;
-    vy: number;
-    va?: number;
-    radius?: number;
-    thrust?: boolean;
-    lastInputSequence?: number;
-    health?: number;
-    maxHealth?: number;
-    energy?: number;
-    maxEnergy?: number;
-  }[];
+  state: FullServerState | PartialServerState;
   players: {
     id: string;
     name: string;
     score: number;
     alive: boolean;
   }[];
+  radar?: {
+    type: "player" | "ship";
+    x: number;
+    y: number;
+  }[];
 }
+
+export type FullServerState = {
+  type: "full";
+  entities: GenericNetEntityState[];
+};
+
+export type PartialServerState = {
+  type: "partial";
+  updated: GenericNetEntityState[];
+  removed: string[];
+};
 
 export interface EntityDamageEvent {
   type: "entity:damage";
@@ -92,13 +91,14 @@ export interface EntityDestroyEvent {
   score?: number;
 }
 
-export interface ServerRadarEvent {
-  type: "server:radar";
-  data: Array<{
-    type: "player" | "ship";
-    x: number;
-    y: number;
-  }>;
+export interface PlayerCameraBoundsEvent {
+  type: "player:camera-bounds";
+  viewBounds: {
+    centerX: number;
+    centerY: number;
+    width: number;
+    height: number;
+  };
 }
 
 export type NetworkEvent =
@@ -111,4 +111,4 @@ export type NetworkEvent =
   | ServerRespawnDeniedEvent
   | EntityDamageEvent
   | EntityDestroyEvent
-  | ServerRadarEvent;
+  | PlayerCameraBoundsEvent;

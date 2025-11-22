@@ -54,6 +54,7 @@ export class Asteroid extends LivingEntity {
       this.velocity = this.velocity.add(
         direction.mul(relativeSpeed * 0.2).neg()
       );
+      this.markChanged();
       return;
     }
   }
@@ -72,6 +73,8 @@ export class Asteroid extends LivingEntity {
       // Only resolve if moving toward each other
       if (velAlongNormal < 0) return;
 
+      this.markChanged();
+
       // Coefficient of restitution (bounciness), 0 = inelastic, 1 = elastic
       const restitution = 0.7;
 
@@ -83,15 +86,15 @@ export class Asteroid extends LivingEntity {
 
       this.velocity = this.velocity.add(impulse.div(m1));
 
-    // If collision is at high speed, take damage proportional to impact speed
-    const impactSpeed = Math.abs(velAlongNormal);
-    const DAMAGE_SPEED_THRESHOLD = 50; // minimum speed before damage is applied
-    if (impactSpeed > DAMAGE_SPEED_THRESHOLD) {
-      const damage = Math.floor((impactSpeed - DAMAGE_SPEED_THRESHOLD) * 0.3); // tune multiplier as needed
-      if (damage > 0) {
-        this.takeDamage(world, damage, other);
+      // If collision is at high speed, take damage proportional to impact speed
+      const impactSpeed = Math.abs(velAlongNormal);
+      const DAMAGE_SPEED_THRESHOLD = 50; // minimum speed before damage is applied
+      if (impactSpeed > DAMAGE_SPEED_THRESHOLD) {
+        const damage = Math.floor((impactSpeed - DAMAGE_SPEED_THRESHOLD) * 0.3); // tune multiplier as needed
+        if (damage > 0) {
+          this.takeDamage(world, damage, other);
+        }
       }
-    }
     }
   }
 

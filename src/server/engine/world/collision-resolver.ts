@@ -107,7 +107,7 @@ export class CollisionResolver {
     if (earliestCollision && earliestCollision.t <= 1.0) {
       // Move entity to collision point
       const t = Math.max(0, earliestCollision.t - 0.001); // Slight offset to prevent overlap
-      entity.setPosition(prevPos.x + dx * t, prevPos.y + dy * t);
+      entity.position = new Vector2(prevPos.x + dx * t, prevPos.y + dy * t);
 
       // Mark as colliding
       const key = this.#pairKey(entity, earliestCollision.entity);

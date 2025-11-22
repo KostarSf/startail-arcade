@@ -59,6 +59,26 @@ let wasPlayerAlive = false;
 // Static mode target position (frozen when staticCamera is active)
 let staticModeTargetPosition: Point | null = null;
 
+// Track last sent camera bounds to detect significant changes
+let lastSentCameraBounds: {
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+} | null = null;
+
+// Throttle camera bounds events to max 10 per second (100ms minimum interval)
+const CAMERA_BOUNDS_THROTTLE_MS = 100;
+let lastCameraBoundsSendTime = 0;
+
+// Track camera velocity for extrapolation
+let lastCameraPosition: { x: number; y: number; time: number } | null = null;
+let cameraVelocity: { vx: number; vy: number } = { vx: 0, vy: 0 };
+// Smoothed velocity to reduce sudden changes
+let smoothedVelocity: { vx: number; vy: number } = { vx: 0, vy: 0 };
+const VELOCITY_SMOOTHING_FACTOR = 0.3; // How much to blend new velocity (0-1, lower = more smoothing)
+const MAX_EXTRAPOLATION_TIME_MS = 100; // Maximum time to extrapolate forward (ms)
+
 /**
  * Clamps a point's magnitude to a maximum distance while preserving direction.
  * @param point - Point to clamp
@@ -195,17 +215,77 @@ function updateCameraTarget(
 
   // Handle static mode (Shift held)
   if (services.controls.staticCamera) {
-    // Freeze target position at last position when entering static mode
-    if (staticModeTargetPosition === null) {
-      staticModeTargetPosition = { x: cameraTarget.x, y: cameraTarget.y };
+    // Calculate view bounds in world space
+    const cameraScale = currentZoom;
+    const viewWidth = renderWidth / cameraScale;
+    const viewHeight = renderHeight / cameraScale;
+    const viewLeft = cameraWorldPosition.x - viewWidth / 2;
+    const viewRight = cameraWorldPosition.x + viewWidth / 2;
+    const viewTop = cameraWorldPosition.y - viewHeight / 2;
+    const viewBottom = cameraWorldPosition.y + viewHeight / 2;
+
+    // Find closest enemy ship within view bounds
+    let closestEnemy: Point | null = null;
+    let closestDistance = Infinity;
+
+    for (const [serverId, entityId] of services.entityIndex.entries()) {
+      // Skip player
+      if (serverId === services.player.id) continue;
+
+      const enemyTransform = stores.transform.get(entityId);
+      const enemyNetworkState = stores.networkState.get(entityId);
+
+      // Check if it's a ship
+      if (!enemyTransform || !enemyNetworkState?.state || enemyNetworkState.state.type !== "ship") {
+        continue;
+      }
+
+      const enemyX = enemyTransform.x;
+      const enemyY = enemyTransform.y;
+
+      // Check if enemy is within view bounds
+      const isInView =
+        enemyX >= viewLeft &&
+        enemyX <= viewRight &&
+        enemyY >= viewTop &&
+        enemyY <= viewBottom;
+
+      if (!isInView) {
+        continue;
+      }
+
+      // Calculate distance to player
+      const dx = enemyX - shipPosition.x;
+      const dy = enemyY - shipPosition.y;
+      const distance = Math.hypot(dx, dy);
+
+      // Track closest enemy
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestEnemy = { x: enemyX, y: enemyY };
+      }
     }
 
-    // Keep target frozen
-    cameraTarget.x = staticModeTargetPosition.x;
-    cameraTarget.y = staticModeTargetPosition.y;
+    // If enemy found, move camera target to midpoint between player and enemy
+    if (closestEnemy) {
+      const midpoint: Point = {
+        x: (shipPosition.x + closestEnemy.x) / 2,
+        y: (shipPosition.y + closestEnemy.y) / 2,
+      };
+      cameraTarget.x = midpoint.x;
+      cameraTarget.y = midpoint.y;
+    } else {
+      // No enemy in view - freeze target position at last position when entering static mode
+      if (staticModeTargetPosition === null) {
+        staticModeTargetPosition = { x: cameraTarget.x, y: cameraTarget.y };
+      }
+      // Keep target frozen
+      cameraTarget.x = staticModeTargetPosition.x;
+      cameraTarget.y = staticModeTargetPosition.y;
+    }
 
     // Set scale to 1
-    cameraTarget.scale = 0.9;
+    cameraTarget.scale = 1.1;
     return;
   }
 
@@ -477,6 +557,28 @@ export const CameraSystem: System<ClientServices> = {
     const currentCameraWorldX = (-camera.x + renderWidth / 2) / camera.scale.x;
     const currentCameraWorldY = (-camera.y + renderHeight / 2) / camera.scale.x;
 
+    // Track camera velocity for extrapolation
+    const now = performance.now();
+    if (lastCameraPosition) {
+      const dtSeconds = (now - lastCameraPosition.time) / 1000;
+      if (dtSeconds > 0 && dtSeconds < 1) {
+        // Calculate instantaneous velocity in world units per second
+        const instantVx = (currentCameraWorldX - lastCameraPosition.x) / dtSeconds;
+        const instantVy = (currentCameraWorldY - lastCameraPosition.y) / dtSeconds;
+
+        // Smooth velocity to reduce sudden changes (exponential moving average)
+        cameraVelocity.vx = instantVx;
+        cameraVelocity.vy = instantVy;
+        smoothedVelocity.vx = smoothedVelocity.vx * (1 - VELOCITY_SMOOTHING_FACTOR) + instantVx * VELOCITY_SMOOTHING_FACTOR;
+        smoothedVelocity.vy = smoothedVelocity.vy * (1 - VELOCITY_SMOOTHING_FACTOR) + instantVy * VELOCITY_SMOOTHING_FACTOR;
+      }
+    }
+    lastCameraPosition = {
+      x: currentCameraWorldX,
+      y: currentCameraWorldY,
+      time: now,
+    };
+
     // Update shake and get offset
     const shakeOffset = cameraShake.update(dt);
 
@@ -497,5 +599,73 @@ export const CameraSystem: System<ClientServices> = {
       shakeOffset.y * 0.5,
       services.controls.staticCamera
     );
+
+    // Check if camera bounds should be sent to server
+    // Only send if player is alive and camera is initialized
+    // Use camera position before shake (currentCameraWorldX/Y) since shake is visual only
+    if (services.player.id && services.player.entityId !== null && cameraInitialized) {
+      const cameraScale = camera.scale.x;
+      const viewWidth = renderWidth / cameraScale;
+      const viewHeight = renderHeight / cameraScale;
+      const minDimension = Math.min(viewWidth, viewHeight);
+      const threshold = minDimension * 0.05; // 5% of minimum dimension
+
+      // Check if enough time has passed since last send (throttle to max 10 per second)
+      const timeSinceLastSend = now - lastCameraBoundsSendTime;
+      const throttleElapsed = timeSinceLastSend >= CAMERA_BOUNDS_THROTTLE_MS;
+
+      // Check if camera position changed significantly
+      const positionChanged =
+        !lastSentCameraBounds ||
+        Math.abs(currentCameraWorldX - lastSentCameraBounds.centerX) > threshold ||
+        Math.abs(currentCameraWorldY - lastSentCameraBounds.centerY) > threshold ||
+        Math.abs(viewWidth - lastSentCameraBounds.width) > threshold ||
+        Math.abs(viewHeight - lastSentCameraBounds.height) > threshold;
+
+      // Calculate delta time since last send (in seconds) for extrapolation
+      // Cap extrapolation time to prevent over-extrapolation when camera slows down
+      const extrapolationTimeMs = Math.min(timeSinceLastSend, MAX_EXTRAPOLATION_TIME_MS);
+      const deltaTimeSeconds = extrapolationTimeMs / 1000;
+
+      // Use smoothed velocity for more conservative extrapolation
+      // This reduces the impact of sudden velocity changes (like when camera slows down)
+      const extrapolatedX = currentCameraWorldX + smoothedVelocity.vx * deltaTimeSeconds;
+      const extrapolatedY = currentCameraWorldY + smoothedVelocity.vy * deltaTimeSeconds;
+
+      // Force send immediately if player warped (bypasses both throttle and threshold)
+      // Otherwise, only send if position changed AND throttle elapsed
+      if (playerWarped) {
+        // Warp detected - send immediately regardless of throttle or threshold
+        // Don't extrapolate on warp since position changed instantly
+        const viewBounds = {
+          centerX: currentCameraWorldX,
+          centerY: currentCameraWorldY,
+          width: viewWidth,
+          height: viewHeight,
+        };
+        services.network.sendCameraBounds(viewBounds);
+        lastSentCameraBounds = viewBounds;
+        lastCameraBoundsSendTime = now;
+      } else if (throttleElapsed && positionChanged) {
+        // Normal movement - respect throttle and threshold
+        // Send extrapolated position to account for network latency
+        const viewBounds = {
+          centerX: extrapolatedX,
+          centerY: extrapolatedY,
+          width: viewWidth,
+          height: viewHeight,
+        };
+        services.network.sendCameraBounds(viewBounds);
+        lastSentCameraBounds = viewBounds;
+        lastCameraBoundsSendTime = now;
+      }
+    } else if (!services.player.id || services.player.entityId === null) {
+      // Reset last sent bounds when player dies
+      lastSentCameraBounds = null;
+      lastCameraBoundsSendTime = 0;
+      lastCameraPosition = null;
+      cameraVelocity = { vx: 0, vy: 0 };
+      smoothedVelocity = { vx: 0, vy: 0 };
+    }
   },
 };

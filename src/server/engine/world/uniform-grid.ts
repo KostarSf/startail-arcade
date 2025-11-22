@@ -64,7 +64,12 @@ export class UniformGrid {
   /**
    * Returns entities in the cells overlapping the query area.
    */
-  query(pos: Vector2, radius: number): BaseEntity[] {
+  query(
+    pos: Vector2,
+    radius: number,
+    changedOnly: boolean = false,
+    includeRemoved: boolean = false
+  ): BaseEntity[] {
     const minX = Math.floor((pos.x - radius) / UniformGrid.CELL_SIZE);
     const maxX = Math.floor((pos.x + radius) / UniformGrid.CELL_SIZE);
     const minY = Math.floor((pos.y - radius) / UniformGrid.CELL_SIZE);
@@ -78,7 +83,11 @@ export class UniformGrid {
         const cell = this.#cells.get(key);
         if (cell) {
           for (const entity of cell) {
-            result.push(entity);
+            if (
+              changedOnly ? entity.changed : !entity.removed || includeRemoved
+            ) {
+              result.push(entity);
+            }
           }
         }
       }

@@ -34,6 +34,9 @@ type StatsStoreState = {
   tickDuration: number;
   /** Connection error state */
   connectionError: boolean;
+  /** Network traffic stats in KB per second */
+  inboundBytesPerSecond: number;
+  outboundBytesPerSecond: number;
 };
 
 type StatsStoreActions = {
@@ -51,6 +54,8 @@ type StatsStoreActions = {
   setWorldRadius: (radius: number) => void;
   setTickDuration: (tickDuration: number) => void;
   setConnectionError: (error: boolean) => void;
+  setInboundBytes: (bytesPerSecond: number) => void;
+  setOutboundBytes: (bytesPerSecond: number) => void;
 };
 
 type StatsStore = StatsStoreState & StatsStoreActions;
@@ -70,6 +75,8 @@ export const useStats = create<StatsStore>((set) => ({
   worldRadius: 5000,
   tickDuration: 0,
   connectionError: false,
+  inboundBytesPerSecond: 0,
+  outboundBytesPerSecond: 0,
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
@@ -84,6 +91,8 @@ export const useStats = create<StatsStore>((set) => ({
   setWorldRadius: (radius: number) => set({ worldRadius: radius }),
   setTickDuration: (tickDuration: number) => set({ tickDuration }),
   setConnectionError: (error: boolean) => set({ connectionError: error }),
+  setInboundBytes: (bytesPerSecond: number) => set({ inboundBytesPerSecond: bytesPerSecond }),
+  setOutboundBytes: (bytesPerSecond: number) => set({ outboundBytesPerSecond: bytesPerSecond }),
 }));
 
 export const stats = () => useStats.getState();

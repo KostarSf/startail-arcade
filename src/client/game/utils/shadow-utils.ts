@@ -98,11 +98,11 @@ export const addShadowToContainer = ({
   return shadow;
 };
 
-const getShadowForBase = (base: ShadowBase) =>
-  (base as any)[BASE_TO_SHADOW] as ShadowClone | undefined;
-
 const getBaseForShadow = (shadow: ShadowClone) =>
   (shadow as any)[SHADOW_TO_BASE] as ShadowBase | undefined;
+
+export const getShadowForBase = (base: ShadowBase) =>
+  (base as any)[BASE_TO_SHADOW] as ShadowClone | undefined;
 
 export const syncShadowForBase = (
   base: ShadowBase,
@@ -171,7 +171,7 @@ export const syncShadowsInContainer = (
 const hasShadow = (display: any): display is ShadowBase =>
   Boolean(display && (display as any)[BASE_TO_SHADOW]);
 
-const isShadowClone = (display: any): display is ShadowClone =>
+export const isShadowClone = (display: any): display is ShadowClone =>
   Boolean(display && (display as any)[SHADOW_TO_BASE]);
 
 export const removeShadowForBase = (base: ShadowBase) => {

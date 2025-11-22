@@ -65,7 +65,11 @@ export interface ClientServices extends Record<string, unknown> {
   stats: () => StatsStore;
   textures: {
     player: import("pixi.js").Texture;
+    playerDamaged1: import("pixi.js").Texture;
+    playerDamaged2: import("pixi.js").Texture;
     pirate: import("pixi.js").Texture;
+    pirateDamaged1: import("pixi.js").Texture;
+    pirateDamaged2: import("pixi.js").Texture;
     asteroids: {
       small: import("pixi.js").Texture[];
       medium: import("pixi.js").Texture[];
@@ -76,6 +80,7 @@ export interface ClientServices extends Record<string, unknown> {
     hint: import("pixi.js").Texture;
     bulletHint: import("pixi.js").Texture;
     explosion: import("pixi.js").Texture;
+    jetstream: import("pixi.js").Texture;
   };
   player: {
     id: string | null;
@@ -88,9 +93,21 @@ export interface ClientServices extends Record<string, unknown> {
         angle: number;
         fire: boolean;
         firingCompensation?: boolean;
+        viewBounds?: {
+          centerX: number;
+          centerY: number;
+          width: number;
+          height: number;
+        };
       },
-      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation"> }
+      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds"> }
     ) => ShipInputCommand | null;
+    sendCameraBounds: (viewBounds: {
+      centerX: number;
+      centerY: number;
+      width: number;
+      height: number;
+    }) => void;
     predictedServerTime: () => number;
     renderDelayMs: number;
   };

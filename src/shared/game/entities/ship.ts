@@ -9,8 +9,8 @@ export interface ShipState extends BaseEntityState {
 
 export interface ShipPhysicsOptions {
   thrust: boolean;
-  fire: boolean;
-  compensatedFire: boolean;
+  fire?: boolean;
+  compensatedFire?: boolean;
   delta: number;
 }
 

@@ -107,6 +107,8 @@ export class Engine {
 
     this.network.sendServerState();
 
+    this.#world.postUpdate(dt);
+
     if (this.network.playerCount === 0) {
       this.stop();
     }

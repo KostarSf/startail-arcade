@@ -1,3 +1,4 @@
+import type { GenericNetEntityState } from "@/shared/game/entities/base";
 import { Vector2 } from "@/shared/math/vector";
 import type {
   FullServerState,
@@ -20,6 +21,8 @@ export class ServerPlayer {
   ship: Ship | null = null;
   name: string = "";
   score: number = 0;
+
+  needFullState = true;
 
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
@@ -220,6 +223,7 @@ export class ServerNetwork {
     switch (message.type) {
       case "player:input":
         if (!player.ship || player.ship.removed) break;
+        player.ship.markChanged();
 
         if (message.input.thrust !== undefined) {
           player.ship.thrust = !!message.input.thrust;
@@ -267,7 +271,7 @@ export class ServerNetwork {
 
         // Create new ship with player's name
         const newShip = new Ship({ id: player.id, name: player.name });
-        newShip.setPosition(
+        newShip.position = new Vector2(
           Math.random() * this.engine.world.borderRadius * 2 -
             this.engine.world.borderRadius,
           Math.random() * this.engine.world.borderRadius * 2 -
@@ -275,6 +279,7 @@ export class ServerNetwork {
         );
         this.engine.world.spawn(newShip);
         player.ship = newShip;
+        player.needFullState = true;
         this.#playerByShipId.set(newShip.id, player);
 
         break;
@@ -324,8 +329,12 @@ export class ServerNetwork {
   }
 
   #needFullState(player: ServerPlayer) {
+    const fullStateRequested = player.needFullState;
+    player.needFullState = false;
+
     return (
       this.#engine.debug.disablePartialStateUpdates ||
+      fullStateRequested ||
       this.engine.tick % this.#keyframesRate === 0
     );
   }
@@ -341,10 +350,26 @@ export class ServerNetwork {
   }
 
   #getPartialState(player: ServerPlayer): PartialServerState {
+    const playerPos = player.ship?.position ?? Vector2.ZERO;
+    const visibleEntities = this.engine.world
+      .queryChanged(playerPos, 900)
+      .array();
+
+    const updated: GenericNetEntityState[] = [];
+    const removed: string[] = [];
+
+    for (const entity of visibleEntities) {
+      if (entity.removed) {
+        removed.push(entity.id);
+      } else {
+        updated.push(entity.toJSON());
+      }
+    }
+
     return {
       type: "partial",
-      updated: [],
-      removed: [],
+      updated,
+      removed,
     };
   }
 

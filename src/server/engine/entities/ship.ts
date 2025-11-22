@@ -18,6 +18,7 @@ export class Ship extends LivingEntity {
   static #nextId = 1;
 
   thrust = false;
+
   lastInputSequence = -1;
 
   #firing = false;
@@ -50,6 +51,7 @@ export class Ship extends LivingEntity {
     if (source && source instanceof Bullet) {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.15));
+      this.markChanged();
     }
 
     return amount;
@@ -58,11 +60,26 @@ export class Ship extends LivingEntity {
   override update(world: World, delta: number) {
     super.update(world, delta);
 
+    const oldVX = this.vx;
+    const oldVY = this.vy;
+    const oldAngle = this.angle;
+
     const result = updateShipPhysics(this, {
       thrust: this.thrust,
       ...this.#consumeFire(),
       delta,
     });
+
+    // NOTE: This is a hack to force the client to update the ship state.
+    // without this, ships lag behind the server state.
+    // TODO: Remove this once we have a proper way to update the ship state.
+    if (
+      Math.abs(oldVX - this.vx) > 0.05 ||
+      Math.abs(oldVY - this.vy) > 0.05 ||
+      Math.abs(oldAngle - this.angle) > 0.05
+    ) {
+      this.markChanged();
+    }
 
     if (result.bullet) {
       result.bullet.ownerId = this.id;
@@ -73,6 +90,12 @@ export class Ship extends LivingEntity {
       this.velocity = this.velocity.sub(direction.mul(5));
     }
 
+    this.#rechargeEnergy(delta);
+  }
+
+  #rechargeEnergy(delta: number) {
+    const oldEnergy = this.#energy;
+
     if (this.#energy < this.#maxEnergy) {
       let multiplier = 1;
       if (this.#energy < this.#maxEnergy * 0.7) multiplier = 0.5;
@@ -80,6 +103,12 @@ export class Ship extends LivingEntity {
 
       this.#energy += Math.ceil(this.#energyRechargeRate * multiplier * delta);
       this.#energy = Math.min(this.#energy, this.#maxEnergy);
+    }
+
+    if (Math.abs(oldEnergy - this.#energy) > 0.1) {
+      // NOTE: It might be better to send only to the local client, not to all,
+      // because other players don't see enemy energy.
+      this.markChanged();
     }
   }
 
@@ -97,17 +126,26 @@ export class Ship extends LivingEntity {
   }
 
   #consumeFire() {
+    if (!this.#firing) {
+      return null;
+    }
+
+    this.markChanged();
+
     const firing = {
       fire: this.#firing,
       compensatedFire: this.#firing ? this.#compensatedFire : false,
     };
+
     this.#firing = false;
     this.#compensatedFire = false;
+
     return firing;
   }
 
   override onCollisionStart(world: World, other: BaseEntity): void {
     if (other instanceof Ship || other instanceof Asteroid) {
+      this.markChanged();
       const relativeSpeed = other.velocity.sub(this.velocity).length();
       const damage = Math.floor(Math.max(relativeSpeed - 150, 0) * 0.5);
       if (damage > 0) {
@@ -118,6 +156,7 @@ export class Ship extends LivingEntity {
 
   override onCollision(world: World, other: BaseEntity): void {
     if (other instanceof Asteroid || other instanceof Ship) {
+      this.markChanged();
       const direction = other.position.sub(this.position).normalize();
       const relativeSpeed = Math.max(
         Math.abs(other.velocity.sub(this.velocity).dot(direction)),

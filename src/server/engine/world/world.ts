@@ -106,6 +106,12 @@ export class World {
     this.#currentAsteroids++;
   }
 
+  #removedEntities = new Map<string, BaseEntity>();
+
+  get removedEntities() {
+    return Array.from(this.#removedEntities.keys());
+  }
+
   update(delta: number) {
     this.#refillAsteroids();
 
@@ -118,23 +124,36 @@ export class World {
     }
 
     for (const entity of this.#entities.values()) {
-      entity.update(this, delta);
+      if (!entity.removed) {
+        entity.update(this, delta);
+        this.#grid.update(entity);
+      }
 
       if (entity.removed) {
-        this.#collisionResolver.removeEntity(this, entity);
+        this.#removedEntities.set(entity.id, entity);
         entity.onRemove(this);
-        this.#entities.delete(entity.id);
-        this.#grid.remove(entity);
-
-        if (entity.type === "asteroid") {
-          this.#currentAsteroids--;
-        }
-      } else {
-        this.#grid.update(entity);
       }
     }
 
     this.#collisionResolver.update(this);
+  }
+
+  postUpdate(delta: number) {
+    for (const entity of this.#removedEntities.values()) {
+      this.#collisionResolver.removeEntity(this, entity);
+      this.#entities.delete(entity.id);
+      this.#grid.remove(entity);
+
+      if (entity.type === "asteroid") {
+        this.#currentAsteroids--;
+      }
+    }
+
+    this.#removedEntities.clear();
+
+    for (const entity of this.#entities.values()) {
+      entity.postUpdate(this, delta);
+    }
   }
 
   #ticksAfterLastRefill = 0;
@@ -171,10 +190,28 @@ export class World {
     }
   }
 
-  /** Query the world for entities in near chunks. */
+  /**
+   * Query the world for entities in near chunks.
+   *
+   * This will return all entities in area wchich are not marked as removed.
+   * */
   query(pos: Vector2, radius: number) {
     const entitiesArray = this.#grid.query(pos, radius);
+    return this.#createAccessor(entitiesArray, pos, radius);
+  }
 
+  /**
+   * Query the world for entities in near chunks.
+   *
+   * This will return all entities in area wchich are marked as changed,
+   * including removed entities.
+   * */
+  queryChanged(pos: Vector2, radius: number) {
+    const entitiesArray = this.#grid.query(pos, radius, true);
+    return this.#createAccessor(entitiesArray, pos, radius);
+  }
+
+  #createAccessor(entities: BaseEntity[], pos: Vector2, radius: number) {
     const createAccessor = (entities: BaseEntity[]) => ({
       set: () => new Set(entities),
       map: () => new Map(entities.map((entity) => [entity.id, entity])),
@@ -187,14 +224,14 @@ export class World {
        * This is more precise than the regular query, but also more expensive. */
       precise: () => {
         return createAccessor(
-          entitiesArray.filter((entity) => {
+          entities.filter((entity) => {
             const dx = entity.x - pos.x;
             const dy = entity.y - pos.y;
             return dx ** 2 + dy ** 2 <= radius ** 2;
           })
         );
       },
-      ...createAccessor(entitiesArray),
+      ...createAccessor(entities),
     };
   }
 

@@ -29,6 +29,8 @@ export abstract class LivingEntity extends BaseEntity implements Damageable {
     const damage = this.onDamage(world, amount, source);
     if (damage <= 0) return;
 
+    this.markChanged();
+
     this.health -= damage;
     this.#lastDamageSource = source;
 

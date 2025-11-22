@@ -32,6 +32,8 @@ export abstract class BaseEntity {
 
   continuousCollision: boolean;
 
+  changed = true;
+
   /** Previous position */
   #prevPos: Vector2 | null = null;
   get prevPos() {
@@ -47,6 +49,11 @@ export abstract class BaseEntity {
 
   get position() {
     return new Vector2(this.x, this.y);
+  }
+
+  set position(position: Vector2) {
+    this.x = position.x;
+    this.y = position.y;
   }
 
   get velocity() {
@@ -94,6 +101,14 @@ export abstract class BaseEntity {
     }
   }
 
+  /** Mark the entity as changed.
+   *
+   * This will cause the entity to be included in the next client's state update.
+   */
+  markChanged() {
+    this.changed = true;
+  }
+
   preUpdate(world: World, delta: number) {
     this.#prevPos = this.position;
   }
@@ -115,8 +130,7 @@ export abstract class BaseEntity {
         : this.x - borderRadius;
 
       const isMovingTowardsEdge =
-        (beyondLeftBorder && this.vx < 0) ||
-        (beyondRightBorder && this.vx > 0);
+        (beyondLeftBorder && this.vx < 0) || (beyondRightBorder && this.vx > 0);
 
       // Wrap if more than threshold away OR if moving towards edge
       if (distanceBeyondBorder > wrapThreshold || isMovingTowardsEdge) {
@@ -139,8 +153,7 @@ export abstract class BaseEntity {
         : this.y - borderRadius;
 
       const isMovingTowardsEdge =
-        (beyondTopBorder && this.vy < 0) ||
-        (beyondBottomBorder && this.vy > 0);
+        (beyondTopBorder && this.vy < 0) || (beyondBottomBorder && this.vy > 0);
 
       // Wrap if more than threshold away OR if moving towards edge
       if (distanceBeyondBorder > wrapThreshold || isMovingTowardsEdge) {
@@ -151,6 +164,10 @@ export abstract class BaseEntity {
         }
       }
     }
+  }
+
+  postUpdate(world: World, delta: number) {
+    this.changed = false;
   }
 
   onCollision(world: World, other: BaseEntity) {
@@ -171,32 +188,13 @@ export abstract class BaseEntity {
 
   remove() {
     this.removed = true;
+    this.markChanged();
   }
 
   onRemove(world: World) {
     if (world.engine.debug.lifecycle) {
       console.log(`entity removed: ${this.name}`);
     }
-  }
-
-  setPosition(x: number, y: number) {
-    this.x = x;
-    this.y = y;
-  }
-
-  setVelocity(vx: number, vy: number) {
-    this.vx = vx;
-    this.vy = vy;
-  }
-
-  addPosition(x: number, y: number) {
-    this.x += x;
-    this.y += y;
-  }
-
-  addVelocity(vx: number, vy: number) {
-    this.vx += vx;
-    this.vy += vy;
   }
 
   toJSON() {

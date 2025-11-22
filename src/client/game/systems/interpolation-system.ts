@@ -1,19 +1,27 @@
-import { AnimatedSprite, Container, Rectangle, Sprite, Texture, TextureSource } from "pixi.js";
+import {
+  AnimatedSprite,
+  Container,
+  Rectangle,
+  Sprite,
+  Texture,
+  TextureSource,
+} from "pixi.js";
 
 import type { EntityId, System } from "@/shared/ecs";
-import { normalizeAngle } from "@/shared/game/entities/base";
+import {
+  normalizeAngle,
+  type GenericNetEntityState,
+} from "@/shared/game/entities/base";
 import { lerp } from "@/shared/math/utils";
 
-import type { ServerSnapshot } from "../network/snapshot-buffer";
+import type { WorldState } from "../network/snapshot-buffer";
 import type { ClientServices } from "../types";
 import { addShadowToContainer } from "../utils/shadow-utils";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-type SnapshotEntity = ServerSnapshot["entities"][number];
-
 interface TimedEntity {
-  state: SnapshotEntity;
+  state: GenericNetEntityState;
   serverTime: number;
 }
 
@@ -25,7 +33,7 @@ interface EntityPair {
 const ensureRenderable = (
   services: ClientServices,
   entityId: EntityId,
-  snapshotEntity: SnapshotEntity
+  snapshotEntity: GenericNetEntityState
 ) => {
   const existing = services.stores.renderable.get(entityId);
   if (existing?.ref) return existing;
@@ -51,17 +59,22 @@ const ensureRenderable = (
       let texture: Texture<TextureSource<any>>;
 
       if (radius > 15) {
-        texture = services.textures.asteroids.large[
-          Math.floor(Math.random() * services.textures.asteroids.large.length)
-        ]!;
+        texture =
+          services.textures.asteroids.large[
+            Math.floor(Math.random() * services.textures.asteroids.large.length)
+          ]!;
       } else if (radius > 10) {
-        texture = services.textures.asteroids.medium[
-          Math.floor(Math.random() * services.textures.asteroids.medium.length)
-        ]!;
+        texture =
+          services.textures.asteroids.medium[
+            Math.floor(
+              Math.random() * services.textures.asteroids.medium.length
+            )
+          ]!;
       } else {
-        texture = services.textures.asteroids.small[
-          Math.floor(Math.random() * services.textures.asteroids.small.length)
-        ]!;
+        texture =
+          services.textures.asteroids.small[
+            Math.floor(Math.random() * services.textures.asteroids.small.length)
+          ]!;
       }
 
       sprite = new Sprite({
@@ -163,7 +176,7 @@ const ensureEntity = (
 };
 
 const removeMissingEntities = (
-  latestSnapshot: ServerSnapshot,
+  latestSnapshot: WorldState,
   services: ClientServices,
   entities: import("@/shared/ecs").EntityManager
 ) => {
@@ -222,10 +235,7 @@ export const InterpolationSystem: System<ClientServices> = {
     const alpha = clamp01((targetTime - fromTime) / total);
 
     const pairMap = new Map<string, EntityPair>();
-    const indexSnapshot = (
-      snapshot: ServerSnapshot | null,
-      key: "from" | "to"
-    ) => {
+    const indexSnapshot = (snapshot: WorldState | null, key: "from" | "to") => {
       if (!snapshot) return;
       for (const entity of snapshot.entities) {
         const existing = pairMap.get(entity.id) ?? {};

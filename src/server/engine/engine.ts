@@ -1,5 +1,10 @@
 import { Vector2 } from "@/shared/math/vector";
-import type { NetworkEvent } from "@/shared/network/events";
+import type {
+  FullServerState,
+  NetworkEvent,
+  PartialServerState,
+  ServerStateEvent,
+} from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { DT_MS, TPS } from "./constants";
 import type { BaseEntity } from "./entities/base-entity";
@@ -14,6 +19,8 @@ export class Engine {
     lifecycle: false,
     ticksDuration: false,
     asteroids: false,
+    disablePartialStateUpdates: true,
+    disableCompression: false,
   };
 
   network: EngineNetwork;
@@ -24,7 +31,6 @@ export class Engine {
   #startTime = 0;
   #lastTime = 0;
   #accumulatedTime = 0;
-  #ticksSinceLastRadar = 0;
   #lastTickDuration = 0;
 
   get tick() {
@@ -109,14 +115,8 @@ export class Engine {
 
     this.#tick++;
     this.#world.update(dt);
-    this.network.sendServerState();
 
-    // Send radar data every second (TPS ticks)
-    this.#ticksSinceLastRadar++;
-    if (this.#ticksSinceLastRadar >= TPS) {
-      this.#ticksSinceLastRadar = 0;
-      this.network.sendRadarData();
-    }
+    this.network.sendServerState();
 
     if (this.network.playerCount === 0) {
       this.stop();
@@ -132,6 +132,9 @@ class EngineNetwork {
   #playerByShipId = new Map<string, ServerPlayer>();
   #engine: Engine;
   #bunServer: Bun.Server<undefined> | null = null;
+
+  #keyframesRate = TPS;
+  #radarStatesRate = TPS;
 
   get engine() {
     return this.#engine;
@@ -157,7 +160,10 @@ class EngineNetwork {
     return this.#playerByShipId.get(shipId);
   }
 
-  validatePlayerName(name: string, currentPlayerId?: string): { valid: boolean; reason?: string } {
+  validatePlayerName(
+    name: string,
+    currentPlayerId?: string
+  ): { valid: boolean; reason?: string } {
     // Trim and check length
     const trimmedName = name.trim();
     if (trimmedName.length === 0) {
@@ -181,7 +187,10 @@ class EngineNetwork {
 
     // Check if name is already taken by another player
     for (const player of this.#players.values()) {
-      if (player.id !== currentPlayerId && player.name.toLowerCase() === lowerName) {
+      if (
+        player.id !== currentPlayerId &&
+        player.name.toLowerCase() === lowerName
+      ) {
         return { valid: false, reason: "Name already taken" };
       }
     }
@@ -376,53 +385,82 @@ class EngineNetwork {
       alive: p.isAlive,
     }));
 
+    const radarData =
+      this.engine.tick % this.#radarStatesRate === 0
+        ? this.#getRadarData()
+        : undefined;
+
     for (const player of this.#players.values()) {
-      const playerPos = player.ship?.position ?? Vector2.ZERO;
-      const visibleEntities = this.engine.world.query(playerPos, 900).array();
+      const needFullState = this.#needFullState(player);
 
       player.ws.send(
         event({
           type: "server:state",
           serverTime: this.engine.serverTime,
           tickDuration: this.engine.lastTickDuration,
-          entities: visibleEntities.map((entity) => entity.toJSON()),
+          state: needFullState
+            ? this.#getFullState(player)
+            : this.#getPartialState(player),
+          radar: radarData?.get(player.id),
           players: playersData,
-        }).serialize()
+        }).serialize({ compress: !this.#engine.debug.disableCompression })
       );
     }
   }
 
-  sendRadarData() {
-    if (!this.#bunServer) {
-      throw new Error("Bun server not set");
-    }
+  #needFullState(player: ServerPlayer) {
+    return (
+      this.#engine.debug.disablePartialStateUpdates ||
+      this.engine.tick % this.#keyframesRate === 0
+    );
+  }
 
-    if (this.#players.size === 0) return;
+  #getFullState(player: ServerPlayer): FullServerState {
+    const playerPos = player.ship?.position ?? Vector2.ZERO;
+    const visibleEntities = this.engine.world.query(playerPos, 900).array();
+
+    return {
+      type: "full",
+      entities: visibleEntities.map((entity) => entity.toJSON()),
+    };
+  }
+
+  #getPartialState(player: ServerPlayer): PartialServerState {
+    return {
+      type: "partial",
+      updated: [],
+      removed: [],
+    };
+  }
+
+  #getRadarData() {
+    const radarData = new Map<string, NonNullable<ServerStateEvent["radar"]>>();
 
     // Get all alive players
     const alivePlayers = this.players.filter((p) => p.isAlive);
 
     // Send radar data to each alive player
     for (const player of alivePlayers) {
-      const radarData: Array<{ type: "player" | "ship"; x: number; y: number }> = [];
+      const playerRadarData: Array<{
+        type: "player" | "ship";
+        x: number;
+        y: number;
+      }> = [];
 
       for (const p of alivePlayers) {
         if (!p.ship) continue;
 
-        radarData.push({
+        playerRadarData.push({
           type: p.id === player.id ? "player" : "ship",
           x: Math.round(p.ship.position.x * 10) / 10,
           y: Math.round(p.ship.position.y * 10) / 10,
         });
       }
 
-      player.ws.send(
-        event({
-          type: "server:radar",
-          data: radarData,
-        }).serialize()
-      );
+      radarData.set(player.id, playerRadarData);
     }
+
+    return radarData;
   }
 
   disconnectAllPlayers() {

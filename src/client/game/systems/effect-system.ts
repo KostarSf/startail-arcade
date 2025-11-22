@@ -55,18 +55,19 @@ const spawnDamageText = (
   const text = new Text({
     text: `-${Math.round(payload.amount)}`,
     style: {
-      fill: 0xfff18a,
+      fill: 0xffff00,
       fontFamily: "Press Start 2P, monospace",
       fontSize: 6,
-      stroke: { color: 0x000000, width: 2 },
+      dropShadow: {
+        distance: 1,
+        color: 0x101010,
+        angle: Math.PI / 1.5
+      }
     },
   });
   text.anchor.set(0.5, 1);
   text.resolution = 2;
   text.roundPixels = true;
-  if (text.texture?.source) {
-    text.texture.source.scaleMode = "nearest";
-  }
   text.x = payload.x;
   text.y = payload.y;
   services.pixi.camera.addChild(text);

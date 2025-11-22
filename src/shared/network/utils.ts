@@ -10,7 +10,19 @@ export function event<T extends NetworkEvent>(
   } as T;
   return {
     payload,
-    serialize: () => JSON.stringify(payload),
+    serialize: <TCompress extends boolean = false>(args?: {
+      compress?: TCompress;
+    }): TCompress extends true ? Uint8Array<ArrayBuffer> : string => {
+      const message = JSON.stringify(payload);
+      if (args?.compress === true) {
+        return Bun.gzipSync(message) as TCompress extends true
+          ? Uint8Array<ArrayBuffer>
+          : string;
+      }
+      return message as TCompress extends true
+        ? Uint8Array<ArrayBuffer>
+        : string;
+    },
   };
 }
 

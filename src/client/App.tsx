@@ -68,9 +68,7 @@ function PlayerStats() {
     const kbitPerSecond = kbPerSecond * 8;
     if (kbitPerSecond >= 1000) {
       const mbitPerSecond = kbitPerSecond / 1000;
-      return `${
-        mbitPerSecond.toFixed(1)
-      }mbit / ${roundedKbPerSecond}kb`;
+      return `${mbitPerSecond.toFixed(1)}mbit / ${roundedKbPerSecond}kb`;
     }
     return `${Math.round(kbitPerSecond)}kbit / ${roundedKbPerSecond}kb`;
   };
@@ -131,12 +129,21 @@ function RespawnButton() {
 
   // Generate default unique 2-word name on mount
   useEffect(() => {
-    const defaultName = uniqueNamesGenerator({
-      dictionaries: [adjectives, animals],
-      separator: " ",
-      length: 2,
-      style: "capital",
-    });
+    let defaultName: string | undefined;
+
+    while (
+      !defaultName ||
+      defaultName.length > 20 ||
+      stats.players.some((p) => p.name === defaultName)
+    ) {
+      defaultName = uniqueNamesGenerator({
+        dictionaries: [adjectives, animals],
+        separator: " ",
+        length: 2,
+        style: "capital",
+      });
+    }
+
     setPlayerName(defaultName);
   }, []);
 

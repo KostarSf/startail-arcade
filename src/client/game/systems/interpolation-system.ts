@@ -180,7 +180,7 @@ const removeMissingEntities = (
   services: ClientServices,
   entities: import("@/shared/ecs").EntityManager
 ) => {
-  const liveIds = new Set(latestSnapshot.entities.map((entity) => entity.id));
+  const liveIds = new Set(latestSnapshot.entities.keys());
   for (const [serverId, entityId] of services.entityIndex.entries()) {
     if (liveIds.has(serverId)) continue;
 
@@ -237,7 +237,7 @@ export const InterpolationSystem: System<ClientServices> = {
     const pairMap = new Map<string, EntityPair>();
     const indexSnapshot = (snapshot: WorldState | null, key: "from" | "to") => {
       if (!snapshot) return;
-      for (const entity of snapshot.entities) {
+      for (const entity of snapshot.entities.values()) {
         const existing = pairMap.get(entity.id) ?? {};
         existing[key] = { state: entity, serverTime: snapshot.serverTime };
         pairMap.set(entity.id, existing);

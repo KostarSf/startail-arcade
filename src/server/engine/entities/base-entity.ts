@@ -139,6 +139,7 @@ export abstract class BaseEntity {
         } else {
           this.x = -borderRadius; // Wrap to left edge
         }
+        this.markChanged();
       }
     }
 
@@ -162,6 +163,7 @@ export abstract class BaseEntity {
         } else {
           this.y = -borderRadius; // Wrap to top edge
         }
+        this.markChanged();
       }
     }
   }

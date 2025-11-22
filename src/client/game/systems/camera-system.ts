@@ -533,11 +533,21 @@ export const CameraSystem: System<ClientServices> = {
         Math.abs(viewWidth - lastSentCameraBounds.width) > threshold ||
         Math.abs(viewHeight - lastSentCameraBounds.height) > threshold;
 
-      // Force send immediately if player warped (bypasses throttle)
+      // Force send immediately if player warped (bypasses both throttle and threshold)
       // Otherwise, only send if position changed AND throttle elapsed
-      const shouldSend = playerWarped || (throttleElapsed && positionChanged);
-
-      if (shouldSend) {
+      if (playerWarped) {
+        // Warp detected - send immediately regardless of throttle or threshold
+        const viewBounds = {
+          centerX: currentCameraWorldX,
+          centerY: currentCameraWorldY,
+          width: viewWidth,
+          height: viewHeight,
+        };
+        services.network.sendCameraBounds(viewBounds);
+        lastSentCameraBounds = viewBounds;
+        lastCameraBoundsSendTime = now;
+      } else if (throttleElapsed && positionChanged) {
+        // Normal movement - respect throttle and threshold
         const viewBounds = {
           centerX: currentCameraWorldX,
           centerY: currentCameraWorldY,

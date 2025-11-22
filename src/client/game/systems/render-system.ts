@@ -1,9 +1,9 @@
 import { view } from "@/shared/ecs";
 import type { System } from "@/shared/ecs";
-import { Container, Graphics, Sprite, Text } from "pixi.js";
+import { AnimatedSprite, Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
 
 import type { ClientServices } from "../types";
-import { syncShadowsInContainer } from "../utils/shadow-utils";
+import { getShadowForBase, isShadowClone, syncShadowsInContainer } from "../utils/shadow-utils";
 
 /**
  * Synchronizes PIXI display objects with ECS transforms each frame.
@@ -291,6 +291,122 @@ export const RenderSystem: System<ClientServices> = {
       if (shipState) {
         const isPlayerShip = services.player.entityId === entity;
         updateShipBars(entity, transform, shipState, isPlayerShip);
+
+        // Find the main ship sprite (the one that has a shadow, not the shadow itself)
+        let shipSprite: Sprite | null = null;
+        for (const child of container.children) {
+          if (
+            child instanceof Sprite &&
+            !isShadowClone(child) &&
+            child.name !== "glare" &&
+            child.name !== "jetstream" &&
+            child.name !== "debug-collider"
+          ) {
+            // Check if this sprite has a shadow linked to it - only base sprites have shadows
+            const shadow = getShadowForBase(child);
+            if (shadow) {
+              shipSprite = child;
+              break;
+            }
+          }
+        }
+
+        if (shipSprite) {
+          // Update ship texture based on health percentage
+          const health = shipState.health ?? shipState.maxHealth ?? 1;
+          const maxHealth = shipState.maxHealth ?? Math.max(health, 1);
+          const healthRatio = clamp01(health / maxHealth);
+
+          let newTexture: Texture;
+          if (healthRatio < 0.33) {
+            newTexture = isPlayerShip
+              ? services.textures.playerDamaged2
+              : services.textures.pirateDamaged2;
+          } else if (healthRatio < 0.66) {
+            newTexture = isPlayerShip
+              ? services.textures.playerDamaged1
+              : services.textures.pirateDamaged1;
+          } else {
+            newTexture = isPlayerShip
+              ? services.textures.player
+              : services.textures.pirate;
+          }
+
+          // Update ship sprite texture if it changed
+          if (shipSprite.texture !== newTexture) {
+            shipSprite.texture = newTexture;
+          }
+
+          // Always ensure shadow uses base texture (never damaged variants)
+          const shadow = getShadowForBase(shipSprite);
+          if (shadow instanceof Sprite) {
+            const baseTexture = isPlayerShip
+              ? services.textures.player
+              : services.textures.pirate;
+            if (shadow.texture !== baseTexture) {
+              shadow.texture = baseTexture;
+            }
+          }
+        }
+
+        // Handle jetstream animation
+        const shipControl = stores.shipControl.get(entity);
+        const isThrusting = shipControl?.thrust ?? false;
+
+        let jetstreamSprite = container.getChildByName(
+          "jetstream"
+        ) as AnimatedSprite | null;
+
+        if (isThrusting) {
+          if (!jetstreamSprite) {
+            // Create jetstream animated sprite from 64x32 spritesheet
+            const jetstreamTexture = services.textures.jetstream;
+            const frame1 = new Texture({
+              source: jetstreamTexture.source,
+              frame: new Rectangle(0, 0, 32, 32),
+            });
+            const frame2 = new Texture({
+              source: jetstreamTexture.source,
+              frame: new Rectangle(32, 0, 32, 32),
+            });
+
+            jetstreamSprite = new AnimatedSprite([frame1, frame2]);
+            jetstreamSprite.name = "jetstream";
+            jetstreamSprite.anchor.set(0.5, 0.5);
+            // Animation speed: one frame per 500ms = 2 fps
+            // Following effect-system pattern: animationSpeed = framesPerSecond / 60
+            jetstreamSprite.animationSpeed = 0.2;
+            jetstreamSprite.loop = true;
+            // Position jetstream behind the ship (negative Y relative to ship center)
+            // Ships typically point right (0°), so behind is negative Y
+            // jetstreamSprite.y = -10; // Offset behind the ship
+            jetstreamSprite.play();
+
+            // Add jetstream before ship sprite so it renders behind
+            const shipSpriteIndex = container.children.findIndex(
+              (child) => child === shipSprite
+            );
+            if (shipSpriteIndex >= 0) {
+              container.addChildAt(jetstreamSprite, shipSpriteIndex);
+            } else {
+              container.addChild(jetstreamSprite);
+            }
+          } else {
+            // Ensure animation is playing
+            if (!jetstreamSprite.playing) {
+              jetstreamSprite.play();
+            }
+            jetstreamSprite.visible = true;
+          }
+        } else {
+          // Hide jetstream when not thrusting
+          if (jetstreamSprite) {
+            jetstreamSprite.visible = false;
+            if (jetstreamSprite.playing) {
+              jetstreamSprite.stop();
+            }
+          }
+        }
       }
 
       // Debug collider rendering (if we have network state with radius)

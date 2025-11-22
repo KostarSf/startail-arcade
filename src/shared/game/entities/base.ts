@@ -11,6 +11,10 @@ export interface BaseEntityState {
   vy: number;
   va: number;
   radius?: number | undefined;
+  health?: number;
+  maxHealth?: number;
+  energy?: number;
+  maxEnergy?: number;
 }
 
 export interface GenericNetEntityState extends BaseEntityState {

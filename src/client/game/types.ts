@@ -65,7 +65,11 @@ export interface ClientServices extends Record<string, unknown> {
   stats: () => StatsStore;
   textures: {
     player: import("pixi.js").Texture;
+    playerDamaged1: import("pixi.js").Texture;
+    playerDamaged2: import("pixi.js").Texture;
     pirate: import("pixi.js").Texture;
+    pirateDamaged1: import("pixi.js").Texture;
+    pirateDamaged2: import("pixi.js").Texture;
     asteroids: {
       small: import("pixi.js").Texture[];
       medium: import("pixi.js").Texture[];
@@ -76,6 +80,7 @@ export interface ClientServices extends Record<string, unknown> {
     hint: import("pixi.js").Texture;
     bulletHint: import("pixi.js").Texture;
     explosion: import("pixi.js").Texture;
+    jetstream: import("pixi.js").Texture;
   };
   player: {
     id: string | null;

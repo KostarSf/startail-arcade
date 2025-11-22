@@ -38,7 +38,12 @@ import bulletTextureSrc from "../assets/images/bullet.png";
 import explosionTextureSrc from "../assets/images/explosion.png";
 import glareTextureSrc from "../assets/images/glare.png";
 import hintBwTextureSrc from "../assets/images/hint_bw.png";
+import jetstreamTextureSrc from "../assets/images/jetstream.png";
+import pirateDamaged1TextureSrc from "../assets/images/pirate-damaged-1.png";
+import pirateDamaged2TextureSrc from "../assets/images/pirate-damaged-2.png";
 import pirateTextureSrc from "../assets/images/pirate.png";
+import playerDamaged1TextureSrc from "../assets/images/player-damaged-1.png";
+import playerDamaged2TextureSrc from "../assets/images/player-damaged-2.png";
 import playerTextureSrc from "../assets/images/player.png";
 
 import { Starfield } from "../starfield";
@@ -114,7 +119,11 @@ export class ClientEngine {
 
   #textures: {
     player: Texture | null;
+    playerDamaged1: Texture | null;
+    playerDamaged2: Texture | null;
     pirate: Texture | null;
+    pirateDamaged1: Texture | null;
+    pirateDamaged2: Texture | null;
     asteroids: {
       small: Texture[];
       medium: Texture[];
@@ -125,15 +134,21 @@ export class ClientEngine {
     hint: Texture | null;
     bulletHint: Texture | null;
     explosion: Texture | null;
+    jetstream: Texture | null;
   } = {
     player: null,
+    playerDamaged1: null,
+    playerDamaged2: null,
     pirate: null,
+    pirateDamaged1: null,
+    pirateDamaged2: null,
     asteroids: { small: [], medium: [], large: [] },
     bullet: null,
     glare: null,
     hint: null,
     bulletHint: null,
     explosion: null,
+    jetstream: null,
   };
 
   #ws: WebSocket | null = null;
@@ -452,13 +467,18 @@ export class ClientEngine {
       stats: this.#statsGetter,
       textures: {
         player: this.#textures.player,
+        playerDamaged1: this.#textures.playerDamaged1!,
+        playerDamaged2: this.#textures.playerDamaged2!,
         pirate: this.#textures.pirate,
+        pirateDamaged1: this.#textures.pirateDamaged1!,
+        pirateDamaged2: this.#textures.pirateDamaged2!,
         asteroids: this.#textures.asteroids,
         bullet: this.#textures.bullet,
         glare: this.#textures.glare!,
         hint: this.#textures.hint!,
         bulletHint: this.#textures.bulletHint!,
         explosion: this.#textures.explosion!,
+        jetstream: this.#textures.jetstream!,
       },
       player: {
         id: null,
@@ -881,16 +901,33 @@ export class ClientEngine {
   }
 
   async #loadTextures() {
-    const [player, pirate, bullet, glare, hint, bulletHint, explosion] =
-      await Promise.all([
-        Assets.load<Texture>(playerTextureSrc),
-        Assets.load<Texture>(pirateTextureSrc),
-        Assets.load<Texture>(bulletTextureSrc),
-        Assets.load<Texture>(glareTextureSrc),
-        Assets.load<Texture>(hintBwTextureSrc),
-        Assets.load<Texture>(bulletHintTextureSrc),
-        Assets.load<Texture>(explosionTextureSrc),
-      ]);
+    const [
+      player,
+      playerDamaged1,
+      playerDamaged2,
+      pirate,
+      pirateDamaged1,
+      pirateDamaged2,
+      bullet,
+      glare,
+      hint,
+      bulletHint,
+      explosion,
+      jetstream,
+    ] = await Promise.all([
+      Assets.load<Texture>(playerTextureSrc),
+      Assets.load<Texture>(playerDamaged1TextureSrc),
+      Assets.load<Texture>(playerDamaged2TextureSrc),
+      Assets.load<Texture>(pirateTextureSrc),
+      Assets.load<Texture>(pirateDamaged1TextureSrc),
+      Assets.load<Texture>(pirateDamaged2TextureSrc),
+      Assets.load<Texture>(bulletTextureSrc),
+      Assets.load<Texture>(glareTextureSrc),
+      Assets.load<Texture>(hintBwTextureSrc),
+      Assets.load<Texture>(bulletHintTextureSrc),
+      Assets.load<Texture>(explosionTextureSrc),
+      Assets.load<Texture>(jetstreamTextureSrc),
+    ]);
 
     const [
       asteroidSmall1,
@@ -910,12 +947,17 @@ export class ClientEngine {
 
     // Ensure all textures use nearest neighbor scaling
     player.source.scaleMode = "nearest";
+    playerDamaged1.source.scaleMode = "nearest";
+    playerDamaged2.source.scaleMode = "nearest";
     pirate.source.scaleMode = "nearest";
+    pirateDamaged1.source.scaleMode = "nearest";
+    pirateDamaged2.source.scaleMode = "nearest";
     bullet.source.scaleMode = "nearest";
     glare.source.scaleMode = "nearest";
     hint.source.scaleMode = "nearest";
     bulletHint.source.scaleMode = "nearest";
     explosion.source.scaleMode = "nearest";
+    jetstream.source.scaleMode = "nearest";
 
     asteroidSmall1.source.scaleMode = "nearest";
     asteroidSmall2.source.scaleMode = "nearest";
@@ -925,7 +967,11 @@ export class ClientEngine {
     asteroidLarge2.source.scaleMode = "nearest";
 
     this.#textures.player = player;
+    this.#textures.playerDamaged1 = playerDamaged1;
+    this.#textures.playerDamaged2 = playerDamaged2;
     this.#textures.pirate = pirate;
+    this.#textures.pirateDamaged1 = pirateDamaged1;
+    this.#textures.pirateDamaged2 = pirateDamaged2;
     this.#textures.asteroids.small = [asteroidSmall1, asteroidSmall2];
     this.#textures.asteroids.medium = [asteroidMedium1, asteroidMedium2];
     this.#textures.asteroids.large = [asteroidLarge1, asteroidLarge2];
@@ -934,6 +980,7 @@ export class ClientEngine {
     this.#textures.hint = hint;
     this.#textures.bulletHint = bulletHint;
     this.#textures.explosion = explosion;
+    this.#textures.jetstream = jetstream;
   }
 
   #resolveSimulatedLatency() {

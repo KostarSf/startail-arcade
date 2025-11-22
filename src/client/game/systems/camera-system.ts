@@ -215,14 +215,74 @@ function updateCameraTarget(
 
   // Handle static mode (Shift held)
   if (services.controls.staticCamera) {
-    // Freeze target position at last position when entering static mode
-    if (staticModeTargetPosition === null) {
-      staticModeTargetPosition = { x: cameraTarget.x, y: cameraTarget.y };
+    // Calculate view bounds in world space
+    const cameraScale = currentZoom;
+    const viewWidth = renderWidth / cameraScale;
+    const viewHeight = renderHeight / cameraScale;
+    const viewLeft = cameraWorldPosition.x - viewWidth / 2;
+    const viewRight = cameraWorldPosition.x + viewWidth / 2;
+    const viewTop = cameraWorldPosition.y - viewHeight / 2;
+    const viewBottom = cameraWorldPosition.y + viewHeight / 2;
+
+    // Find closest enemy ship within view bounds
+    let closestEnemy: Point | null = null;
+    let closestDistance = Infinity;
+
+    for (const [serverId, entityId] of services.entityIndex.entries()) {
+      // Skip player
+      if (serverId === services.player.id) continue;
+
+      const enemyTransform = stores.transform.get(entityId);
+      const enemyNetworkState = stores.networkState.get(entityId);
+
+      // Check if it's a ship
+      if (!enemyTransform || !enemyNetworkState?.state || enemyNetworkState.state.type !== "ship") {
+        continue;
+      }
+
+      const enemyX = enemyTransform.x;
+      const enemyY = enemyTransform.y;
+
+      // Check if enemy is within view bounds
+      const isInView =
+        enemyX >= viewLeft &&
+        enemyX <= viewRight &&
+        enemyY >= viewTop &&
+        enemyY <= viewBottom;
+
+      if (!isInView) {
+        continue;
+      }
+
+      // Calculate distance to player
+      const dx = enemyX - shipPosition.x;
+      const dy = enemyY - shipPosition.y;
+      const distance = Math.hypot(dx, dy);
+
+      // Track closest enemy
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestEnemy = { x: enemyX, y: enemyY };
+      }
     }
 
-    // Keep target frozen
-    cameraTarget.x = staticModeTargetPosition.x;
-    cameraTarget.y = staticModeTargetPosition.y;
+    // If enemy found, move camera target to midpoint between player and enemy
+    if (closestEnemy) {
+      const midpoint: Point = {
+        x: (shipPosition.x + closestEnemy.x) / 2,
+        y: (shipPosition.y + closestEnemy.y) / 2,
+      };
+      cameraTarget.x = midpoint.x;
+      cameraTarget.y = midpoint.y;
+    } else {
+      // No enemy in view - freeze target position at last position when entering static mode
+      if (staticModeTargetPosition === null) {
+        staticModeTargetPosition = { x: cameraTarget.x, y: cameraTarget.y };
+      }
+      // Keep target frozen
+      cameraTarget.x = staticModeTargetPosition.x;
+      cameraTarget.y = staticModeTargetPosition.y;
+    }
 
     // Set scale to 1
     cameraTarget.scale = 1.1;

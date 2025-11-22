@@ -67,7 +67,8 @@ export class UniformGrid {
   query(
     pos: Vector2,
     radius: number,
-    changedOnly: boolean = false
+    changedOnly: boolean = false,
+    includeRemoved: boolean = false
   ): BaseEntity[] {
     const minX = Math.floor((pos.x - radius) / UniformGrid.CELL_SIZE);
     const maxX = Math.floor((pos.x + radius) / UniformGrid.CELL_SIZE);
@@ -82,7 +83,9 @@ export class UniformGrid {
         const cell = this.#cells.get(key);
         if (cell) {
           for (const entity of cell) {
-            if (changedOnly ? entity.changed : !entity.removed) {
+            if (
+              changedOnly ? entity.changed : !entity.removed || includeRemoved
+            ) {
               result.push(entity);
             }
           }

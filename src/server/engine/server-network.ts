@@ -31,6 +31,8 @@ export class ServerPlayer {
     height: number;
   } | null = null;
 
+  lastSeenEntityIds = new Set<string>();
+
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
 
@@ -259,11 +261,6 @@ export class ServerNetwork {
 
       case "player:camera-bounds":
         player.cameraViewBounds = message.viewBounds;
-        console.log(
-          "camera bounds",
-          message.viewBounds.centerX,
-          message.viewBounds.centerY
-        );
         break;
 
       case "player:respawn":
@@ -284,6 +281,9 @@ export class ServerNetwork {
         // Set player name and reset score
         player.name = message.name.trim();
         player.resetScore();
+
+        // Reset visibility tracking on respawn
+        player.lastSeenEntityIds.clear();
 
         // Create new ship with player's name
         const newShip = new Ship({ id: player.id, name: player.name });
@@ -328,8 +328,19 @@ export class ServerNetwork {
 
     for (const player of this.#players.values()) {
       const needFullState = this.#needFullState(player);
+
+      let state: FullServerState | PartialServerState;
       if (needFullState) {
-        console.log("full state");
+        state = this.#getFullState(player);
+        // Update tracking with full state entities
+        player.lastSeenEntityIds = new Set(
+          state.entities.map((entity) => entity.id)
+        );
+      } else {
+        state = this.#getPartialState(player);
+        // Update tracking with currently visible entities
+        const visibleIds = this.#getVisibleEntityIds(player);
+        player.lastSeenEntityIds = visibleIds;
       }
 
       player.ws.send(
@@ -337,9 +348,7 @@ export class ServerNetwork {
           type: "server:state",
           serverTime: this.engine.serverTime,
           tickDuration: this.engine.lastTickDuration,
-          state: needFullState
-            ? this.#getFullState(player)
-            : this.#getPartialState(player),
+          state,
           radar: radarData?.get(player.id),
           players: playersData,
         }).serialize({ compress: !this.#engine.debug.disableCompression })
@@ -382,8 +391,8 @@ export class ServerNetwork {
   #calculateCameraViewBounds(player: ServerPlayer) {
     if (player.cameraViewBounds) {
       // Use camera view bounds with 10% offset
-      const expandedWidth = player.cameraViewBounds.width * 1.1;
-      const expandedHeight = player.cameraViewBounds.height * 1.1;
+      const expandedWidth = player.cameraViewBounds.width * 1.25;
+      const expandedHeight = player.cameraViewBounds.height * 1.25;
       return {
         queryRadius: Math.max(expandedWidth, expandedHeight) / 2,
         queryPos: new Vector2(
@@ -403,42 +412,110 @@ export class ServerNetwork {
   #getPartialState(player: ServerPlayer): PartialServerState {
     const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
 
-    const visibleEntities = this.engine.world
-      .queryChanged(queryPos, queryRadius)
+    // Get ALL entities in view (including removed ones)
+    const allEntities = this.engine.world
+      .query(queryPos, queryRadius, true)
       .array();
 
-    const updated: GenericNetEntityState[] = [];
-    const removed: string[] = [];
+    // Build set of currently visible entity IDs (non-removed entities)
+    const currentVisibleIds = new Set<string>();
+    for (const entity of allEntities) {
+      if (!entity.removed) {
+        currentVisibleIds.add(entity.id);
+      }
+    }
 
+    // Handle player's own ship if it's not in view
     if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
       const playerShip = this.#engine.world.find(player.ship.id);
       if (playerShip) {
-        if (playerShip.removed) {
-          removed.push(playerShip.id);
-        } else {
-          updated.push(playerShip.toJSON());
+        if (!playerShip.removed) {
+          currentVisibleIds.add(playerShip.id);
         }
       }
     }
 
-    for (const entity of visibleEntities) {
+    const updated: GenericNetEntityState[] = [];
+    const removedSet = new Set<string>();
+
+    // Find entities that disappeared from view (were seen before but not now)
+    for (const entityId of player.lastSeenEntityIds) {
+      if (!currentVisibleIds.has(entityId)) {
+        // Entity is no longer visible, add to removed
+        removedSet.add(entityId);
+      }
+    }
+
+    // Process all entities in view
+    for (const entity of allEntities) {
       if (entity.removed) {
-        removed.push(entity.id);
+        // Entity was removed and was previously visible
+        if (player.lastSeenEntityIds.has(entity.id)) {
+          removedSet.add(entity.id);
+        }
       } else {
-        updated.push(entity.toJSON());
+        // Entity is still alive
+        const wasPreviouslyVisible = player.lastSeenEntityIds.has(entity.id);
+        const isNewlyVisible = !wasPreviouslyVisible;
+        const hasChanged = entity.changed;
+
+        if (isNewlyVisible || hasChanged) {
+          // Newly appeared entity or entity that changed, add to updated
+          updated.push(entity.toJSON());
+        }
+      }
+    }
+
+    // Handle player's own ship if it's not in view
+    if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
+      const playerShip = this.#engine.world.find(player.ship.id);
+      if (playerShip) {
+        if (playerShip.removed) {
+          removedSet.add(playerShip.id);
+        } else {
+          // Always include player ship updates if not in view
+          const wasPreviouslyVisible = player.lastSeenEntityIds.has(playerShip.id);
+          const hasChanged = playerShip.changed;
+          if (!wasPreviouslyVisible || hasChanged) {
+            updated.push(playerShip.toJSON());
+          }
+        }
       }
     }
 
     return {
       type: "partial",
       updated,
-      removed,
+      removed: Array.from(removedSet),
     };
   }
 
   #playerInView(player: ServerPlayer, queryPos: Vector2, queryRadius: number) {
     if (!player.ship) return false;
     return player.ship.position.distance(queryPos) < queryRadius;
+  }
+
+  #getVisibleEntityIds(player: ServerPlayer): Set<string> {
+    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
+
+    const visibleEntities = this.engine.world
+      .query(queryPos, queryRadius)
+      .array();
+
+    const visibleIds = new Set<string>();
+    for (const entity of visibleEntities) {
+      visibleIds.add(entity.id);
+    }
+
+    // Always include player's own ship if it exists
+    if (player.ship) {
+      const playerShip = this.#engine.world.find(player.ship.id);
+      if (playerShip && !playerShip.removed) {
+        visibleIds.add(playerShip.id);
+      }
+    }
+
+    return visibleIds;
   }
 
   #getRadarData() {

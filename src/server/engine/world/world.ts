@@ -195,8 +195,8 @@ export class World {
    *
    * This will return all entities in area wchich are not marked as removed.
    * */
-  query(pos: Vector2, radius: number) {
-    const entitiesArray = this.#grid.query(pos, radius);
+  query(pos: Vector2, radius: number, includeRemoved: boolean = false) {
+    const entitiesArray = this.#grid.query(pos, radius, false, includeRemoved);
     return this.#createAccessor(entitiesArray, pos, radius);
   }
 

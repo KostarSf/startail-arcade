@@ -131,6 +131,8 @@ function RespawnButton() {
   useEffect(() => {
     let defaultName: string | undefined;
 
+    let attempts = 0;
+
     while (
       !defaultName ||
       defaultName.length > 20 ||
@@ -142,6 +144,10 @@ function RespawnButton() {
         length: 2,
         style: "capital",
       });
+
+      attempts++;
+
+      if (attempts > 10) break;
     }
 
     setPlayerName(defaultName);

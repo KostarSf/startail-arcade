@@ -1010,11 +1010,11 @@ export class ClientEngine {
 
   #sendWithLatency(payload: string) {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
-    setTimeout(() => {
-      // Track outbound bytes
-      const encoder = new TextEncoder();
-      this.#outboundBytes += encoder.encode(payload).length;
-    });
+
+    // Track outbound bytes
+    const encoder = new TextEncoder();
+    this.#outboundBytes += encoder.encode(payload).length;
+
     this.#withSimulatedLatency(() => {
       this.#ws?.send(payload);
     });

@@ -16,8 +16,9 @@ import type { Starfield } from "../starfield";
 import type { SnapshotBuffer } from "./network/snapshot-buffer";
 import type { InputBuffer } from "./network/input-buffer";
 import type { CameraShake } from "./systems/camera-shake";
-
-type StatsStore = ReturnType<typeof import("../store").stats>;
+import type { AudioEngine } from "../audio/audio-engine";
+import type { StatsStore } from "../store";
+import type { AudioSettingsStore } from "../audio/audio-settings";
 
 export interface DamageTextRequest {
   amount: number;
@@ -130,4 +131,6 @@ export interface ClientServices extends Record<string, unknown> {
     queueDamageText: (payload: DamageTextRequest) => void;
     queueExplosion: (payload: ExplosionRequest) => void;
   };
+  audio: AudioEngine;
+  audioSettings: () => AudioSettingsStore;
 }

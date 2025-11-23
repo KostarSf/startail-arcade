@@ -11,7 +11,6 @@ import { TPS } from "./constants";
 import type { Engine } from "./engine";
 import type { BaseEntity } from "./entities/base-entity";
 import { Bullet } from "./entities/bullet";
-import { LivingEntity } from "./entities/living-entity";
 import { Ship } from "./entities/ship";
 import type { World } from "./world/world";
 
@@ -42,6 +41,13 @@ export class ServerPlayer {
 
   addScore(points: number) {
     this.score += points;
+    // Send score event to the player
+    this.ws.send(
+      event({
+        type: "player:score",
+        score: this.score,
+      }).serialize()
+    );
   }
 
   resetScore() {
@@ -127,8 +133,6 @@ export class ServerNetwork {
 
   handleEntityDestroyed(world: World, entity: BaseEntity, source?: BaseEntity) {
     let killerPlayerId: string | undefined;
-    let earnedScore: number | undefined;
-    let victimPlayerId: string | undefined;
 
     // Determine the killer player
     if (source instanceof Bullet && source.owner) {
@@ -143,34 +147,10 @@ export class ServerNetwork {
       }
     }
 
-    // Award points if there's a killer
-    if (killerPlayerId && entity instanceof LivingEntity) {
-      const killer = this.#playerById.get(killerPlayerId);
-      if (killer) {
-        let points = entity.earnablePoints;
-
-        // If victim is a ship, calculate dynamic points
-        if (entity instanceof Ship) {
-          const victim = this.#playerByShipId.get(entity.id);
-          if (victim) {
-            victimPlayerId = victim.id;
-            points = Math.floor(10 + victim.score / 100);
-            // Reset victim's score
-            victim.resetScore();
-          }
-        }
-
-        killer.addScore(points);
-        earnedScore = killer.score;
-      }
-    }
-
     // If victim is a ship but no killer, still reset their score
-    if (entity instanceof Ship && !victimPlayerId) {
+    if (entity instanceof Ship) {
       const victim = this.#playerByShipId.get(entity.id);
-      if (victim) {
-        victim.resetScore();
-      }
+      if (victim) victim.resetScore();
     }
 
     // Broadcast entity destroy event
@@ -182,7 +162,6 @@ export class ServerNetwork {
         y: entity.position.y,
         sourceId: source?.id,
         playerId: killerPlayerId,
-        score: earnedScore,
       })
     );
   }
@@ -293,6 +272,7 @@ export class ServerNetwork {
           Math.random() * this.engine.world.borderRadius * 2 -
             this.engine.world.borderRadius
         );
+        newShip.player = player;
         this.engine.world.spawn(newShip);
         player.ship = newShip;
         player.needFullState = true;

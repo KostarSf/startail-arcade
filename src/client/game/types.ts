@@ -89,6 +89,9 @@ export interface ClientServices extends Record<string, unknown> {
     bulletHint: import("pixi.js").Texture;
     explosion: import("pixi.js").Texture;
     jetstream: import("pixi.js").Texture;
+    exp1: import("pixi.js").Texture;
+    exp2: import("pixi.js").Texture;
+    exp3: import("pixi.js").Texture;
   };
   player: {
     id: string | null;

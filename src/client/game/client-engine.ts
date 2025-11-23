@@ -35,6 +35,9 @@ import asteroidSmall2TextureSrc from "../assets/images/asteroids/small-02.png";
 
 import bulletHintTextureSrc from "../assets/images/bullet-hint.png";
 import bulletTextureSrc from "../assets/images/bullet.png";
+import exp1TextureSrc from "../assets/images/exp-1.png";
+import exp2TextureSrc from "../assets/images/exp-2.png";
+import exp3TextureSrc from "../assets/images/exp-3.png";
 import explosionTextureSrc from "../assets/images/explosion.png";
 import glareTextureSrc from "../assets/images/glare.png";
 import hintBwTextureSrc from "../assets/images/hint_bw.png";
@@ -146,6 +149,9 @@ export class ClientEngine {
     bulletHint: Texture | null;
     explosion: Texture | null;
     jetstream: Texture | null;
+    exp1: Texture | null;
+    exp2: Texture | null;
+    exp3: Texture | null;
   } = {
     player: null,
     playerDamaged1: null,
@@ -160,6 +166,9 @@ export class ClientEngine {
     bulletHint: null,
     explosion: null,
     jetstream: null,
+    exp1: null,
+    exp2: null,
+    exp3: null,
   };
 
   #ws: WebSocket | null = null;
@@ -554,6 +563,9 @@ export class ClientEngine {
         bulletHint: this.#textures.bulletHint!,
         explosion: this.#textures.explosion!,
         jetstream: this.#textures.jetstream!,
+        exp1: this.#textures.exp1!,
+        exp2: this.#textures.exp2!,
+        exp3: this.#textures.exp3!,
       },
       player: {
         id: null,
@@ -1067,11 +1079,19 @@ export class ClientEngine {
             break;
           }
 
+          const isHealing = message.amount < 0;
+
           this.#services.effects.queueDamageText({
             amount: message.amount,
             x: message.x,
             y: message.y,
           });
+
+          // Skip sounds and explosions for healing
+          if (isHealing) {
+            break;
+          }
+
           const networkState = this.#services.stores.networkState.get(entityId);
 
           // Play damage sound only if entity exists in world
@@ -1130,13 +1150,13 @@ export class ClientEngine {
             x: message.x,
             y: message.y,
           });
-
-          // Check if player scored from this destroy event
-          if (message.playerId === this.#services.player.id && message.score !== undefined) {
-            // Player gained score - play coin sound
-            this.#services.audio.playOneShot({ soundId: "snd_coin" });
-          }
         }
+        break;
+      case "player:score":
+        if (!this.#services) break;
+        // Play fuel sound when player gains exp/score with randomized pitch
+        const pitch = 0.9 + Math.random() * 0.2; // Random pitch between 0.9 and 1.1
+        this.#services.audio.playOneShot({ soundId: "snd_fuel", pitch });
         break;
     }
   }
@@ -1286,6 +1306,9 @@ export class ClientEngine {
       bulletHint,
       explosion,
       jetstream,
+      exp1,
+      exp2,
+      exp3,
     ] = await Promise.all([
       Assets.load<Texture>(playerTextureSrc),
       Assets.load<Texture>(playerDamaged1TextureSrc),
@@ -1299,6 +1322,9 @@ export class ClientEngine {
       Assets.load<Texture>(bulletHintTextureSrc),
       Assets.load<Texture>(explosionTextureSrc),
       Assets.load<Texture>(jetstreamTextureSrc),
+      Assets.load<Texture>(exp1TextureSrc),
+      Assets.load<Texture>(exp2TextureSrc),
+      Assets.load<Texture>(exp3TextureSrc),
     ]);
 
     const [
@@ -1330,6 +1356,9 @@ export class ClientEngine {
     bulletHint.source.scaleMode = "nearest";
     explosion.source.scaleMode = "nearest";
     jetstream.source.scaleMode = "nearest";
+    exp1.source.scaleMode = "nearest";
+    exp2.source.scaleMode = "nearest";
+    exp3.source.scaleMode = "nearest";
 
     asteroidSmall1.source.scaleMode = "nearest";
     asteroidSmall2.source.scaleMode = "nearest";
@@ -1353,6 +1382,9 @@ export class ClientEngine {
     this.#textures.bulletHint = bulletHint;
     this.#textures.explosion = explosion;
     this.#textures.jetstream = jetstream;
+    this.#textures.exp1 = exp1;
+    this.#textures.exp2 = exp2;
+    this.#textures.exp3 = exp3;
   }
 
   #resolveSimulatedLatency() {

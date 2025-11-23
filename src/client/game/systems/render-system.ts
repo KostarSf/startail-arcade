@@ -235,9 +235,9 @@ export const RenderSystem: System<ClientServices> = {
       // Keep any sprite-attached shadows aligned with the latest transform.
       syncShadowsInContainer(container, { cameraScale: shadowCameraScale });
 
-      // Update glare for bullets
+      // Update glare for bullets and exp
       const networkState = stores.networkState.get(entity);
-      if (networkState?.state?.type === "bullet") {
+      if (networkState?.state?.type === "bullet" || networkState?.state?.type === "exp") {
         const glareSprite = container.getChildByName("glare") as Sprite | null;
         if (glareSprite) {
           // Calculate distance to player
@@ -277,12 +277,74 @@ export const RenderSystem: System<ClientServices> = {
           glareSprite.scale.set(glareScale);
           glareSprite.rotation = -container.rotation; // Counteract container rotation to keep horizontal
 
-          // Discrete flickering: change alpha every 100ms
-          const flickerInterval = 100;
-          const flickerStep = Math.floor(time / flickerInterval);
-          // Use flickerStep as seed for consistent flicker per interval
-          const random = ((flickerStep * 9301 + 49297) % 233280) / 233280;
-          glareSprite.alpha = 0.5 + random * 0.3; // Min 0.5, max 0.8
+          // For exp entities with low life, blink together with the sprite
+          if (networkState?.state?.type === "exp") {
+            const expLife = (networkState.state as any).life ?? Infinity;
+            const blinkingThreshold = 5;
+
+            if (expLife < blinkingThreshold) {
+              // Blink interval scales from 500ms (life = 5) to 250ms (life = 0)
+              // Faster blinking as life approaches zero (2x speed at zero)
+              const maxBlinkInterval = 500; // When life = 5
+              const minBlinkInterval = 250; // When life = 0 (2x faster)
+              const lifeRatio = Math.max(0, Math.min(1, expLife / blinkingThreshold)); // 0 to 1, where 1 = life 5, 0 = life 0
+              const blinkInterval = minBlinkInterval + (maxBlinkInterval - minBlinkInterval) * lifeRatio;
+              const blinkStep = Math.floor(time / blinkInterval);
+              // Blink together with exp sprite: visible when blinkStep is even, invisible when odd
+              glareSprite.alpha = blinkStep % 2 === 0 ? 1.0 : 0.0;
+            } else {
+              // Normal flickering when life >= 5
+              const flickerInterval = 100;
+              const flickerStep = Math.floor(time / flickerInterval);
+              // Use flickerStep as seed for consistent flicker per interval
+              const random = ((flickerStep * 9301 + 49297) % 233280) / 233280;
+              glareSprite.alpha = 0.5 + random * 0.3; // Min 0.5, max 0.8
+            }
+          } else {
+            // Bullets: normal discrete flickering
+            const flickerInterval = 100;
+            const flickerStep = Math.floor(time / flickerInterval);
+            // Use flickerStep as seed for consistent flicker per interval
+            const random = ((flickerStep * 9301 + 49297) % 233280) / 233280;
+            glareSprite.alpha = 0.5 + random * 0.3; // Min 0.5, max 0.8
+          }
+        }
+      }
+
+      // Update exp blinking when life < 5
+      if (networkState?.state?.type === "exp") {
+        const expLife = (networkState.state as any).life ?? Infinity;
+        // Find the exp sprite (not the glare or shadow)
+        let expSprite: Sprite | null = null;
+        for (const child of container.children) {
+          if (
+            child instanceof Sprite &&
+            child.name !== "glare" &&
+            !isShadowClone(child)
+          ) {
+            expSprite = child;
+            break;
+          }
+        }
+
+        if (expSprite) {
+          const blinkingThreshold = 5;
+
+          if (expLife < blinkingThreshold) {
+            // Blink interval scales from 500ms (life = 5) to 250ms (life = 0)
+            // Faster blinking as life approaches zero (2x speed at zero)
+            const maxBlinkInterval = 500; // When life = 5
+            const minBlinkInterval = 250; // When life = 0 (2x faster)
+            const lifeRatio = Math.max(0, Math.min(1, expLife / blinkingThreshold)); // 0 to 1, where 1 = life 5, 0 = life 0
+            const blinkInterval = minBlinkInterval + (maxBlinkInterval - minBlinkInterval) * lifeRatio;
+            const blinkStep = Math.floor(time / blinkInterval);
+            // Toggle visibility: visible when blinkStep is even, invisible when odd
+            // This matches the glare blinking logic above
+            expSprite.alpha = blinkStep % 2 === 0 ? 1.0 : 0.0;
+          } else {
+            // Reset alpha to fully visible when life >= 5
+            expSprite.alpha = 1.0;
+          }
         }
       }
 

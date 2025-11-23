@@ -1,6 +1,7 @@
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { Bullet } from "./bullet";
+import { Exp } from "./exp";
 import { LivingEntity } from "./living-entity";
 import { Ship } from "./ship";
 
@@ -42,6 +43,22 @@ export class Asteroid extends LivingEntity {
     }
 
     return amount;
+  }
+
+  protected override onDeath(world: World, source?: BaseEntity) {
+    if (this.earnablePoints <= 0) return;
+
+    if (source && (source.type === "ship" || source.type === "bullet")) {
+      const relativeVelocity = source.velocity.mul(0.3).sub(this.velocity);
+      Exp.spawn(
+        world,
+        this.position,
+        relativeVelocity,
+        // Math.ceil(this.earnablePoints),
+        999,
+        (this.radius ?? 0) * 0.7
+      );
+    }
   }
 
   override onCollision(world: World, other: BaseEntity): void {

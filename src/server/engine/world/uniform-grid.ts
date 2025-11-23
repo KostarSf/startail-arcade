@@ -84,7 +84,8 @@ export class UniformGrid {
         if (cell) {
           for (const entity of cell) {
             if (
-              changedOnly ? entity.changed : !entity.removed || includeRemoved
+              entity.initialized &&
+              (changedOnly ? entity.changed : !entity.removed || includeRemoved)
             ) {
               result.push(entity);
             }

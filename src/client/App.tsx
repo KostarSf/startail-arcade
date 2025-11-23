@@ -4,8 +4,8 @@ import {
   animals,
   uniqueNamesGenerator,
 } from "unique-names-generator";
-import { DebugDialog } from "./DebugDialog";
 import { AudioSettings } from "./AudioSettings";
+import { DebugDialog } from "./DebugDialog";
 import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
@@ -174,33 +174,36 @@ function RespawnButton() {
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="fixed inset-0 flex flex-col items-center justify-center z-50 pointer-events-none"
-    >
-      <div className="mb-4 pointer-events-auto">
-        <input
-          type="text"
-          value={playerName}
-          onChange={(e) => setPlayerName(e.target.value)}
-          onKeyDown={() => clientEngine.playUIType()}
-          onFocus={() => clientEngine.playUIHover()}
-          className="name-input"
-          placeholder="Enter your name"
-          maxLength={20}
-        />
-        {stats.respawnError && (
-          <div className="respawn-error">{stats.respawnError}</div>
-        )}
-      </div>
-      <button
-        type="submit"
-        className="respawn-button pointer-events-auto"
-        onMouseEnter={() => clientEngine.playUIHover()}
+    <>
+      <p className="fixed bottom-4 left-5 z-50 pointer-events-none font-mono text-xs">v0.1.0</p>
+      <form
+        onSubmit={handleSubmit}
+        className="fixed inset-0 flex flex-col items-center justify-center z-50 pointer-events-none"
       >
-        {buttonText}
-      </button>
-    </form>
+        <div className="mb-4 pointer-events-auto">
+          <input
+            type="text"
+            value={playerName}
+            onChange={(e) => setPlayerName(e.target.value)}
+            onKeyDown={() => clientEngine.playUIType()}
+            onFocus={() => clientEngine.playUIHover()}
+            className="name-input"
+            placeholder="Enter your name"
+            maxLength={20}
+          />
+          {stats.respawnError && (
+            <div className="respawn-error">{stats.respawnError}</div>
+          )}
+        </div>
+        <button
+          type="submit"
+          className="respawn-button pointer-events-auto"
+          onMouseEnter={() => clientEngine.playUIHover()}
+        >
+          {buttonText}
+        </button>
+      </form>
+    </>
   );
 }
 

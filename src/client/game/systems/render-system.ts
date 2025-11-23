@@ -55,7 +55,11 @@ export const RenderSystem: System<ClientServices> = {
         uiContainer = new Container();
         uiContainer.name = name;
         pixi.camera.addChild(uiContainer);
+        // Ensure sortableChildren is enabled for zIndex to work
+        pixi.camera.sortableChildren = true;
       }
+      // Always ensure UI containers have high zIndex to render above all world sprites
+      uiContainer.zIndex = 1000;
       activeShipUiNames.add(name);
       return uiContainer;
     };

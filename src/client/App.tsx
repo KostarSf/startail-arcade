@@ -184,7 +184,7 @@ function RespawnButton() {
 
   return (
     <>
-      <p className="fixed bottom-4 left-5 z-50 pointer-events-none font-mono text-xs">v0.1.1</p>
+      <p className="fixed bottom-4 left-5 z-50 pointer-events-none font-mono text-xs">v0.2.0</p>
       <form
         onSubmit={handleSubmit}
         className="fixed inset-0 flex flex-col items-center justify-center z-50 pointer-events-none"

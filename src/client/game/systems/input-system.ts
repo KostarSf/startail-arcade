@@ -19,6 +19,8 @@ const FIRE_SHAKE_DURATION = 0.2; // Slightly longer duration (150ms)
 const ANGLE_PACKET_INTERVAL_MS = 1000 / 60; // ~60hz
 const ANGLE_EPSILON = (Math.PI / 180) * 0.25; // 0.25 degree
 const ANGLE_FORCE_THRESHOLD = (Math.PI / 180) * 5; // 5 degrees
+// Keyboard rotation speed (radians per second)
+const KEYBOARD_ROTATION_SPEED = (Math.PI * 2) * 2; // 2 full rotations per second
 
 const normalizeAngleDelta = (current: number, previous: number) => {
   let delta = current - previous;
@@ -37,7 +39,7 @@ let previousStaticCamera = false;
 export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",
-  tick({ services, time }) {
+  tick({ services, time, dt }) {
     const {
       player,
       controls,
@@ -68,10 +70,37 @@ export const InputSystem: System<ClientServices> = {
     );
     const transform = stores.transform.get(player.entityId);
 
+    // Calculate angle based on control mode
     if (transform) {
-      controls.angle =
-        Math.atan2(cursorWorld.y - transform.y, cursorWorld.x - transform.x) ??
-        controls.angle;
+      if (controls.controlMode === "gamepad") {
+        // Use gamepad angle when in gamepad mode
+        if (controls.gamepadAngle !== null) {
+          controls.angle = controls.gamepadAngle;
+        } else {
+          // Fallback to current transform angle if gamepad angle not set
+          controls.angle = transform.angle;
+        }
+      } else {
+        // Keyboard/mouse mode
+        if (controls.keyboardRotateLeft || controls.keyboardRotateRight) {
+          // Use keyboard rotation (arrow keys)
+          const rotationDelta = (controls.keyboardRotateLeft ? -1 : 1) * KEYBOARD_ROTATION_SPEED * dt;
+          controls.angle = transform.angle + rotationDelta;
+          // Normalize angle to [-PI, PI]
+          while (controls.angle > Math.PI) controls.angle -= Math.PI * 2;
+          while (controls.angle < -Math.PI) controls.angle += Math.PI * 2;
+          // Mark that mouse hasn't moved since keyboard rotation (will be reset when mouse moves)
+          controls.mouseHasMovedSinceKeyboardRotation = false;
+        } else {
+          // Use cursor-based angle only if mouse has moved since keyboard rotation stopped
+          if (controls.mouseHasMovedSinceKeyboardRotation) {
+            controls.angle =
+              Math.atan2(cursorWorld.y - transform.y, cursorWorld.x - transform.x) ??
+              controls.angle;
+          }
+          // If mouse hasn't moved, keep the current angle (from keyboard rotation)
+        }
+      }
       transform.angle = controls.angle;
     }
 

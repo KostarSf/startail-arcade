@@ -41,6 +41,13 @@ export interface ControlState {
   lastAnglePacketTime: number;
   lastSentAngle: number;
   pendingAngle: number | null;
+  controlMode: "gamepad" | "keyboard" | null;
+  gamepadAngle: number | null;
+  previousGamepadButtons: boolean[];
+  keyboardRotateLeft: boolean;
+  keyboardRotateRight: boolean;
+  mouseHasMovedSinceKeyboardRotation: boolean;
+  lastCursorScreenForMouseCheck: { x: number; y: number } | null;
 }
 
 export interface ClientServices extends Record<string, unknown> {

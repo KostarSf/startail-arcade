@@ -117,6 +117,13 @@ export class ClientEngine {
     lastAnglePacketTime: 0,
     lastSentAngle: 0,
     pendingAngle: null,
+    controlMode: null,
+    gamepadAngle: null,
+    previousGamepadButtons: [],
+    keyboardRotateLeft: false,
+    keyboardRotateRight: false,
+    mouseHasMovedSinceKeyboardRotation: true,
+    lastCursorScreenForMouseCheck: null,
   };
 
   #services: ClientServices | null = null;
@@ -662,37 +669,254 @@ export class ClientEngine {
         this.#fpsSampleFrames = 0;
         this.#fpsLastSampleTime = nowTick;
       }
+
+      // Poll gamepad state
+      this.#pollGamepad();
     });
+  }
+
+  #pollGamepad() {
+    const gamepads = navigator.getGamepads();
+    const gamepad = gamepads[0]; // Use first connected gamepad
+
+    if (!gamepad) {
+      // No gamepad connected, clear gamepad angle
+      if (this.#controls.controlMode === "gamepad") {
+        this.#controls.gamepadAngle = null;
+      }
+      return;
+    }
+
+    const STICK_DEADZONE = 0.15;
+    const TRIGGER_THRESHOLD = 0.1;
+
+    // Read left stick ONLY (axes 0, 1) - ignore right stick completely
+    const stickX = gamepad.axes[0] ?? 0;
+    const stickY = gamepad.axes[1] ?? 0;
+    const stickMagnitude = Math.sqrt(stickX * stickX + stickY * stickY);
+
+    // Read triggers
+    // Triggers are typically on axes 4 and 5 (Xbox controllers) or buttons 6 and 7
+    // IMPORTANT: Axes 2 and 3 are typically the RIGHT STICK, so we completely ignore them
+    // Left trigger: try axis 4 first, then button 6 (NEVER use axis 2 - that's right stick X)
+    let leftTriggerActive = false;
+    const leftTriggerAxis4 = gamepad.axes[4];
+
+    // Check axis 4 (most common for Xbox controllers)
+    if (leftTriggerAxis4 !== undefined) {
+      if (leftTriggerAxis4 >= 0) {
+        leftTriggerActive = leftTriggerAxis4 > TRIGGER_THRESHOLD;
+      } else {
+        leftTriggerActive = leftTriggerAxis4 > (-1 + TRIGGER_THRESHOLD * 2);
+      }
+    }
+    // Fallback to button 6 if axis 4 not available
+    const leftTriggerButton = gamepad.buttons[6]?.pressed ?? false;
+    leftTriggerActive = leftTriggerActive || leftTriggerButton;
+
+    // Right trigger: try axis 5 first, then button 7 (NEVER use axis 3 - that's right stick Y)
+    let rightTriggerActive = false;
+    const rightTriggerAxis5 = gamepad.axes[5];
+
+    // Check axis 5 (most common for Xbox controllers)
+    if (rightTriggerAxis5 !== undefined) {
+      if (rightTriggerAxis5 >= 0) {
+        rightTriggerActive = rightTriggerAxis5 > TRIGGER_THRESHOLD;
+      } else {
+        rightTriggerActive = rightTriggerAxis5 > (-1 + TRIGGER_THRESHOLD * 2);
+      }
+    }
+    // Fallback to button 7 if axis 5 not available
+    const rightTriggerButton = gamepad.buttons[7]?.pressed ?? false;
+    rightTriggerActive = rightTriggerActive || rightTriggerButton;
+
+    // Read buttons
+    // Right button (RB/R1): button 5 on Xbox/PlayStation controllers
+    const rightButton = gamepad.buttons[5]?.pressed ?? false;
+    const startButton = gamepad.buttons[9]?.pressed ?? false; // Start button
+
+    // Detect any gamepad input to switch to gamepad mode
+    // Only check left stick (axes 0, 1), triggers, and buttons - completely ignore right stick (axes 2, 3)
+    // Check buttons but exclude any that might be mapped to right stick
+    const hasGamepadInput =
+      stickMagnitude > STICK_DEADZONE ||
+      leftTriggerActive ||
+      rightTriggerActive ||
+      rightButton ||
+      startButton ||
+      // Check buttons, but be careful not to include right stick axes
+      gamepad.buttons.some((btn, idx) => btn?.pressed);
+
+    const wasGamepadMode = this.#controls.controlMode === "gamepad";
+
+    if (hasGamepadInput && this.#controls.controlMode !== "gamepad") {
+      this.#controls.controlMode = "gamepad";
+    }
+
+    // If we just switched away from gamepad mode, clear gamepad controls
+    if (wasGamepadMode && this.#controls.controlMode !== "gamepad") {
+      this.#controls.thrust = false;
+      this.#controls.gamepadAngle = null;
+    }
+
+    // Initialize previous button states array if needed
+    if (this.#controls.previousGamepadButtons.length < gamepad.buttons.length) {
+      this.#controls.previousGamepadButtons = new Array(
+        Math.max(gamepad.buttons.length, 10)
+      ).fill(false);
+    }
+
+    // Only apply gamepad inputs when in gamepad mode
+    if (this.#controls.controlMode === "gamepad") {
+      // Left stick: calculate angle for ship rotation
+      if (stickMagnitude > STICK_DEADZONE) {
+        // Calculate angle from stick direction
+        const angle = Math.atan2(stickY, stickX);
+        this.#controls.gamepadAngle = angle;
+      } else {
+        // Stick is centered, keep last angle or use current ship angle
+        if (this.#controls.gamepadAngle === null && this.#services?.player.entityId) {
+          const transform = this.#services.stores.transform.get(
+            this.#services.player.entityId
+          );
+          if (transform) {
+            this.#controls.gamepadAngle = transform.angle;
+          }
+        }
+      }
+
+      // Left trigger: throttle (only set when in gamepad mode)
+      this.#controls.thrust = leftTriggerActive;
+
+      // Right trigger: fire (with edge detection)
+      const previousRightTrigger = this.#controls.previousGamepadButtons[7] ?? false;
+      if (rightTriggerActive && !previousRightTrigger) {
+        // Trigger just pressed, fire once
+        this.#controls.fire = true;
+      }
+      this.#controls.previousGamepadButtons[7] = rightTriggerActive;
+
+      // Right button (RB): toggle static camera (edge detection)
+      // Only use button 5 (RB/R1)
+      const previousRightButton = this.#controls.previousGamepadButtons[5] ?? false;
+
+      // Toggle on button press (edge detection)
+      if (rightButton && !previousRightButton) {
+        // Button just pressed, toggle static camera
+        this.#controls.staticCamera = !this.#controls.staticCamera;
+      }
+      // Update button state
+      this.#controls.previousGamepadButtons[5] = rightButton;
+    }
+
+    // Start button: handle menu respawn (works regardless of control mode)
+    const previousStartButton = this.#controls.previousGamepadButtons[9] ?? false;
+    if (startButton && !previousStartButton) {
+      // Start button just pressed
+      const stats = this.#statsGetter();
+      if (stats.playerId !== null && stats.playerObject === null) {
+        // Player is in menu (not spawned)
+        // Try to get player name from input field, or use default
+        let playerName = "Player";
+        const nameInput = document.querySelector(
+          'input[name="playerName"], .name-input'
+        ) as HTMLInputElement;
+        if (nameInput && nameInput.value.trim()) {
+          playerName = nameInput.value.trim();
+        } else {
+          // Try to get from existing player data
+          const existingPlayer = stats.players.find((p) => p.id === stats.playerId);
+          if (existingPlayer?.name) {
+            playerName = existingPlayer.name;
+          }
+        }
+        this.playUIClick();
+        this.respawn(playerName);
+      }
+    }
+    this.#controls.previousGamepadButtons[9] = startButton;
   }
 
   #setupInputListeners() {
     const updateCursor = (e: import("pixi.js").FederatedPointerEvent) => {
+      // Switch to keyboard mode on mouse movement
+      if (this.#controls.controlMode !== "keyboard") {
+        this.#controls.controlMode = "keyboard";
+      }
       // Convert screen coordinates to game render space (0.75x resolution)
-      this.#controls.cursorScreen = {
+      const newCursorScreen = {
         x: e.global.x * this.#renderScale,
         y: e.global.y * this.#renderScale,
       };
+
+      // Check if mouse has actually moved (not just a click)
+      if (this.#controls.lastCursorScreenForMouseCheck) {
+        const dx = newCursorScreen.x - this.#controls.lastCursorScreenForMouseCheck.x;
+        const dy = newCursorScreen.y - this.#controls.lastCursorScreenForMouseCheck.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        // If mouse moved more than 1 pixel, mark it as moved
+        if (distance > 1) {
+          this.#controls.mouseHasMovedSinceKeyboardRotation = true;
+        }
+      } else {
+        // First time, assume mouse has moved
+        this.#controls.mouseHasMovedSinceKeyboardRotation = true;
+      }
+
+      this.#controls.cursorScreen = newCursorScreen;
+      this.#controls.lastCursorScreenForMouseCheck = newCursorScreen;
     };
     this.#app.stage.on("pointermove", updateCursor);
     this.#app.stage.on("pointerdown", updateCursor);
 
     window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyW") {
-        this.#controls.thrust = true;
+      // Switch to keyboard mode on any key press
+      if (this.#controls.controlMode !== "keyboard") {
+        this.#controls.controlMode = "keyboard";
       }
-      if (e.code === "Space") {
-        this.#controls.fire = true;
-      }
-      if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
-        this.#controls.staticCamera = true;
+
+      // Apply keyboard inputs when in keyboard mode or null (initial state)
+      const isKeyboardMode = this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
+      if (isKeyboardMode) {
+        if (e.code === "KeyW" || e.code === "ArrowUp") {
+          this.#controls.thrust = true;
+        }
+        if (e.code === "Space" || e.code === "KeyZ") {
+          this.#controls.fire = true;
+        }
+        if (e.code === "ArrowLeft") {
+          this.#controls.keyboardRotateLeft = true;
+        }
+        if (e.code === "ArrowRight") {
+          this.#controls.keyboardRotateRight = true;
+        }
+        // Only set staticCamera with keyboard when in keyboard mode (not null, to avoid conflicts)
+        if (this.#controls.controlMode === "keyboard") {
+          if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+            this.#controls.staticCamera = true;
+          }
+        }
       }
     });
     window.addEventListener("keyup", (e) => {
-      if (e.code === "KeyW") {
-        this.#controls.thrust = false;
-      }
-      if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
-        this.#controls.staticCamera = false;
+      // Apply keyboard inputs when in keyboard mode or null (initial state)
+      const isKeyboardMode = this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
+      if (isKeyboardMode) {
+        if (e.code === "KeyW" || e.code === "ArrowUp") {
+          this.#controls.thrust = false;
+        }
+        if (e.code === "ArrowLeft") {
+          this.#controls.keyboardRotateLeft = false;
+        }
+        if (e.code === "ArrowRight") {
+          this.#controls.keyboardRotateRight = false;
+        }
+        // Only set staticCamera with keyboard when in keyboard mode (not null, to avoid conflicts)
+        if (this.#controls.controlMode === "keyboard") {
+          if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+            this.#controls.staticCamera = false;
+          }
+        }
       }
     });
     window.addEventListener("mousedown", (e) => {
@@ -700,8 +924,21 @@ export class ClientEngine {
         return;
       }
 
-      if (e.button === 0) {
+      // Apply mouse inputs when in keyboard mode or null (initial state)
+      if ((this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null) && e.button === 0) {
         this.#controls.fire = true;
+      }
+    });
+
+    // Gamepad connect/disconnect listeners
+    window.addEventListener("gamepadconnected", (e) => {
+      console.log("Gamepad connected:", e.gamepad.id);
+    });
+    window.addEventListener("gamepaddisconnected", (e) => {
+      console.log("Gamepad disconnected:", e.gamepad.id);
+      // If gamepad was the active control mode, reset to null
+      if (this.#controls.controlMode === "gamepad") {
+        this.#controls.controlMode = null;
       }
     });
   }

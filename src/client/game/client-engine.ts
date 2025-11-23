@@ -333,6 +333,7 @@ export class ClientEngine {
 
     // Load settings directly from localStorage to avoid timing issues
     const STORAGE_KEY = "audio-settings";
+    let loadedMasterVolume = 1.0;
     let loadedVolumes = { game: 1.0, ui: 1.0, music: 0.5, ambience: 1.0 };
     let loadedMutes = { game: false, ui: false, music: false, ambience: false };
 
@@ -340,6 +341,9 @@ export class ClientEngine {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+        if (parsed.masterVolume !== undefined) {
+          loadedMasterVolume = parsed.masterVolume;
+        }
         if (parsed.volumes) {
           loadedVolumes = { ...loadedVolumes, ...parsed.volumes };
         }
@@ -352,6 +356,7 @@ export class ClientEngine {
     }
 
     // Apply settings to audio engine
+    this.#audioEngine.setMasterVolume(loadedMasterVolume);
     this.#audioEngine.setCategoryVolume("game", loadedVolumes.game);
     this.#audioEngine.setCategoryVolume("ui", loadedVolumes.ui);
     this.#audioEngine.setCategoryVolume("music", loadedVolumes.music);
@@ -1193,6 +1198,7 @@ export class ClientEngine {
     const wasGameMuted = this.#audioEngine.isCategoryMuted("game");
     const wasAmbienceMuted = this.#audioEngine.isCategoryMuted("ambience");
 
+    this.#audioEngine.setMasterVolume(settings.masterVolume);
     this.#audioEngine.setCategoryVolume("game", settings.volumes.game);
     this.#audioEngine.setCategoryVolume("ui", settings.volumes.ui);
     this.#audioEngine.setCategoryVolume("music", settings.volumes.music);
@@ -1225,5 +1231,20 @@ export class ClientEngine {
         nonPositional: true,
       });
     }
+  }
+
+  playUIClick(): void {
+    if (!this.#audioEngine) return;
+    this.#audioEngine.playOneShot({ soundId: "snd_click" });
+  }
+
+  playUIHover(): void {
+    if (!this.#audioEngine) return;
+    this.#audioEngine.playOneShot({ soundId: "snd_hover" });
+  }
+
+  playUIType(): void {
+    if (!this.#audioEngine) return;
+    this.#audioEngine.playOneShot({ soundId: "snd_type" });
   }
 }

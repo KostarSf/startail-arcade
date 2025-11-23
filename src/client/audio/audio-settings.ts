@@ -8,11 +8,13 @@ import type { SoundCategory } from "./audio-engine";
 const STORAGE_KEY = "audio-settings";
 
 interface AudioSettingsState {
+  masterVolume: number;
   volumes: Record<SoundCategory, number>;
   mutes: Record<SoundCategory, boolean>;
 }
 
 interface AudioSettingsActions {
+  setMasterVolume: (volume: number) => void;
   setVolume: (category: SoundCategory, volume: number) => void;
   setMuted: (category: SoundCategory, muted: boolean) => void;
   load: () => void;
@@ -22,6 +24,7 @@ interface AudioSettingsActions {
 export type AudioSettingsStore = AudioSettingsState & AudioSettingsActions;
 
 const DEFAULT_SETTINGS: AudioSettingsState = {
+  masterVolume: 1.0,
   volumes: {
     game: 1.0,
     ui: 1.0,
@@ -60,6 +63,21 @@ function saveToStorage(state: AudioSettingsState): void {
 
 export const useAudioSettings = create<AudioSettingsStore>((set, get) => ({
   ...DEFAULT_SETTINGS,
+  setMasterVolume: (volume: number) => {
+    set((state) => {
+      const newState = {
+        ...state,
+        masterVolume: Math.max(0, Math.min(1, volume)),
+      };
+      // Save the new state immediately
+      saveToStorage({
+        masterVolume: newState.masterVolume,
+        volumes: newState.volumes,
+        mutes: newState.mutes,
+      });
+      return newState;
+    });
+  },
   setVolume: (category: SoundCategory, volume: number) => {
     set((state) => {
       const newState = {
@@ -71,6 +89,7 @@ export const useAudioSettings = create<AudioSettingsStore>((set, get) => ({
       };
       // Save the new state immediately
       saveToStorage({
+        masterVolume: newState.masterVolume,
         volumes: newState.volumes,
         mutes: newState.mutes,
       });
@@ -88,6 +107,7 @@ export const useAudioSettings = create<AudioSettingsStore>((set, get) => ({
       };
       // Save the new state immediately
       saveToStorage({
+        masterVolume: newState.masterVolume,
         volumes: newState.volumes,
         mutes: newState.mutes,
       });
@@ -97,6 +117,7 @@ export const useAudioSettings = create<AudioSettingsStore>((set, get) => ({
   load: () => {
     const stored = loadFromStorage();
     set((state) => ({
+      masterVolume: stored.masterVolume ?? DEFAULT_SETTINGS.masterVolume,
       volumes: {
         ...DEFAULT_SETTINGS.volumes,
         ...stored.volumes,
@@ -110,6 +131,7 @@ export const useAudioSettings = create<AudioSettingsStore>((set, get) => ({
   save: () => {
     const state = get();
     saveToStorage({
+      masterVolume: state.masterVolume,
       volumes: state.volumes,
       mutes: state.mutes,
     });

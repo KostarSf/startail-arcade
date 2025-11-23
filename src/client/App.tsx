@@ -166,6 +166,8 @@ function RespawnButton() {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Play click sound
+    clientEngine.playUIClick();
     // Send respawn command to spawn the player ship
     // This works for both initial spawn (deathPosition is null) and respawn after death
     clientEngine.respawn(playerName);
@@ -181,6 +183,8 @@ function RespawnButton() {
           type="text"
           value={playerName}
           onChange={(e) => setPlayerName(e.target.value)}
+          onKeyDown={() => clientEngine.playUIType()}
+          onFocus={() => clientEngine.playUIHover()}
           className="name-input"
           placeholder="Enter your name"
           maxLength={20}
@@ -189,7 +193,11 @@ function RespawnButton() {
           <div className="respawn-error">{stats.respawnError}</div>
         )}
       </div>
-      <button type="submit" className="respawn-button pointer-events-auto">
+      <button
+        type="submit"
+        className="respawn-button pointer-events-auto"
+        onMouseEnter={() => clientEngine.playUIHover()}
+      >
         {buttonText}
       </button>
     </form>
@@ -329,7 +337,11 @@ function ConnectionError() {
           Please wait a bit and try again.
         </div>
         <button
-          onClick={() => window.location.reload()}
+          onClick={() => {
+            clientEngine.playUIClick();
+            window.location.reload();
+          }}
+          onMouseEnter={() => clientEngine.playUIHover()}
           className="connection-error-button"
         >
           RELOAD PAGE
@@ -342,7 +354,11 @@ function ConnectionError() {
 function HelpButton() {
   return (
     <div className="relative group pointer-events-auto">
-      <button className="help-button" aria-label="Help">
+      <button
+        className="help-button"
+        aria-label="Help"
+        onMouseEnter={() => clientEngine.playUIHover()}
+      >
         ?
       </button>
       <div className="help-dialog opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 pointer-events-auto">

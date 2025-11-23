@@ -4,15 +4,18 @@
  */
 
 // Sound asset imports
+import sndClickUrl from "../assets/sounds/snd_click.ogg";
 import sndCoinUrl from "../assets/sounds/snd_coin.wav";
 import sndDeathUrl from "../assets/sounds/snd_death.wav";
 import sndEngineUrl from "../assets/sounds/snd_engine.wav";
 import sndExplodeUrl from "../assets/sounds/snd_explode.wav";
 import sndHitUrl from "../assets/sounds/snd_hit.wav";
+import sndHoverUrl from "../assets/sounds/snd_hover.ogg";
 import sndOutOfAmmoUrl from "../assets/sounds/snd_out_of_ammo.wav";
 import sndReviveUrl from "../assets/sounds/snd_revive.wav";
 import sndShootUrl from "../assets/sounds/snd_shoot.wav";
 import sndSmallHitUrl from "../assets/sounds/snd_small_hit.wav";
+import sndTypeUrl from "../assets/sounds/snd_type.ogg";
 import msgSongUrl from "../assets/sounds/music/msg_song.ogg";
 import spaceAmbienceUrl from "../assets/sounds/music/space.ogg";
 
@@ -49,6 +52,27 @@ export interface StopMusicParams {
 
 // Sound registry with metadata
 const SOUND_REGISTRY: Record<string, SoundMetadata> = {
+  snd_click: {
+    category: "ui",
+    baseVolume: 0.5,
+    reverbSend: 0.0,
+    positional: false,
+    dopplerEnabled: false,
+  },
+  snd_hover: {
+    category: "ui",
+    baseVolume: 0.3,
+    reverbSend: 0.0,
+    positional: false,
+    dopplerEnabled: false,
+  },
+  snd_type: {
+    category: "ui",
+    baseVolume: 0.4,
+    reverbSend: 0.0,
+    positional: false,
+    dopplerEnabled: false,
+  },
   snd_explode: {
     category: "game",
     baseVolume: 0.8,
@@ -58,7 +82,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   },
   snd_coin: {
     category: "ui",
-    baseVolume: 0.7,
+    baseVolume: 0.5,
     reverbSend: 0.0,
     positional: false,
     dopplerEnabled: false,
@@ -102,7 +126,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   },
   snd_revive: {
     category: "game",
-    baseVolume: 0.8,
+    baseVolume: 0.5,
     reverbSend: 0.0,
     positional: false,
     dopplerEnabled: false,
@@ -142,16 +166,19 @@ const MUSIC_REGISTRY: Record<string, { loop?: boolean; baseVolume: number }> = {
 
 // URL mapping
 const SOUND_URLS: Record<string, string> = {
+  snd_click: sndClickUrl,
   snd_explode: sndExplodeUrl,
   snd_coin: sndCoinUrl,
   snd_death: sndDeathUrl,
   snd_engine: sndEngineUrl,
   snd_engine_bullet: sndEngineUrl,
   snd_hit: sndHitUrl,
+  snd_hover: sndHoverUrl,
   snd_out_of_ammo: sndOutOfAmmoUrl,
   snd_revive: sndReviveUrl,
   snd_shoot: sndShootUrl,
   snd_small_hit: sndSmallHitUrl,
+  snd_type: sndTypeUrl,
   space_ambience: spaceAmbienceUrl,
 };
 
@@ -809,6 +836,17 @@ export class AudioEngine {
     music.isPlaying = false;
     music.source = null;
     this.activeMusic.delete(params.musicId);
+  }
+
+  // Master volume control
+  setMasterVolume(volume: number): void {
+    if (!this.masterGain) return;
+    this.masterGain.gain.value = Math.max(0, Math.min(1, volume));
+  }
+
+  getMasterVolume(): number {
+    if (!this.masterGain) return 1.0;
+    return this.masterGain.gain.value;
   }
 
   // Category volume and mute controls

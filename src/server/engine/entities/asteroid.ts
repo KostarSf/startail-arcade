@@ -54,8 +54,7 @@ export class Asteroid extends LivingEntity {
         world,
         this.position,
         relativeVelocity,
-        // Math.ceil(this.earnablePoints),
-        999,
+        Math.ceil(this.earnablePoints),
         (this.radius ?? 0) * 0.7
       );
     }

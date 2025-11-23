@@ -96,7 +96,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   },
   snd_engine: {
     category: "game",
-    baseVolume: 0.15,
+    baseVolume: 0.17,
     reverbSend: 0.2,
     positional: true,
     dopplerEnabled: true,
@@ -104,7 +104,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   // Tiny positional engine hum used for enemy bullets
   snd_engine_bullet: {
     category: "game",
-    baseVolume: 0.05,
+    baseVolume: 0.1,
     reverbSend: 0.0,
     positional: true,
     dopplerEnabled: true,

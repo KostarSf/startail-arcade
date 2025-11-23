@@ -333,8 +333,8 @@ export class ClientEngine {
 
     // Load settings directly from localStorage to avoid timing issues
     const STORAGE_KEY = "audio-settings";
-    let loadedVolumes = { game: 1.0, ui: 1.0, music: 0.5 };
-    let loadedMutes = { game: false, ui: false, music: false };
+    let loadedVolumes = { game: 1.0, ui: 1.0, music: 0.5, ambience: 1.0 };
+    let loadedMutes = { game: false, ui: false, music: false, ambience: false };
 
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -355,9 +355,11 @@ export class ClientEngine {
     this.#audioEngine.setCategoryVolume("game", loadedVolumes.game);
     this.#audioEngine.setCategoryVolume("ui", loadedVolumes.ui);
     this.#audioEngine.setCategoryVolume("music", loadedVolumes.music);
+    this.#audioEngine.setCategoryVolume("ambience", loadedVolumes.ambience);
     this.#audioEngine.setCategoryMuted("game", loadedMutes.game);
     this.#audioEngine.setCategoryMuted("ui", loadedMutes.ui);
     this.#audioEngine.setCategoryMuted("music", loadedMutes.music);
+    this.#audioEngine.setCategoryMuted("ambience", loadedMutes.ambience);
 
     // Start global space ambience (game sound, non-positional, always looping)
     this.#audioEngine.playLoopingSound({

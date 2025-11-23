@@ -83,7 +83,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
     baseVolume: 0.05,
     reverbSend: 0.0,
     positional: true,
-    dopplerEnabled: true, // No Doppler, we just use higher pitch
+    dopplerEnabled: true,
     basePitch: 10,
   },
   snd_hit: {
@@ -404,6 +404,10 @@ export class AudioEngine {
       categoryGain = this.gameGain!;
     } else if (metadata.category === "ui") {
       categoryGain = this.uiGain!;
+    } else if (metadata.category === "music") {
+      categoryGain = this.musicGain!;
+    } else if (metadata.category === "ambience") {
+      categoryGain = this.ambienceGain!;
     } else {
       categoryGain = this.masterGain!; // Fallback
     }
@@ -605,6 +609,10 @@ export class AudioEngine {
       categoryGain = this.gameGain!;
     } else if (metadata.category === "ui") {
       categoryGain = this.uiGain!;
+    } else if (metadata.category === "music") {
+      categoryGain = this.musicGain!;
+    } else if (metadata.category === "ambience") {
+      categoryGain = this.ambienceGain!;
     } else {
       categoryGain = this.masterGain!;
     }
@@ -828,11 +836,12 @@ export class AudioEngine {
   }
 
   private updateCategoryGains(): void {
-    if (!this.gameGain || !this.uiGain || !this.musicGain) return;
+    if (!this.gameGain || !this.uiGain || !this.musicGain || !this.ambienceGain) return;
 
     this.gameGain.gain.value = this.categoryMutes.game ? 0 : this.categoryVolumes.game;
     this.uiGain.gain.value = this.categoryMutes.ui ? 0 : this.categoryVolumes.ui;
     this.musicGain.gain.value = this.categoryMutes.music ? 0 : this.categoryVolumes.music;
+    this.ambienceGain.gain.value = this.categoryMutes.ambience ? 0 : this.categoryVolumes.ambience;
   }
 
   // Stop all active sounds with a specific sound ID

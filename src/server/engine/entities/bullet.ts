@@ -1,11 +1,9 @@
 import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
-import { TPS } from "../constants";
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { LivingEntity } from "./living-entity";
 
 export interface IBullet extends IBaseEntity {
-  life: number;
   ownerId: string;
   damage: number;
 }
@@ -15,8 +13,7 @@ export class Bullet extends BaseEntity {
 
   static #nextId = 1;
 
-  static lifeSpan = TPS * 5; // 4 seconds
-  life: number;
+  static lifeSpan = 5; // 5 seconds
 
   #owner: BaseEntity | null = null;
   #ownerId: string | null = null;
@@ -36,7 +33,7 @@ export class Bullet extends BaseEntity {
 
     super(bullet);
     this.#ownerId = bullet.ownerId ?? null;
-    this.life = bullet.life ?? Bullet.lifeSpan;
+    this.life = Bullet.lifeSpan;
     this.damage = bullet.damage ?? 10;
   }
 
@@ -58,12 +55,6 @@ export class Bullet extends BaseEntity {
     super.update(world, delta);
 
     this.angle = Math.atan2(this.vy, this.vx);
-
-    this.life -= 1;
-    if (this.life <= 0) {
-      this.remove();
-      return;
-    }
   }
 
   override onCollisionStart(world: World, other: BaseEntity): void {
@@ -88,7 +79,6 @@ export class Bullet extends BaseEntity {
     return {
       ...super.toJSON(),
       ownerId: this.#ownerId ?? undefined,
-      life: this.life,
       damage: this.damage,
     };
   }

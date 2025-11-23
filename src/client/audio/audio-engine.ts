@@ -9,6 +9,7 @@ import sndCoinUrl from "../assets/sounds/snd_coin.wav";
 import sndDeathUrl from "../assets/sounds/snd_death.wav";
 import sndEngineUrl from "../assets/sounds/snd_engine.wav";
 import sndExplodeUrl from "../assets/sounds/snd_explode.wav";
+import sndFuelUrl from "../assets/sounds/snd_fuel.wav";
 import sndHitUrl from "../assets/sounds/snd_hit.wav";
 import sndHoverUrl from "../assets/sounds/snd_hover.ogg";
 import sndOutOfAmmoUrl from "../assets/sounds/snd_out_of_ammo.wav";
@@ -36,6 +37,7 @@ export interface PlayOneShotParams {
   position?: { x: number; y: number };
   velocity?: { vx: number; vy: number };
   volume?: number; // Override base volume (0-1)
+  pitch?: number; // Optional pitch multiplier (default 1.0)
 }
 
 export interface PlayMusicParams {
@@ -87,6 +89,13 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
     positional: false,
     dopplerEnabled: false,
   },
+  snd_fuel: {
+    category: "ui",
+    baseVolume: 0.5,
+    reverbSend: 0.0,
+    positional: false,
+    dopplerEnabled: false,
+  },
   snd_death: {
     category: "game",
     baseVolume: 0.8,
@@ -96,7 +105,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   },
   snd_engine: {
     category: "game",
-    baseVolume: 0.15,
+    baseVolume: 0.17,
     reverbSend: 0.2,
     positional: true,
     dopplerEnabled: true,
@@ -104,7 +113,7 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   // Tiny positional engine hum used for enemy bullets
   snd_engine_bullet: {
     category: "game",
-    baseVolume: 0.05,
+    baseVolume: 0.1,
     reverbSend: 0.0,
     positional: true,
     dopplerEnabled: true,
@@ -172,6 +181,7 @@ const SOUND_URLS: Record<string, string> = {
   snd_death: sndDeathUrl,
   snd_engine: sndEngineUrl,
   snd_engine_bullet: sndEngineUrl,
+  snd_fuel: sndFuelUrl,
   snd_hit: sndHitUrl,
   snd_hover: sndHoverUrl,
   snd_out_of_ammo: sndOutOfAmmoUrl,
@@ -459,6 +469,7 @@ export class AudioEngine {
       panner.positionZ.value = 0;
 
       // Calculate Doppler shift based on relative velocity
+      let finalPlaybackRate = params.pitch ?? 1.0;
       if (params.velocity && metadata.dopplerEnabled !== false) {
         const dx = params.position.x - this.listenerPosition.x;
         const dy = params.position.y - this.listenerPosition.y;
@@ -479,10 +490,12 @@ export class AudioEngine {
           // Default dopplerFactor = 1: higher when approaching, lower when receding
           const dopplerFactor = metadata.dopplerFactor ?? 1;
           const dopplerShift = 1 + dopplerFactor * (relativeVel / SOUND_SPEED);
-          // Clamp to reasonable range
-          source.playbackRate.value = Math.max(0.5, Math.min(2.0, dopplerShift));
+          // Multiply pitch with Doppler shift
+          finalPlaybackRate *= dopplerShift;
         }
       }
+      // Apply pitch/playback rate (clamp to reasonable range)
+      source.playbackRate.value = Math.max(0.5, Math.min(2.0, finalPlaybackRate));
 
       // Connect: source -> gain -> panner -> category gain -> master
       source.connect(gain);
@@ -498,6 +511,10 @@ export class AudioEngine {
       }
     } else {
       // Non-positional audio (centered on listener)
+      // Apply pitch if specified (no Doppler for non-positional)
+      if (params.pitch !== undefined) {
+        source.playbackRate.value = Math.max(0.5, Math.min(2.0, params.pitch));
+      }
       source.connect(gain);
       gain.connect(categoryGain);
     }

@@ -29,6 +29,7 @@ export interface ShipPhysicsResult {
 }
 
 export const SHIP_CONSTANTS = {
+  radius: 13,
   maxSpeed: 250,
   limitThreshold: 150,
   startBoost: 8,

@@ -45,10 +45,13 @@ export abstract class LivingEntity extends BaseEntity implements Damageable {
     );
 
     if (!this.isAlive) {
+      this.onDeath(world, source);
       this.remove();
       world.engine.network.handleEntityDestroyed(world, this, source);
     }
   }
+
+  protected onDeath(world: World, source?: BaseEntity) {}
 
   protected abstract onDamage(
     world: World,

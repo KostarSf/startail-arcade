@@ -1,8 +1,10 @@
 import {
   AnimatedSprite,
   Container,
+  Graphics,
   Rectangle,
   Sprite,
+  Text,
   Texture,
   TextureSource,
 } from "pixi.js";
@@ -114,6 +116,61 @@ const ensureRenderable = (
         container.addChild(bulletSprite); // Add after glare and shadow so bullet renders on top
       }
       break;
+    case "exp":
+      {
+        // Select sprite based on value
+        const value = (snapshotEntity as any).value ?? 0;
+        let expTexture: Texture;
+        if (value < 50) {
+          expTexture = services.textures.exp1;
+        } else if (value < 500) {
+          expTexture = services.textures.exp2;
+        } else {
+          expTexture = services.textures.exp3;
+        }
+
+        const expSprite = new Sprite({
+          texture: expTexture,
+          anchor: 0.5,
+        });
+        expSprite.scale.set(2); // Scale exp sprites by 1.5
+
+        // Add glare sprite below exp so exp renders on top
+        const glareSprite = new Sprite({
+          texture: services.textures.glare,
+          anchor: 0.5,
+        });
+        glareSprite.name = "glare";
+        glareSprite.rotation = 0; // Keep horizontal
+        container.addChild(glareSprite); // Add first so it renders below
+        addShadowToContainer({ parent: container, base: expSprite });
+        container.addChild(expSprite); // Add after glare and shadow so exp renders on top
+        sprite = expSprite;
+      }
+      break;
+    default: {
+      const radius = snapshotEntity.radius ?? 10;
+      const circle = new Graphics();
+      circle.circle(0, 0, radius);
+      circle.fill(0x00ff00); // Green color
+      circle.stroke({ color: 0x00cc00, width: 1 });
+      circle.name = "default-circle";
+
+      const label = new Text({
+        text: snapshotEntity.type ?? "unknown",
+        style: {
+          fontSize: 12,
+          fill: 0xffffff,
+          align: "center",
+        },
+      });
+      label.anchor.set(0.5);
+      label.y = radius + 5; // Position label below the circle
+
+      container.addChild(circle);
+      container.addChild(label);
+      break;
+    }
   }
 
   if (sprite) {

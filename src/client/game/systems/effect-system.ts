@@ -52,10 +52,12 @@ const spawnDamageText = (
   services: ClientServices,
   payload: DamageTextRequest
 ) => {
+  const isHealing = payload.amount < 0;
+  const amount = Math.abs(payload.amount);
   const text = new Text({
-    text: `-${Math.round(payload.amount)}`,
+    text: isHealing ? `+${Math.round(amount)}` : `-${Math.round(amount)}`,
     style: {
-      fill: 0xffff00,
+      fill: isHealing ? 0x00ff00 : 0xffff00,
       fontFamily: "Press Start 2P, monospace",
       fontSize: 6,
       dropShadow: {

@@ -8,6 +8,7 @@ import type { World } from "../world/world";
 
 export type IBaseEntity = BaseEntityState & {
   continuousCollision?: boolean;
+  life?: number;
 };
 
 export abstract class BaseEntity {
@@ -27,8 +28,13 @@ export abstract class BaseEntity {
   /** Radians per second */
   va: number;
 
+  linearDamping: number | undefined;
+  targetSpeed: number | undefined;
+
   /** Radius in pixels for collision detection */
   radius: number | undefined;
+
+  life: number | undefined;
 
   continuousCollision: boolean;
 
@@ -97,6 +103,7 @@ export abstract class BaseEntity {
     this.va = entity.va ?? 0;
     this.radius = entity.radius ?? undefined;
     this.continuousCollision = entity.continuousCollision ?? false;
+    this.life = entity.life ?? undefined;
   }
 
   initialize(world: World) {
@@ -121,6 +128,14 @@ export abstract class BaseEntity {
 
   update(world: World, delta: number) {
     this.#wasWarped = false;
+
+    if (this.life) {
+      this.life -= delta;
+      if (this.life <= 0) {
+        this.remove();
+        return;
+      }
+    }
 
     integrateMotion(this, delta);
 
@@ -220,7 +235,10 @@ export abstract class BaseEntity {
       angle: this.angle,
       vx: this.vx,
       vy: this.vy,
+      linearDamping: this.linearDamping,
+      targetSpeed: this.targetSpeed,
       va: this.va,
+      life: this.life,
     };
   }
 }

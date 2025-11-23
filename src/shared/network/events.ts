@@ -101,6 +101,11 @@ export interface PlayerCameraBoundsEvent {
   };
 }
 
+export interface PlayerScoreEvent {
+  type: "player:score";
+  score: number;
+}
+
 export type NetworkEvent =
   | PlayerInputEvent
   | ServerStateEvent
@@ -111,4 +116,5 @@ export type NetworkEvent =
   | ServerRespawnDeniedEvent
   | EntityDamageEvent
   | EntityDestroyEvent
-  | PlayerCameraBoundsEvent;
+  | PlayerCameraBoundsEvent
+  | PlayerScoreEvent;

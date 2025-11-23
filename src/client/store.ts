@@ -58,7 +58,7 @@ type StatsStoreActions = {
   setOutboundBytes: (bytesPerSecond: number) => void;
 };
 
-type StatsStore = StatsStoreState & StatsStoreActions;
+export type StatsStore = StatsStoreState & StatsStoreActions;
 
 export const useStats = create<StatsStore>((set) => ({
   latency: 0,

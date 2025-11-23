@@ -16,6 +16,22 @@ declare module "*.png" {
   export = path;
 }
 
+declare module "*.wav" {
+  /**
+   * A path to the WAV file
+   */
+  const path: `${string}.wav`;
+  export = path;
+}
+
+declare module "*.ogg" {
+  /**
+   * A path to the OGG file
+   */
+  const path: `${string}.ogg`;
+  export = path;
+}
+
 declare module "*.module.css" {
   /**
    * A record of class names to their corresponding CSS module classes

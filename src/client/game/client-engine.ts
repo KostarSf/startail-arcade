@@ -48,6 +48,8 @@ import playerTextureSrc from "../assets/images/player.png";
 
 import { Starfield } from "../starfield";
 import { stats } from "../store";
+import { AudioEngine } from "../audio/audio-engine";
+import { audioSettings } from "../audio/audio-settings";
 import { InputBuffer } from "./network/input-buffer";
 import { NetworkDecoder } from "./network/network-decoder";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
@@ -62,6 +64,7 @@ import { InterpolationSystem } from "./systems/interpolation-system";
 import { ParticleSystem } from "./systems/particle-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
+import { AudioSystem } from "./systems/audio-system";
 import type {
   ClientServices,
   ControlState,
@@ -83,6 +86,7 @@ export class ClientEngine {
   #renderScale = 0.7;
   #lastScreenWidth = 0;
   #lastScreenHeight = 0;
+  #audioEngine: AudioEngine | null = null;
 
   #entityManager = new EntityManager();
   #pipeline: Pipeline<ClientServices> | null = null;
@@ -311,11 +315,65 @@ export class ClientEngine {
     });
 
     await this.#loadTextures();
+    await this.#initializeAudio();
     this.#setupServices();
     this.#setupPipeline();
     this.#setupInputListeners();
     this.#setupTickers();
     this.#connect();
+  }
+
+  async #initializeAudio() {
+    this.#audioEngine = new AudioEngine();
+    await this.#audioEngine.initialize();
+
+    // Load audio settings from localStorage and apply them
+    const settings = audioSettings();
+    settings.load();
+
+    // Load settings directly from localStorage to avoid timing issues
+    const STORAGE_KEY = "audio-settings";
+    let loadedVolumes = { game: 1.0, ui: 1.0, music: 0.5 };
+    let loadedMutes = { game: false, ui: false, music: false };
+
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.volumes) {
+          loadedVolumes = { ...loadedVolumes, ...parsed.volumes };
+        }
+        if (parsed.mutes) {
+          loadedMutes = { ...loadedMutes, ...parsed.mutes };
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to load audio settings from localStorage:", e);
+    }
+
+    // Apply settings to audio engine
+    this.#audioEngine.setCategoryVolume("game", loadedVolumes.game);
+    this.#audioEngine.setCategoryVolume("ui", loadedVolumes.ui);
+    this.#audioEngine.setCategoryVolume("music", loadedVolumes.music);
+    this.#audioEngine.setCategoryMuted("game", loadedMutes.game);
+    this.#audioEngine.setCategoryMuted("ui", loadedMutes.ui);
+    this.#audioEngine.setCategoryMuted("music", loadedMutes.music);
+
+    // Start global space ambience (game sound, non-positional, always looping)
+    this.#audioEngine.playLoopingSound({
+      soundId: "space_ambience",
+      entityId: "ambient",
+      nonPositional: true,
+    });
+
+    // Resume audio context on first user interaction
+    const resumeAudio = async () => {
+      await this.#audioEngine?.resume();
+      document.removeEventListener("click", resumeAudio);
+      document.removeEventListener("keydown", resumeAudio);
+    };
+    document.addEventListener("click", resumeAudio, { once: true });
+    document.addEventListener("keydown", resumeAudio, { once: true });
   }
 
   #setupRetroRendering() {
@@ -435,6 +493,9 @@ export class ClientEngine {
     ) {
       throw new Error("Textures not loaded");
     }
+    if (!this.#audioEngine) {
+      throw new Error("Audio engine not initialized");
+    }
     const self = this;
     const effectQueues = {
       damageTexts: [] as DamageTextRequest[],
@@ -522,6 +583,8 @@ export class ClientEngine {
           effectQueues.explosions.push(payload);
         },
       },
+      audio: this.#audioEngine,
+      audioSettings: audioSettings,
     };
   }
 
@@ -542,6 +605,7 @@ export class ClientEngine {
     this.#pipeline.register(HintSystem);
     this.#pipeline.register(GridSystem);
     this.#pipeline.register(CameraSystem);
+    this.#pipeline.register(AudioSystem);
     const now = performance.now();
     this.#pipeline.init(now);
     this.#fpsLastSampleTime = now;
@@ -751,26 +815,84 @@ export class ClientEngine {
           if (entityId === undefined) {
             break;
           }
+
+          // Verify entity exists in world - check if it has transform
+          const transform = this.#services.stores.transform.get(entityId);
+          if (!transform) {
+            // Entity doesn't exist in world yet, skip sound
+            break;
+          }
+
           this.#services.effects.queueDamageText({
             amount: message.amount,
             x: message.x,
             y: message.y,
           });
           const networkState = this.#services.stores.networkState.get(entityId);
+
+          // Play damage sound only if entity exists in world
           if (networkState?.state?.type === "ship") {
+            // Ship damage - use snd_hit for ships
+            this.#services.audio.playOneShot({
+              soundId: "snd_hit",
+              position: { x: message.x, y: message.y },
+            });
+            // Queue explosion visual effect (explode sound will play on entity:destroy)
             this.#services.effects.queueExplosion({
               x: message.x,
               y: message.y,
             });
+          } else if (networkState?.state) {
+            // Other entity damage (asteroids, etc.) - use snd_small_hit
+            // Only play if entity has network state (exists in world)
+            this.#services.audio.playOneShot({
+              soundId: "snd_small_hit",
+              position: { x: message.x, y: message.y },
+            });
+          }
+
+          // Check if this damage killed the local player
+          if (message.entityId === this.#services.player.id) {
+            const entityNetworkState = this.#services.stores.networkState.get(entityId);
+            if (entityNetworkState?.state?.type === "ship") {
+              const health = entityNetworkState.state.health ?? entityNetworkState.state.maxHealth ?? 1;
+              if (health <= message.amount) {
+                // Player will die from this damage
+                this.#services.audio.playOneShot({ soundId: "snd_death" });
+              }
+            }
           }
         }
         break;
       case "entity:destroy":
         if (!this.#services) break;
-        this.#services.effects.queueExplosion({
-          x: message.x,
-          y: message.y,
-        });
+        {
+          // Verify entity existed in world before playing explode sound
+          const entityId = this.#services.entityIndex.get(message.entityId);
+          const hadTransform = entityId !== undefined &&
+            this.#services.stores.transform.has(entityId);
+
+          // Only play explode sound if entity existed in world
+          if (hadTransform) {
+            // Play explosion sound immediately when event comes in
+            this.#services.audio.playOneShot({
+              soundId: "snd_explode",
+              position: { x: message.x, y: message.y },
+            });
+          }
+
+          // Queue explosion effect for visual (always, even if entity wasn't in world)
+          this.#services.effects.queueExplosion({
+            x: message.x,
+            y: message.y,
+          });
+
+          // Check if player scored from this destroy event
+          if (message.playerId === this.#services.player.id && message.score !== undefined) {
+            // Player gained score - play coin sound
+            this.#services.audio.playOneShot({ soundId: "snd_coin" });
+          }
+        }
         break;
     }
   }
@@ -816,6 +938,12 @@ export class ClientEngine {
     statsStore.setOutboundBytes(0);
     this.#inboundBytes = 0;
     this.#outboundBytes = 0;
+
+    // Stop music on disconnect
+    if (this.#audioEngine) {
+      this.#audioEngine.stopMusic({ musicId: "msg_song", fadeOutMs: 500 });
+    }
+
     if (this.#services) {
       this.#services.player.entityId = null;
       this.#services.player.id = null;
@@ -1051,5 +1179,49 @@ export class ClientEngine {
       name: name,
     }).serialize();
     this.#sendWithLatency(payload);
+  }
+
+  syncAudioSettings(): void {
+    if (!this.#audioEngine) return;
+    const settings = this.#services?.audioSettings();
+    if (!settings) return;
+
+    // Track previous music/game/ambience mute state to detect when categories are unmuted
+    const wasMusicMuted = this.#audioEngine.isCategoryMuted("music");
+    const wasGameMuted = this.#audioEngine.isCategoryMuted("game");
+    const wasAmbienceMuted = this.#audioEngine.isCategoryMuted("ambience");
+
+    this.#audioEngine.setCategoryVolume("game", settings.volumes.game);
+    this.#audioEngine.setCategoryVolume("ui", settings.volumes.ui);
+    this.#audioEngine.setCategoryVolume("music", settings.volumes.music);
+    this.#audioEngine.setCategoryVolume("ambience", settings.volumes.ambience);
+    this.#audioEngine.setCategoryMuted("game", settings.mutes.game);
+    this.#audioEngine.setCategoryMuted("ui", settings.mutes.ui);
+    this.#audioEngine.setCategoryMuted("music", settings.mutes.music);
+    this.#audioEngine.setCategoryMuted("ambience", settings.mutes.ambience);
+
+    // If music was just unmuted and player is alive, start playing music
+    const isMusicMuted = settings.mutes.music;
+    const isMusicPlaying = this.#audioEngine.isMusicPlaying("msg_song");
+    const isPlayerAlive = this.#services?.player.entityId !== null;
+
+    // Start music if it was just unmuted and player is alive
+    if (wasMusicMuted && !isMusicMuted && isPlayerAlive && !isMusicPlaying) {
+      this.#audioEngine.playMusic({
+        musicId: "msg_song",
+        loop: true,
+        fadeInMs: 1000,
+      });
+    }
+
+    // Ensure space ambience is playing when ambience is (re)enabled
+    const isAmbienceMuted = settings.mutes.ambience;
+    if (wasAmbienceMuted && !isAmbienceMuted) {
+      this.#audioEngine.playLoopingSound({
+        soundId: "space_ambience",
+        entityId: "ambient",
+        nonPositional: true,
+      });
+    }
   }
 }

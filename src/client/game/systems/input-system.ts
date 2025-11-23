@@ -91,6 +91,27 @@ export const InputSystem: System<ClientServices> = {
     if (fireTriggered) {
       shipControl.fire = true;
       cameraShake.add(FIRE_SHAKE_AMPLITUDE, FIRE_SHAKE_DURATION);
+
+      // Play shoot sound
+      const transform = stores.transform.get(player.entityId);
+      const velocity = stores.velocity.get(player.entityId);
+      const networkState = stores.networkState.get(player.entityId);
+
+      // Check if player has enough energy to fire (client-side check for sound feedback)
+      const shipState = networkState?.state?.type === "ship" ? networkState.state : null;
+      const energy = shipState?.energy ?? shipState?.maxEnergy ?? 100;
+      const energyConsumption = 25; // Approximate energy cost per shot (should match server)
+
+      if (energy >= energyConsumption) {
+        // Play shoot sound (non-positional for player)
+        services.audio.playOneShot({
+          soundId: "snd_shoot",
+          // No position - player's fire sound is non-positional (centered)
+        });
+      } else {
+        // Not enough energy - play out of ammo sound
+        services.audio.playOneShot({ soundId: "snd_out_of_ammo" });
+      }
     }
 
     if (angleChanged) {

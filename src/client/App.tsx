@@ -5,6 +5,7 @@ import {
   uniqueNamesGenerator,
 } from "unique-names-generator";
 import { DebugDialog } from "./DebugDialog";
+import { AudioSettings } from "./AudioSettings";
 import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
@@ -22,7 +23,7 @@ export function App() {
       <Leaderboard />
       <Radar />
       <RespawnButton />
-      <HelpButton />
+      <BottomRightButtons />
       {DEBUG ? <DebugDialog /> : null}
     </>
   );
@@ -340,31 +341,41 @@ function ConnectionError() {
 
 function HelpButton() {
   return (
-    <div className="fixed bottom-4 right-4 z-50 pointer-events-none">
-      <div className="relative group">
-        <button className="help-button pointer-events-auto" aria-label="Help">
-          ?
-        </button>
-        <div className="help-dialog opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 pointer-events-auto">
-          <div className="help-dialog-content">
-            <div className="help-item">
-              <span className="help-key">MOUSE</span>
-              <span className="help-action">rotate</span>
-            </div>
-            <div className="help-item">
-              <span className="help-key">W</span>
-              <span className="help-action">accelerate</span>
-            </div>
-            <div className="help-item">
-              <span className="help-key">LMB</span>
-              <span className="help-action">fire</span>
-            </div>
-            <div className="help-item">
-              <span className="help-key">Shift</span>
-              <span className="help-action">freeze camera</span>
-            </div>
+    <div className="relative group pointer-events-auto">
+      <button className="help-button" aria-label="Help">
+        ?
+      </button>
+      <div className="help-dialog opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 pointer-events-auto">
+        <div className="help-dialog-content">
+          <div className="help-item">
+            <span className="help-key">MOUSE</span>
+            <span className="help-action">rotate</span>
+          </div>
+          <div className="help-item">
+            <span className="help-key">W</span>
+            <span className="help-action">accelerate</span>
+          </div>
+          <div className="help-item">
+            <span className="help-key">LMB</span>
+            <span className="help-action">fire</span>
+          </div>
+          <div className="help-item">
+            <span className="help-key">Shift</span>
+            <span className="help-action">freeze camera</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function BottomRightButtons() {
+  return (
+    <div className="fixed bottom-4 right-4 z-50 pointer-events-none">
+      <div className="flex flex-row items-end gap-2">
+        {/* Help button to the left, sound button to the right */}
+        <HelpButton />
+        <AudioSettings />
       </div>
     </div>
   );

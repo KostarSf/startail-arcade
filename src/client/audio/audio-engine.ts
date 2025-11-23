@@ -89,14 +89,14 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   },
   snd_death: {
     category: "game",
-    baseVolume: 0.9,
+    baseVolume: 0.8,
     reverbSend: 0.3,
     positional: false, // Center on player
     dopplerEnabled: false,
   },
   snd_engine: {
     category: "game",
-    baseVolume: 0.3, // Reduced by 2x (was 0.6)
+    baseVolume: 0.15,
     reverbSend: 0.2,
     positional: true,
     dopplerEnabled: true,
@@ -133,14 +133,14 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   },
   snd_shoot: {
     category: "game",
-    baseVolume: 0.6,
+    baseVolume: 0.5,
     reverbSend: 0.1,
     positional: true,
     dopplerEnabled: true,
   },
   snd_small_hit: {
     category: "game",
-    baseVolume: 0.5,
+    baseVolume: 0.3,
     reverbSend: 0.2,
     positional: true,
     dopplerEnabled: false,

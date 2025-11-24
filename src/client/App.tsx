@@ -4,13 +4,14 @@ import {
   animals,
   uniqueNamesGenerator,
 } from "unique-names-generator";
+import cursorImage from "./assets/images/cursor.png";
 import { AudioSettings } from "./AudioSettings";
 import { DebugDialog } from "./DebugDialog";
 import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
-import cursorImage from "./assets/images/cursor.png";
 
+const VERSION = "v0.2.1";
 const DEBUG = false;
 
 export function App() {
@@ -184,7 +185,9 @@ function RespawnButton() {
 
   return (
     <>
-      <p className="fixed bottom-4 left-5 z-50 pointer-events-none font-mono text-xs">v0.2.0</p>
+      <p className="fixed bottom-4 left-5 z-50 pointer-events-none font-mono text-xs">
+        {VERSION}
+      </p>
       <form
         onSubmit={handleSubmit}
         className="fixed inset-0 flex flex-col items-center justify-center z-50 pointer-events-none"

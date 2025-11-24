@@ -121,19 +121,23 @@ const ensureRenderable = (
         // Select sprite based on value
         const value = (snapshotEntity as any).value ?? 0;
         let expTexture: Texture;
+        let scale = 1;
         if (value < 50) {
           expTexture = services.textures.exp1;
+          scale = 1.5 + (value < 5 ? 0.2 : value < 10 ? 0.6 : 1);
         } else if (value < 500) {
           expTexture = services.textures.exp2;
+          scale = 1.125 + (value < 50 ? 0.2 : value < 100 ? 0.6 : 1);
         } else {
           expTexture = services.textures.exp3;
+          scale = 1.25 + (value < 500 ? 0.2 : value < 1000 ? 0.6 : 1);
         }
 
         const expSprite = new Sprite({
           texture: expTexture,
           anchor: 0.5,
         });
-        expSprite.scale.set(2); // Scale exp sprites by 1.5
+        expSprite.scale.set(scale);
 
         // Add glare sprite below exp so exp renders on top
         const glareSprite = new Sprite({

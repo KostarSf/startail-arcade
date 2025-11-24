@@ -1,3 +1,4 @@
+import { level } from "@/shared/game/entities/player";
 import { useEffect, useRef, useState } from "react";
 import {
   adjectives,
@@ -11,7 +12,7 @@ import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
 
-const VERSION = "v0.2.2";
+const VERSION = "v0.3.0";
 const DEBUG = false;
 
 export function App() {
@@ -32,6 +33,8 @@ export function App() {
       <GameTagline />
       <Leaderboard />
       <Radar />
+      <LevelBar />
+      <FloatingScoreTexts />
       <RespawnButton />
       <BottomRightButtons />
       {DEBUG ? <DebugDialog /> : null}
@@ -138,37 +141,52 @@ function RespawnButton() {
   const stats = useStats();
   const [playerName, setPlayerName] = useState<string>("");
 
-  // Generate default unique 2-word name on mount
+  // Load name from localStorage on mount, or generate new one if missing
   useEffect(() => {
-    let defaultName: string | undefined;
+    const STORAGE_KEY = "playerName";
 
-    let attempts = 0;
+    // Try to load from localStorage
+    const savedName = localStorage.getItem(STORAGE_KEY);
 
-    while (
-      !defaultName ||
-      defaultName.length > 20 ||
-      stats.players.some((p) => p.name === defaultName)
-    ) {
-      defaultName = uniqueNamesGenerator({
-        dictionaries: [adjectives, animals],
-        separator: " ",
-        length: 2,
-        style: "capital",
-      });
+    if (savedName && savedName.trim().length > 0 && savedName.length <= 20) {
+      // Use saved name if valid
+      setPlayerName(savedName.trim());
+    } else {
+      // Generate default unique 2-word name if not found or invalid
+      let defaultName: string | undefined;
 
-      attempts++;
+      let attempts = 0;
 
-      if (attempts > 10) break;
+      while (
+        !defaultName ||
+        defaultName.length > 20 ||
+        stats.players.some((p) => p.name === defaultName)
+      ) {
+        defaultName = uniqueNamesGenerator({
+          dictionaries: [adjectives, animals],
+          separator: " ",
+          length: 2,
+          style: "capital",
+        });
+
+        attempts++;
+
+        if (attempts > 10) break;
+      }
+
+      if (defaultName) {
+        setPlayerName(defaultName);
+      }
     }
-
-    setPlayerName(defaultName);
   }, []);
 
   // Show button only after receiving server:player-initialize (playerId is set)
   // and when playerObject is null (not spawned yet or destroyed)
   // Hide button when playerObject exists (player is alive and spawned)
   // Also show during reconnection to indicate status
-  const shouldShow = (stats.playerId !== null && stats.playerObject === null) || stats.isReconnecting;
+  const shouldShow =
+    (stats.playerId !== null && stats.playerObject === null) ||
+    stats.isReconnecting;
 
   if (!shouldShow) return null;
 
@@ -187,11 +205,18 @@ function RespawnButton() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isDisabled) return; // Don't allow submit while reconnecting
+
+    // Save current username to localStorage when player starts to play
+    const trimmedName = playerName.trim();
+    if (trimmedName.length > 0 && trimmedName.length <= 20) {
+      localStorage.setItem("playerName", trimmedName);
+    }
+
     // Play click sound
     clientEngine.playUIClick();
     // Send respawn command to spawn the player ship
     // This works for both initial spawn (deathPosition is null) and respawn after death
-    clientEngine.respawn(playerName);
+    clientEngine.respawn(trimmedName);
   };
 
   return (
@@ -222,8 +247,12 @@ function RespawnButton() {
         )}
         <button
           type="submit"
-          className={`respawn-button pointer-events-auto ${stats.isReconnecting ? "reconnecting" : ""}`}
-          onMouseEnter={() => !stats.isReconnecting && clientEngine.playUIHover()}
+          className={`respawn-button pointer-events-auto ${
+            stats.isReconnecting ? "reconnecting" : ""
+          }`}
+          onMouseEnter={() =>
+            !stats.isReconnecting && clientEngine.playUIHover()
+          }
           disabled={isDisabled}
         >
           {buttonText}
@@ -469,6 +498,143 @@ function HelpButton() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LevelBar() {
+  const stats = useStats();
+
+  // Only show level bar when player exists and is alive
+  if (!stats.playerObject) return null;
+
+  // Get current player from players array
+  const currentPlayer = stats.players.find((p) => p.id === stats.playerId);
+  if (!currentPlayer) return null;
+
+  // Use player's score as XP
+  const xp = currentPlayer.score;
+  const currentLevel = level.levelFromXp(xp);
+
+  // Calculate XP progress to next level
+  const xpForCurrentLevel = level.xpTotalForLevel(currentLevel);
+  const xpForNextLevel = level.xpTotalForLevel(currentLevel + 1);
+  const xpNeededForNextLevel = xpForNextLevel - xpForCurrentLevel;
+  const xpProgress = xp - xpForCurrentLevel;
+  const progressPercent = Math.min(
+    (xpProgress / xpNeededForNextLevel) * 100,
+    100
+  );
+
+  return (
+    <div className="level-bar">
+      <div className="level-bar-label">LEVEL {currentLevel}</div>
+      <div className="level-bar-progress-container">
+        <div
+          className="level-bar-progress-fill"
+          style={{ width: `${progressPercent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FloatingScoreTexts() {
+  const floatingScoreTexts = useStats((state) => state.floatingScoreTexts);
+  const removeFloatingScoreText = useStats((state) => state.removeFloatingScoreText);
+
+  useEffect(() => {
+    // Clean up old texts (older than 1.2 seconds to ensure animation completes)
+    const interval = setInterval(() => {
+      const now = performance.now();
+      floatingScoreTexts.forEach((text) => {
+        if (now - text.startTime > 1200) {
+          removeFloatingScoreText(text.id);
+        }
+      });
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [floatingScoreTexts, removeFloatingScoreText]);
+
+  if (floatingScoreTexts.length === 0) return null;
+
+  return (
+    <>
+      {floatingScoreTexts.map((text) => (
+        <FloatingScoreText
+          key={text.id}
+          id={text.id}
+          value={text.value}
+          startTime={text.startTime}
+        />
+      ))}
+    </>
+  );
+}
+
+function FloatingScoreText({
+  id,
+  value,
+  startTime,
+}: {
+  id: number;
+  value: number;
+  startTime: number;
+}) {
+  const removeFloatingScoreText = useStats((state) => state.removeFloatingScoreText);
+  const [opacity, setOpacity] = useState(1);
+  const [translateY, setTranslateY] = useState(0);
+
+  useEffect(() => {
+    const duration = 1000; // 1 second
+    let animationFrame: number;
+
+    // Ease-out cubic function: starts fast, slows down
+    const easeOutCubic = (t: number): number => {
+      return 1 - Math.pow(1 - t, 3);
+    };
+
+    const animate = () => {
+      const now = performance.now();
+      const elapsed = now - startTime;
+      const linearProgress = Math.min(elapsed / duration, 1);
+
+      // Apply easing function for smooth deceleration
+      const easedProgress = easeOutCubic(linearProgress);
+
+      // Fly up: move from 0 to -60px with easing
+      setTranslateY(-60 * easedProgress);
+
+      // Fade out: opacity from 1 to 0 with easing
+      setOpacity(1 - easedProgress);
+
+      if (linearProgress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      } else {
+        // Remove from store when animation completes
+        removeFloatingScoreText(id);
+      }
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [id, startTime, removeFloatingScoreText]);
+
+  return (
+    <div
+      className="floating-score-text"
+      style={{
+        opacity,
+        transform: `translateX(-50%) translateY(${translateY}px)`,
+      }}
+    >
+      +{value}
     </div>
   );
 }

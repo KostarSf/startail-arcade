@@ -36,6 +36,14 @@ type StatsStoreState = {
   /** Network traffic stats in KB per second */
   inboundBytesPerSecond: number;
   outboundBytesPerSecond: number;
+  /** Floating score texts */
+  floatingScoreTexts: Array<{
+    id: number;
+    value: number;
+    startTime: number;
+  }>;
+  /** Remove floating score text by id */
+  removeFloatingScoreText: (id: number) => void;
 };
 
 type StatsStoreActions = {
@@ -56,6 +64,8 @@ type StatsStoreActions = {
   setIsReconnecting: (isReconnecting: boolean) => void;
   setInboundBytes: (bytesPerSecond: number) => void;
   setOutboundBytes: (bytesPerSecond: number) => void;
+  addFloatingScoreText: (value: number) => void;
+  removeFloatingScoreText: (id: number) => void;
 };
 
 export type StatsStore = StatsStoreState & StatsStoreActions;
@@ -78,6 +88,7 @@ export const useStats = create<StatsStore>((set) => ({
   isReconnecting: false,
   inboundBytesPerSecond: 0,
   outboundBytesPerSecond: 0,
+  floatingScoreTexts: [],
   setLatency: (latency: number) => set({ latency }),
   setOffset: (offset: number) => set({ offset }),
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
@@ -95,6 +106,21 @@ export const useStats = create<StatsStore>((set) => ({
   setIsReconnecting: (isReconnecting: boolean) => set({ isReconnecting }),
   setInboundBytes: (bytesPerSecond: number) => set({ inboundBytesPerSecond: bytesPerSecond }),
   setOutboundBytes: (bytesPerSecond: number) => set({ outboundBytesPerSecond: bytesPerSecond }),
+  addFloatingScoreText: (value: number) =>
+    set((state) => ({
+      floatingScoreTexts: [
+        ...state.floatingScoreTexts,
+        {
+          id: Date.now() + Math.random(),
+          value,
+          startTime: performance.now(),
+        },
+      ],
+    })),
+  removeFloatingScoreText: (id: number) =>
+    set((state) => ({
+      floatingScoreTexts: state.floatingScoreTexts.filter((text) => text.id !== id),
+    })),
 }));
 
 export const stats = () => useStats.getState();

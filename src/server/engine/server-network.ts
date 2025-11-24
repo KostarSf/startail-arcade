@@ -1,4 +1,5 @@
 import type { GenericNetEntityState } from "@/shared/game/entities/base";
+import { level as levelUtils } from "@/shared/game/entities/player";
 import { Vector2 } from "@/shared/math/vector";
 import type {
   FullServerState,
@@ -19,7 +20,10 @@ export class ServerPlayer {
   ws: Bun.ServerWebSocket;
   ship: Ship | null = null;
   name: string = "";
+
   score: number = 0;
+  level = levelUtils.levelFromXp(this.score);
+  totalScoreToNextLevel = levelUtils.xpTotalForLevel(this.level + 1);
 
   needFullState = true;
 
@@ -40,14 +44,49 @@ export class ServerPlayer {
   }
 
   addScore(points: number) {
+    if (!this.ship || this.ship.removed) return;
+
+    const previousLevel = this.level;
+
     this.score += points;
     // Send score event to the player
     this.ws.send(
       event({
         type: "player:score",
         score: this.score,
+        delta: points,
       }).serialize()
     );
+    this.level = levelUtils.levelFromXp(this.score);
+    this.totalScoreToNextLevel = levelUtils.xpTotalForLevel(this.level + 1);
+
+    if (previousLevel < this.level) {
+      const levelDifference = this.level - previousLevel;
+      this.ship.maxHealth += levelDifference * 10;
+      this.ship.maxEnergy += levelDifference * 0.5;
+      this.ship.energyRechargeRate += levelDifference * 0.1;
+      this.ship.baseDamage += 0.5 * levelDifference;
+      this.ship.markChanged();
+
+      console.log(
+        "player leveled up",
+        this.name,
+        this.level,
+        this.ship.maxHealth,
+        this.ship.maxEnergy,
+        this.ship.energyRechargeRate,
+        this.ship.baseDamage
+      );
+
+      this.ws.send(
+        event({
+          type: "player:level-up",
+          level: this.level,
+          score: this.score,
+          nextLevelScore: this.totalScoreToNextLevel,
+        }).serialize()
+      );
+    }
   }
 
   resetScore() {

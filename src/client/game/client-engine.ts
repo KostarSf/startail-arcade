@@ -1157,8 +1157,15 @@ export class ClientEngine {
       case "player:score":
         if (!this.#services) break;
         // Play fuel sound when player gains exp/score with randomized pitch
-        const pitch = 0.9 + Math.random() * 0.2; // Random pitch between 0.9 and 1.1
+        const pitch = 0.8 + Math.random() * 0.4; // Random pitch between 0.8 and 1.2
         this.#services.audio.playOneShot({ soundId: "snd_fuel", pitch });
+        // Add floating score text
+        this.#statsGetter().addFloatingScoreText(message.delta);
+        break;
+      case "player:level-up":
+        if (!this.#services) break;
+        // Play pick energy sound when player levels up
+        this.#services.audio.playOneShot({ soundId: "snd_pick_energy" });
         break;
     }
   }

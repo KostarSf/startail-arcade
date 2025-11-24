@@ -15,8 +15,13 @@ export const GridSystem: System<ClientServices> = {
   stage: "presentation",
   priority: 3, // Run after camera system (priority 2)
   init({ services }) {
-    // Check if grid already exists
-    if ((services as any).grid) return;
+    // Clean up existing grid if it exists (for hot reload)
+    const existingGrid = (services as any).grid as Graphics | undefined;
+    if (existingGrid) {
+      services.pixi.camera.removeChild(existingGrid);
+      existingGrid.destroy();
+    }
+
     const grid = new Graphics();
     grid.zIndex = -1000; // Render behind everything
     grid.visible = true;

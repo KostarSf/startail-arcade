@@ -88,6 +88,9 @@ export class Engine {
     console.log("engine stopped");
   }
 
+  #ticksWithoutPlayers = 0;
+  #MAX_TICKS_WITHOUT_PLAYERS = TPS * 60;
+
   #update(dt: number) {
     const tickStart = performance.now();
 
@@ -110,7 +113,17 @@ export class Engine {
     this.#world.postUpdate(dt);
 
     if (this.network.playerCount === 0) {
-      this.stop();
+      this.#ticksWithoutPlayers++;
+      if (this.#ticksWithoutPlayers >= this.#MAX_TICKS_WITHOUT_PLAYERS) {
+        console.log(
+          `no players for the last ${(
+            this.#ticksWithoutPlayers / TPS
+          ).toFixed()} seconds, stopping engine`
+        );
+        this.stop();
+      }
+    } else {
+      this.#ticksWithoutPlayers = 0;
     }
 
     this.#lastTickDuration = performance.now() - tickStart;

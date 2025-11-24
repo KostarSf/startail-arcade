@@ -1,3 +1,4 @@
+import type { RadarData } from "@/shared/network/events";
 import type { Container } from "pixi.js";
 import { create } from "zustand";
 
@@ -23,11 +24,7 @@ type StatsStoreState = {
   /** Respawn error message */
   respawnError: string | null;
   /** Radar data */
-  radarData: Array<{
-    type: "player" | "ship";
-    x: number;
-    y: number;
-  }> | null;
+  radarData: Array<RadarData> | null;
   /** World radius for radar calculations */
   worldRadius: number;
   /** Last server tick duration in milliseconds */
@@ -50,7 +47,7 @@ type StatsStoreActions = {
   setDeathPosition: (position: { x: number; y: number } | null) => void;
   setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => void;
   setRespawnError: (error: string | null) => void;
-  setRadarData: (data: Array<{ type: "player" | "ship"; x: number; y: number }> | null) => void;
+  setRadarData: (data: Array<RadarData> | null) => void;
   setWorldRadius: (radius: number) => void;
   setTickDuration: (tickDuration: number) => void;
   setConnectionError: (error: boolean) => void;
@@ -87,7 +84,7 @@ export const useStats = create<StatsStore>((set) => ({
   setDeathPosition: (position: { x: number; y: number } | null) => set({ deathPosition: position }),
   setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => set({ players }),
   setRespawnError: (error: string | null) => set({ respawnError: error }),
-  setRadarData: (data: Array<{ type: "player" | "ship"; x: number; y: number }> | null) => set({ radarData: data }),
+  setRadarData: (data: Array<RadarData> | null) => set({ radarData: data }),
   setWorldRadius: (radius: number) => set({ worldRadius: radius }),
   setTickDuration: (tickDuration: number) => set({ tickDuration }),
   setConnectionError: (error: boolean) => set({ connectionError: error }),

@@ -28,6 +28,10 @@ export class NetworkDecoder {
   async process(event: MessageEvent<any>, cb: NetEventCallback) {
     const receiveOrder = ++this.#receiveCounter;
 
+    if (this.#fakeLatency > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.#fakeLatency));
+    }
+
     const message = await this.#decodeMessage(event.data);
     this.#enqueueMessage(message, receiveOrder, cb);
 

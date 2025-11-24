@@ -361,10 +361,13 @@ function Radar() {
     const players: typeof stats.radarData = [];
     const ships: typeof stats.radarData = [];
     const asteroids: typeof stats.radarData = [];
+    const pirates: typeof stats.radarData = [];
 
     for (const point of stats.radarData) {
       if (point.type === "player") {
         players.push(point);
+      } else if (point.type === "pirate") {
+        pirates.push(point);
       } else if (point.type === "asteroid") {
         asteroids.push(point);
       } else {
@@ -400,6 +403,22 @@ function Radar() {
         const radarY = normalizedY * radarSize;
         ctx.beginPath();
         ctx.arc(radarX, radarY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Draw pirates
+    if (pirates.length > 0) {
+      ctx.fillStyle = "red";
+      ctx.shadowColor = "white";
+      ctx.shadowBlur = 2;
+      for (const point of pirates) {
+        const normalizedX = (point.x + worldRadius) / (2 * worldRadius);
+        const normalizedY = (point.y + worldRadius) / (2 * worldRadius);
+        const radarX = normalizedX * radarSize;
+        const radarY = normalizedY * radarSize;
+        ctx.beginPath();
+        ctx.arc(radarX, radarY, 2, 0, Math.PI * 2);
         ctx.fill();
       }
     }

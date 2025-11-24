@@ -25,3 +25,16 @@ export function inverseLerp(value: number, min: number, max: number): number {
   // Linear interpolation between min and max
   return (value - min) / (max - min);
 }
+
+/**
+ * Linearly interpolates between two angles, taking the shortest path.
+ * Handles wrap-around at -PI/PI boundary correctly.
+ * @param start - Starting angle in radians
+ * @param end - Target angle in radians
+ * @param t - Interpolation factor (0 to 1)
+ * @returns Interpolated angle in radians
+ */
+export function angleLerp(start: number, end: number, t: number): number {
+  const delta = Math.atan2(Math.sin(end - start), Math.cos(end - start));
+  return start + delta * t;
+}

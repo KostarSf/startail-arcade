@@ -133,6 +133,10 @@ export class Ship extends LivingEntity {
     const earnablePoints = value / 25;
     this.earnablePoints += earnablePoints;
     this.heal(Math.ceil(earnablePoints));
+    this.#energy = Math.min(
+      this.#energy + Math.ceil(value * 0.25),
+      this.#maxEnergy
+    );
     this.player?.addScore(value);
   }
 

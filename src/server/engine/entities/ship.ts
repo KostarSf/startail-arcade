@@ -194,6 +194,32 @@ export class Ship extends LivingEntity {
     this.markChanged();
   }
 
+  /**
+   * Adjusts health and energy to preserve their percentages when max values increase.
+   * Used during level-ups to maintain the same relative health/energy.
+   */
+  adjustStatsForLevelUp(oldMaxHealth: number, oldMaxEnergy: number) {
+    // Preserve health percentage when maxHealth increases
+    if (oldMaxHealth > 0) {
+      const healthPercentage = this.health / oldMaxHealth;
+      this.health = Math.min(
+        Math.round(this.maxHealth * healthPercentage),
+        this.maxHealth
+      );
+    }
+
+    // Preserve energy percentage when maxEnergy increases
+    if (oldMaxEnergy > 0) {
+      const energyPercentage = this.#energy / oldMaxEnergy;
+      this.#energy = Math.min(
+        Math.round(this.maxEnergy * energyPercentage),
+        this.maxEnergy
+      );
+    }
+
+    this.markChanged();
+  }
+
   #consumeFire() {
     if (!this.#firing) {
       return null;
@@ -246,6 +272,7 @@ export class Ship extends LivingEntity {
       lastInputSequence: this.lastInputSequence,
       energy: this.#energy,
       maxEnergy: this.maxEnergy,
+      level: this.player?.level,
     };
   }
 }

@@ -62,11 +62,16 @@ export class ServerPlayer {
 
     if (previousLevel < this.level) {
       const levelDifference = this.level - previousLevel;
+      const oldMaxHealth = this.ship.maxHealth;
+      const oldMaxEnergy = this.ship.maxEnergy;
+
       this.ship.maxHealth += levelDifference * 10;
       this.ship.maxEnergy += levelDifference * 0.5;
       this.ship.energyRechargeRate += levelDifference * 0.1;
       this.ship.baseDamage += 0.5 * levelDifference;
-      this.ship.markChanged();
+
+      // Preserve health and energy percentages when max values increase
+      this.ship.adjustStatsForLevelUp(oldMaxHealth, oldMaxEnergy);
 
       console.log(
         "player leveled up",

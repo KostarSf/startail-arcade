@@ -10,9 +10,9 @@ import type {
 import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
 import type { Engine } from "./engine";
+import { PirateAI } from "./entities/ai/pirate-ai";
 import type { BaseEntity } from "./entities/base-entity";
 import { Bullet } from "./entities/bullet";
-import { Pirate } from "./entities/pirate";
 import { Ship } from "./entities/ship";
 import type { World } from "./world/world";
 
@@ -323,16 +323,6 @@ export class ServerNetwork {
         player.needFullState = true;
         this.#playerByShipId.set(newShip.id, player);
 
-        const piratePos = newShip.position.add(
-          new Vector2(Math.random() * 400 - 200, Math.random() * 400 - 200)
-        );
-        const pirate = new Pirate({
-          x: piratePos.x,
-          y: piratePos.y,
-          angle: Math.random() * Math.PI * 2,
-        });
-        this.engine.world.spawn(pirate);
-
         break;
     }
   }
@@ -573,7 +563,7 @@ export class ServerNetwork {
       let type: RadarData["type"] | undefined;
 
       if (entity.type === "asteroid" && includeAllAsteroids) type = "asteroid";
-      if (entity instanceof Pirate) type = "pirate";
+      if (entity instanceof Ship && entity.ai) type = "pirate";
 
       if (type) {
         asteroidRadarData.push({

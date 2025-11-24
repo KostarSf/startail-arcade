@@ -518,20 +518,12 @@ canvas {
   padding: 3px;
 }
 
-.radar-dot {
-  position: absolute;
-  border-radius: 50%;
-  transition: all 0.1s ease-out;
-}
-
-.radar-dot-player {
-  background: #fbbf24;
-  box-shadow: 0 0 4px #fbbf24;
-}
-
-.radar-dot-ship {
-  background: white;
-  box-shadow: 0 0 2px white;
+.radar-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 /* Connection Error Overlay */

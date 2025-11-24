@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   adjectives,
   animals,
@@ -292,44 +292,103 @@ function Leaderboard() {
 
 function Radar() {
   const stats = useStats();
-
-  // Only show radar when player is alive
-  if (!stats.playerObject || !stats.radarData) return null;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Account for border (3px) and padding (3px) - inner space is 144x144
   const radarSize = 144;
   const worldRadius = stats.worldRadius;
 
-  return (
-    <div className="radar-container">
-      {stats.radarData.map((point, index) => {
-        // Calculate normalized position (0 to 1)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !stats.radarData) return;
+
+    const ctx = canvas.getContext("2d", { alpha: true });
+    if (!ctx) return;
+
+    // Optimize canvas rendering
+    ctx.imageSmoothingEnabled = false;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, radarSize, radarSize);
+
+    // Group dots by type for efficient batch rendering
+    const players: typeof stats.radarData = [];
+    const ships: typeof stats.radarData = [];
+    const asteroids: typeof stats.radarData = [];
+
+    for (const point of stats.radarData) {
+      if (point.type === "player") {
+        players.push(point);
+      } else if (point.type === "asteroid") {
+        asteroids.push(point);
+      } else {
+        ships.push(point);
+      }
+    }
+
+    // Draw asteroids (most common, smallest)
+    if (asteroids.length > 0) {
+      ctx.fillStyle = "#505050";
+      ctx.shadowColor = "#505050";
+      ctx.shadowBlur = 2;
+      for (const point of asteroids) {
         const normalizedX = (point.x + worldRadius) / (2 * worldRadius);
         const normalizedY = (point.y + worldRadius) / (2 * worldRadius);
-
-        // Convert to radar pixel position
         const radarX = normalizedX * radarSize;
         const radarY = normalizedY * radarSize;
+        ctx.beginPath();
+        ctx.arc(radarX, radarY, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
-        const isPlayer = point.type === "player";
-        const dotSize = isPlayer ? 4 : 3;
+    // Draw ships
+    if (ships.length > 0) {
+      ctx.fillStyle = "white";
+      ctx.shadowColor = "white";
+      ctx.shadowBlur = 2;
+      for (const point of ships) {
+        const normalizedX = (point.x + worldRadius) / (2 * worldRadius);
+        const normalizedY = (point.y + worldRadius) / (2 * worldRadius);
+        const radarX = normalizedX * radarSize;
+        const radarY = normalizedY * radarSize;
+        ctx.beginPath();
+        ctx.arc(radarX, radarY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
-        return (
-          <div
-            key={`${point.type}-${index}`}
-            className={`radar-dot ${
-              isPlayer ? "radar-dot-player" : "radar-dot-ship"
-            }`}
-            style={{
-              left: `${radarX}px`,
-              top: `${radarY}px`,
-              width: `${dotSize}px`,
-              height: `${dotSize}px`,
-              transform: `translate(-${dotSize / 2}px, -${dotSize / 2}px)`,
-            }}
-          />
-        );
-      })}
+    // Draw player (usually just one)
+    if (players.length > 0) {
+      ctx.fillStyle = "#fbbf24";
+      ctx.shadowColor = "#fbbf24";
+      ctx.shadowBlur = 4;
+      for (const point of players) {
+        const normalizedX = (point.x + worldRadius) / (2 * worldRadius);
+        const normalizedY = (point.y + worldRadius) / (2 * worldRadius);
+        const radarX = normalizedX * radarSize;
+        const radarY = normalizedY * radarSize;
+        ctx.beginPath();
+        ctx.arc(radarX, radarY, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Reset shadow for next frame
+    ctx.shadowBlur = 0;
+  }, [stats.radarData, worldRadius, radarSize]);
+
+  // Only show radar when player is alive
+  if (!stats.playerObject || !stats.radarData) return null;
+
+  return (
+    <div className="radar-container">
+      <canvas
+        ref={canvasRef}
+        width={radarSize}
+        height={radarSize}
+        className="radar-canvas"
+      />
     </div>
   );
 }

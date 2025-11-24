@@ -54,11 +54,13 @@ export interface ServerStateEvent {
     score: number;
     alive: boolean;
   }[];
-  radar?: {
-    type: "player" | "ship";
-    x: number;
-    y: number;
-  }[];
+  radar?: RadarData[];
+}
+
+export interface RadarData {
+  type: "player" | "ship" | "asteroid";
+  x: number;
+  y: number;
 }
 
 export type FullServerState = {

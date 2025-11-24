@@ -29,9 +29,11 @@ export class Ship extends LivingEntity {
   #compensatedFire = false;
 
   #energy = 100;
-  #maxEnergy = 100;
+  maxEnergy = 100;
   /** per second */
-  #energyRechargeRate = 20;
+  energyRechargeRate = 20;
+
+  baseDamage = 10;
 
   player?: ServerPlayer;
 
@@ -106,6 +108,7 @@ export class Ship extends LivingEntity {
 
     if (result.bullet) {
       result.bullet.ownerId = this.id;
+      result.bullet.damage = this.baseDamage;
       const bullet = new Bullet(result.bullet);
       this.world.spawn(bullet);
 
@@ -135,7 +138,7 @@ export class Ship extends LivingEntity {
     this.heal(Math.ceil(earnablePoints));
     this.#energy = Math.min(
       this.#energy + Math.ceil(value * 0.25),
-      this.#maxEnergy
+      this.maxEnergy
     );
     this.player?.addScore(value);
   }
@@ -143,13 +146,13 @@ export class Ship extends LivingEntity {
   #rechargeEnergy(delta: number) {
     const oldEnergy = this.#energy;
 
-    if (this.#energy < this.#maxEnergy) {
+    if (this.#energy < this.maxEnergy) {
       let multiplier = 1;
-      if (this.#energy < this.#maxEnergy * 0.7) multiplier = 0.5;
-      if (this.#energy < this.#maxEnergy * 0.3) multiplier = 0.25;
+      if (this.#energy < this.maxEnergy * 0.7) multiplier = 0.5;
+      if (this.#energy < this.maxEnergy * 0.3) multiplier = 0.25;
 
-      this.#energy += Math.ceil(this.#energyRechargeRate * multiplier * delta);
-      this.#energy = Math.min(this.#energy, this.#maxEnergy);
+      this.#energy += Math.ceil(this.energyRechargeRate * multiplier * delta);
+      this.#energy = Math.min(this.#energy, this.maxEnergy);
     }
 
     if (Math.abs(oldEnergy - this.#energy) > 0.1) {
@@ -242,7 +245,7 @@ export class Ship extends LivingEntity {
       thrust: this.thrust,
       lastInputSequence: this.lastInputSequence,
       energy: this.#energy,
-      maxEnergy: this.#maxEnergy,
+      maxEnergy: this.maxEnergy,
     };
   }
 }

@@ -15,6 +15,7 @@ export interface ShipPhysicsOptions {
 }
 
 export interface BulletSpawnState {
+  damage?: number;
   x: number;
   y: number;
   angle: number;

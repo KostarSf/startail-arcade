@@ -709,3 +709,21 @@ canvas {
   transition: width 0.3s ease;
   box-shadow: 2px 2px 0 0 rgba(255, 255, 255, 0.3);
 }
+
+/* Floating score text styles */
+.floating-score-text {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  color: #ffffff;
+  font-family: "Press Start 2P", monospace;
+  font-size: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 20;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+  text-shadow: 2px 2px 0px black, -2px 2px 0px black, 2px -2px 0px black, -2px -2px 0px black;
+}

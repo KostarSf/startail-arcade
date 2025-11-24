@@ -93,6 +93,13 @@ export interface EntityDestroyEvent {
   score?: number;
 }
 
+export interface PlayerLevelUpEvent {
+  type: "player:level-up";
+  level: number;
+  score: number;
+  nextLevelScore: number;
+}
+
 export interface PlayerCameraBoundsEvent {
   type: "player:camera-bounds";
   viewBounds: {
@@ -106,6 +113,7 @@ export interface PlayerCameraBoundsEvent {
 export interface PlayerScoreEvent {
   type: "player:score";
   score: number;
+  delta: number;
 }
 
 export type NetworkEvent =
@@ -119,4 +127,5 @@ export type NetworkEvent =
   | EntityDamageEvent
   | EntityDestroyEvent
   | PlayerCameraBoundsEvent
-  | PlayerScoreEvent;
+  | PlayerScoreEvent
+  | PlayerLevelUpEvent;

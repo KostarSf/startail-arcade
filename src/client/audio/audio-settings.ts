@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS: AudioSettingsState = {
   volumes: {
     game: 1.0,
     ui: 1.0,
-    music: 0.5,
+    music: 0.8,
     ambience: 1.0,
   },
   mutes: {

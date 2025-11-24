@@ -1,4 +1,4 @@
-import { makeAryphmeticCurve } from "@/shared/math/levels";
+import { level } from "@/shared/game/entities/player";
 import { useEffect, useRef, useState } from "react";
 import {
   adjectives,
@@ -34,6 +34,7 @@ export function App() {
       <Leaderboard />
       <Radar />
       <LevelBar />
+      <FloatingScoreTexts />
       <RespawnButton />
       <BottomRightButtons />
       {DEBUG ? <DebugDialog /> : null}
@@ -491,16 +492,13 @@ function LevelBar() {
   const currentPlayer = stats.players.find((p) => p.id === stats.playerId);
   if (!currentPlayer) return null;
 
-  // Create level curve with default parameters
-  const levelCurve = makeAryphmeticCurve(50, 1.05);
-
   // Use player's score as XP
   const xp = currentPlayer.score;
-  const currentLevel = levelCurve.levelFromXp(xp);
+  const currentLevel = level.levelFromXp(xp);
 
   // Calculate XP progress to next level
-  const xpForCurrentLevel = levelCurve.xpTotalForLevel(currentLevel);
-  const xpForNextLevel = levelCurve.xpTotalForLevel(currentLevel + 1);
+  const xpForCurrentLevel = level.xpTotalForLevel(currentLevel);
+  const xpForNextLevel = level.xpTotalForLevel(currentLevel + 1);
   const xpNeededForNextLevel = xpForNextLevel - xpForCurrentLevel;
   const xpProgress = xp - xpForCurrentLevel;
   const progressPercent = Math.min(
@@ -517,6 +515,106 @@ function LevelBar() {
           style={{ width: `${progressPercent}%` }}
         />
       </div>
+    </div>
+  );
+}
+
+function FloatingScoreTexts() {
+  const floatingScoreTexts = useStats((state) => state.floatingScoreTexts);
+  const removeFloatingScoreText = useStats((state) => state.removeFloatingScoreText);
+
+  useEffect(() => {
+    // Clean up old texts (older than 1.2 seconds to ensure animation completes)
+    const interval = setInterval(() => {
+      const now = performance.now();
+      floatingScoreTexts.forEach((text) => {
+        if (now - text.startTime > 1200) {
+          removeFloatingScoreText(text.id);
+        }
+      });
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [floatingScoreTexts, removeFloatingScoreText]);
+
+  if (floatingScoreTexts.length === 0) return null;
+
+  return (
+    <>
+      {floatingScoreTexts.map((text) => (
+        <FloatingScoreText
+          key={text.id}
+          id={text.id}
+          value={text.value}
+          startTime={text.startTime}
+        />
+      ))}
+    </>
+  );
+}
+
+function FloatingScoreText({
+  id,
+  value,
+  startTime,
+}: {
+  id: number;
+  value: number;
+  startTime: number;
+}) {
+  const removeFloatingScoreText = useStats((state) => state.removeFloatingScoreText);
+  const [opacity, setOpacity] = useState(1);
+  const [translateY, setTranslateY] = useState(0);
+
+  useEffect(() => {
+    const duration = 1000; // 1 second
+    let animationFrame: number;
+
+    // Ease-out cubic function: starts fast, slows down
+    const easeOutCubic = (t: number): number => {
+      return 1 - Math.pow(1 - t, 3);
+    };
+
+    const animate = () => {
+      const now = performance.now();
+      const elapsed = now - startTime;
+      const linearProgress = Math.min(elapsed / duration, 1);
+
+      // Apply easing function for smooth deceleration
+      const easedProgress = easeOutCubic(linearProgress);
+
+      // Fly up: move from 0 to -60px with easing
+      setTranslateY(-60 * easedProgress);
+
+      // Fade out: opacity from 1 to 0 with easing
+      setOpacity(1 - easedProgress);
+
+      if (linearProgress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      } else {
+        // Remove from store when animation completes
+        removeFloatingScoreText(id);
+      }
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [id, startTime, removeFloatingScoreText]);
+
+  return (
+    <div
+      className="floating-score-text"
+      style={{
+        opacity,
+        transform: `translateX(-50%) translateY(${translateY}px)`,
+      }}
+    >
+      +{value}
     </div>
   );
 }

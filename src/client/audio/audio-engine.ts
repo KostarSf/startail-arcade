@@ -13,11 +13,12 @@ import sndFuelUrl from "../assets/sounds/snd_fuel.wav";
 import sndHitUrl from "../assets/sounds/snd_hit.wav";
 import sndHoverUrl from "../assets/sounds/snd_hover.ogg";
 import sndOutOfAmmoUrl from "../assets/sounds/snd_out_of_ammo.wav";
+import sndPickEnergyUrl from "../assets/sounds/snd_pick_energy.wav";
 import sndReviveUrl from "../assets/sounds/snd_revive.wav";
 import sndShootUrl from "../assets/sounds/snd_shoot.wav";
 import sndSmallHitUrl from "../assets/sounds/snd_small_hit.wav";
 import sndTypeUrl from "../assets/sounds/snd_type.ogg";
-import msgSongUrl from "../assets/sounds/music/msg_song.ogg";
+import msgSongUrl from "../assets/sounds/music/msc_game_theme_1.ogg";
 import spaceAmbienceUrl from "../assets/sounds/music/space.ogg";
 
 export type SoundCategory = "game" | "ui" | "music" | "ambience";
@@ -92,6 +93,13 @@ const SOUND_REGISTRY: Record<string, SoundMetadata> = {
   snd_fuel: {
     category: "ui",
     baseVolume: 0.5,
+    reverbSend: 0.0,
+    positional: false,
+    dopplerEnabled: false,
+  },
+  snd_pick_energy: {
+    category: "ui",
+    baseVolume: 0.6,
     reverbSend: 0.0,
     positional: false,
     dopplerEnabled: false,
@@ -185,6 +193,7 @@ const SOUND_URLS: Record<string, string> = {
   snd_hit: sndHitUrl,
   snd_hover: sndHoverUrl,
   snd_out_of_ammo: sndOutOfAmmoUrl,
+  snd_pick_energy: sndPickEnergyUrl,
   snd_revive: sndReviveUrl,
   snd_shoot: sndShootUrl,
   snd_small_hit: sndSmallHitUrl,

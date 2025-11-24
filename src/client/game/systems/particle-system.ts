@@ -38,6 +38,29 @@ export const ParticleSystem: System<ClientServices> = {
   id: "particle-system",
   stage: "presentation",
   init({ services }) {
+    // Clean up existing particle system if it exists (for hot reload)
+    const existingContainer = (services as any).particleContainer as ParticleContainer | undefined;
+    const existingTexture = (services as any).particleTexture as Texture | undefined;
+    const existingEmitters = (services as any).bulletEmitters as Map<number, BulletEmitter> | undefined;
+
+    if (existingContainer) {
+      // Clean up all particles
+      if (existingEmitters) {
+        for (const emitter of existingEmitters.values()) {
+          for (const traceParticle of emitter.particles) {
+            existingContainer.removeParticle(traceParticle.particle);
+          }
+        }
+      }
+      // Remove from camera and destroy
+      services.pixi.camera.removeChild(existingContainer);
+      existingContainer.destroy();
+    }
+
+    if (existingTexture) {
+      existingTexture.destroy(true);
+    }
+
     // Create particle container
     const particleContainer = new ParticleContainer({
       dynamicProperties: {

@@ -63,8 +63,8 @@ const spawnDamageText = (
       dropShadow: {
         distance: 1,
         color: 0x101010,
-        angle: Math.PI / 1.5
-      }
+        angle: Math.PI / 1.5,
+      },
     },
   });
   text.anchor.set(0.5, 1);
@@ -141,6 +141,27 @@ export const EffectSystem: System<ClientServices> = {
   stage: "presentation",
   priority: 1,
   init({ services }) {
+    // Clean up existing effect state if it exists (for hot reload)
+    const existingRuntime = (services as any)[EFFECT_STATE_KEY] as
+      | EffectRuntimeState
+      | undefined;
+    if (existingRuntime) {
+      // Clean up all damage texts
+      for (const instance of existingRuntime.damageTexts) {
+        services.pixi.camera.removeChild(instance.text);
+        instance.text.destroy();
+      }
+      // Clean up all explosions
+      for (const instance of existingRuntime.explosions) {
+        services.pixi.camera.removeChild(instance.sprite);
+        instance.sprite.destroy();
+      }
+      // Destroy explosion frame textures
+      for (const texture of existingRuntime.explosionFrames) {
+        texture.destroy(false); // Don't destroy the base texture
+      }
+    }
+
     const runtime: EffectRuntimeState = {
       damageTexts: [],
       explosions: [],

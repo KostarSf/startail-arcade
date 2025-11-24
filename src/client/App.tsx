@@ -141,30 +141,43 @@ function RespawnButton() {
   const stats = useStats();
   const [playerName, setPlayerName] = useState<string>("");
 
-  // Generate default unique 2-word name on mount
+  // Load name from localStorage on mount, or generate new one if missing
   useEffect(() => {
-    let defaultName: string | undefined;
+    const STORAGE_KEY = "playerName";
 
-    let attempts = 0;
+    // Try to load from localStorage
+    const savedName = localStorage.getItem(STORAGE_KEY);
 
-    while (
-      !defaultName ||
-      defaultName.length > 20 ||
-      stats.players.some((p) => p.name === defaultName)
-    ) {
-      defaultName = uniqueNamesGenerator({
-        dictionaries: [adjectives, animals],
-        separator: " ",
-        length: 2,
-        style: "capital",
-      });
+    if (savedName && savedName.trim().length > 0 && savedName.length <= 20) {
+      // Use saved name if valid
+      setPlayerName(savedName.trim());
+    } else {
+      // Generate default unique 2-word name if not found or invalid
+      let defaultName: string | undefined;
 
-      attempts++;
+      let attempts = 0;
 
-      if (attempts > 10) break;
+      while (
+        !defaultName ||
+        defaultName.length > 20 ||
+        stats.players.some((p) => p.name === defaultName)
+      ) {
+        defaultName = uniqueNamesGenerator({
+          dictionaries: [adjectives, animals],
+          separator: " ",
+          length: 2,
+          style: "capital",
+        });
+
+        attempts++;
+
+        if (attempts > 10) break;
+      }
+
+      if (defaultName) {
+        setPlayerName(defaultName);
+      }
     }
-
-    setPlayerName(defaultName);
   }, []);
 
   // Show button only after receiving server:player-initialize (playerId is set)
@@ -192,11 +205,18 @@ function RespawnButton() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isDisabled) return; // Don't allow submit while reconnecting
+
+    // Save current username to localStorage when player starts to play
+    const trimmedName = playerName.trim();
+    if (trimmedName.length > 0 && trimmedName.length <= 20) {
+      localStorage.setItem("playerName", trimmedName);
+    }
+
     // Play click sound
     clientEngine.playUIClick();
     // Send respawn command to spawn the player ship
     // This works for both initial spawn (deathPosition is null) and respawn after death
-    clientEngine.respawn(playerName);
+    clientEngine.respawn(trimmedName);
   };
 
   return (

@@ -4,7 +4,7 @@ import type {
   FullServerState,
   NetworkEvent,
   PartialServerState,
-  ServerStateEvent,
+  RadarData,
 } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
@@ -505,18 +505,30 @@ export class ServerNetwork {
   }
 
   #getRadarData() {
-    const radarData = new Map<string, NonNullable<ServerStateEvent["radar"]>>();
+    const radarData = new Map<string, RadarData[]>();
+
+    const includeAllAsteroids = false;
+
+    const allEntities = this.engine.world.entities;
+    const asteroidRadarData: RadarData[] = [];
+
+    if (includeAllAsteroids) {
+      for (const entity of allEntities) {
+        if (entity.removed || entity.type !== "asteroid") continue;
+        asteroidRadarData.push({
+          type: "asteroid",
+          x: Math.round(entity.position.x * 10) / 10,
+          y: Math.round(entity.position.y * 10) / 10,
+        });
+      }
+    }
 
     // Get all alive players
     const alivePlayers = this.players.filter((p) => p.isAlive);
 
     // Send radar data to each alive player
     for (const player of alivePlayers) {
-      const playerRadarData: Array<{
-        type: "player" | "ship";
-        x: number;
-        y: number;
-      }> = [];
+      const playerRadarData: RadarData[] = [];
 
       for (const p of alivePlayers) {
         if (!p.ship) continue;
@@ -527,6 +539,8 @@ export class ServerNetwork {
           y: Math.round(p.ship.position.y * 10) / 10,
         });
       }
+
+      playerRadarData.push(...asteroidRadarData);
 
       radarData.set(player.id, playerRadarData);
     }

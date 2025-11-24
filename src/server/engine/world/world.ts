@@ -1,4 +1,4 @@
-import type { Vector2 } from "@/shared/math/vector";
+import { Vector2 } from "@/shared/math/vector";
 import type { SerializableEvent } from "@/shared/network/utils";
 import { TPS } from "../constants";
 import type { Engine } from "../engine";
@@ -6,6 +6,7 @@ import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
+import { generateWorld } from "./utils/fbm-domain-warp-world-generator";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
@@ -48,12 +49,34 @@ export class World {
   initialize(engine: Engine) {
     this.#engine = engine;
 
-    for (let i = this.#currentAsteroids; i < this.#maxAsteroids; i++) {
-      this.#spawnAsteroid();
+    const asteroidPositions = generateWorld(
+      this.#borderRadius,
+      this.#maxAsteroids
+    );
+
+    const velocityFactor = Math.max(Math.random() * 140 - 40, 0);
+    const angleFactor = Math.random() * Math.PI * 2 - Math.PI;
+
+    for (const position of asteroidPositions) {
+      this.#spawnAsteroid({
+        position,
+        velocity:
+          velocityFactor > 0
+            ? Vector2.RIGHT.mul(Math.random() * velocityFactor).rotate(
+                Math.random() * Math.PI * 0.5 - Math.PI * 0.25 + angleFactor
+              )
+            : undefined,
+      });
     }
   }
 
-  #spawnAsteroid(args?: { beyondBorder?: boolean }) {
+  #spawnAsteroid(args?: {
+    beyondBorder?: boolean;
+    position?: Vector2;
+    velocity?: Vector2;
+    angle?: number;
+    angularVelocity?: number;
+  }) {
     const ASTEROID_VELOCITY = 50;
     const ASTEROID_ANGLE_VELOCITY = Math.PI * 0.5;
 
@@ -63,8 +86,8 @@ export class World {
       [18, 100, 0.4],
     ].at(Math.floor(Math.random() * 3)) as [number, number, number];
 
-    let x = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
-    let y = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
+    let x = args?.position?.x;
+    let y = args?.position?.y;
 
     if (args?.beyondBorder) {
       const offset = this.#borderRadius + 100;
@@ -78,25 +101,30 @@ export class World {
         x = Math.random() * offset * 2 - offset;
       }
     } else {
-      x = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
-      y = Math.random() * this.#borderRadius * 2 - this.#borderRadius;
+      x ??= Math.random() * this.#borderRadius * 2 - this.#borderRadius;
+      y ??= Math.random() * this.#borderRadius * 2 - this.#borderRadius;
     }
 
-    const angle = Math.random() * 2 * Math.PI - Math.PI;
+    const angle = args?.angle ?? Math.random() * 2 * Math.PI - Math.PI;
     const vx =
+      args?.velocity?.x ??
       (Math.random() * ASTEROID_VELOCITY - ASTEROID_VELOCITY / 2) *
-      velocityMultiplier;
+        velocityMultiplier +
+        (Math.random() * 10 - 3);
     const vy =
+      args?.velocity?.y ??
       (Math.random() * ASTEROID_VELOCITY - ASTEROID_VELOCITY / 2) *
-      velocityMultiplier;
+        velocityMultiplier +
+        (Math.random() * 20 - 6);
     const va =
+      args?.angularVelocity ??
       Math.random() * ASTEROID_ANGLE_VELOCITY - ASTEROID_ANGLE_VELOCITY / 2;
     const asteroid = new Asteroid({
       x,
       y,
       angle,
-      vx: vx + Math.random() * 10 - 3,
-      vy: vy + Math.random() * 20 - 6,
+      vx,
+      vy,
       va,
       radius,
       maxHealth: health,
@@ -156,18 +184,14 @@ export class World {
     }
   }
 
-  #ticksAfterLastRefill = 0;
   #refillInterval = TPS * 5;
   #minBatchCount = 10;
   #maxBatchCount = 50;
 
   #refillAsteroids() {
-    if (this.#ticksAfterLastRefill < this.#refillInterval) {
-      this.#ticksAfterLastRefill++;
+    if (!this.#engine || this.#engine.tick % this.#refillInterval !== 0) {
       return;
     }
-
-    this.#ticksAfterLastRefill = 0;
 
     if (this.#currentAsteroids >= this.#maxAsteroids) {
       if (this.engine.debug.asteroids) {

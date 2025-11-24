@@ -167,15 +167,26 @@ function RespawnButton() {
   // Show button only after receiving server:player-initialize (playerId is set)
   // and when playerObject is null (not spawned yet or destroyed)
   // Hide button when playerObject exists (player is alive and spawned)
-  const shouldShow = stats.playerId !== null && stats.playerObject === null;
+  // Also show during reconnection to indicate status
+  const shouldShow = (stats.playerId !== null && stats.playerObject === null) || stats.isReconnecting;
 
   if (!shouldShow) return null;
 
-  // Show "Respawn" if deathPosition is set (player died), otherwise "Play" (waiting to spawn)
-  const buttonText = stats.deathPosition !== null ? "RESPAWN" : "PLAY";
+  // Show different text based on reconnecting state
+  let buttonText: string;
+  let isDisabled = false;
+
+  if (stats.isReconnecting) {
+    buttonText = "RECONNECTING...";
+    isDisabled = true;
+  } else {
+    // Show "Respawn" if deathPosition is set (player died), otherwise "Play" (waiting to spawn)
+    buttonText = stats.deathPosition !== null ? "RESPAWN" : "PLAY";
+  }
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isDisabled) return; // Don't allow submit while reconnecting
     // Play click sound
     clientEngine.playUIClick();
     // Send respawn command to spawn the player ship
@@ -192,25 +203,28 @@ function RespawnButton() {
         onSubmit={handleSubmit}
         className="fixed inset-0 flex flex-col items-center justify-center z-50 pointer-events-none"
       >
-        <div className="mb-4 pointer-events-auto">
-          <input
-            type="text"
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            onKeyDown={() => clientEngine.playUIType()}
-            onFocus={() => clientEngine.playUIHover()}
-            className="name-input"
-            placeholder="Enter your name"
-            maxLength={20}
-          />
-          {stats.respawnError && (
-            <div className="respawn-error">{stats.respawnError}</div>
-          )}
-        </div>
+        {!stats.isReconnecting && (
+          <div className="mb-4 pointer-events-auto">
+            <input
+              type="text"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              onKeyDown={() => clientEngine.playUIType()}
+              onFocus={() => clientEngine.playUIHover()}
+              className="name-input"
+              placeholder="Enter your name"
+              maxLength={20}
+            />
+            {stats.respawnError && (
+              <div className="respawn-error">{stats.respawnError}</div>
+            )}
+          </div>
+        )}
         <button
           type="submit"
-          className="respawn-button pointer-events-auto"
-          onMouseEnter={() => clientEngine.playUIHover()}
+          className={`respawn-button pointer-events-auto ${stats.isReconnecting ? "reconnecting" : ""}`}
+          onMouseEnter={() => !stats.isReconnecting && clientEngine.playUIHover()}
+          disabled={isDisabled}
         >
           {buttonText}
         </button>

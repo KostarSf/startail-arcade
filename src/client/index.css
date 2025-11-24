@@ -54,6 +54,41 @@ canvas {
     0 0 0 0 #ffffff;
 }
 
+/* Reconnecting button - yellow with pulsing animation */
+.respawn-button.reconnecting {
+  background-color: #ffff00;
+  color: #000000;
+  border: 3px solid #ffff00;
+  cursor: not-allowed;
+  animation: reconnectPulse 1.5s ease-in-out infinite;
+}
+
+.respawn-button.reconnecting:hover {
+  background-color: #ffff00;
+  color: #000000;
+  transform: none;
+  box-shadow:
+    0 0 0 2px #000000,
+    4px 4px 0 0 #ffff00;
+}
+
+@keyframes reconnectPulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow:
+      0 0 0 2px #000000,
+      4px 4px 0 0 #ffff00,
+      0 0 20px rgba(255, 255, 0, 0.4);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow:
+      0 0 0 2px #000000,
+      4px 4px 0 0 #ffff00,
+      0 0 40px rgba(255, 255, 0, 0.8);
+  }
+}
+
 /* Name input field - retro pixelated style */
 .name-input {
   background-color: #000000;

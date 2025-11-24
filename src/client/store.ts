@@ -31,6 +31,8 @@ type StatsStoreState = {
   tickDuration: number;
   /** Connection error state */
   connectionError: boolean;
+  /** Reconnecting state - true when attempting to reconnect */
+  isReconnecting: boolean;
   /** Network traffic stats in KB per second */
   inboundBytesPerSecond: number;
   outboundBytesPerSecond: number;
@@ -42,7 +44,7 @@ type StatsStoreActions = {
   setHasTimeSync: (hasTimeSync: boolean) => void;
   setObjectsCount: (objectsCount: number) => void;
   setFps: (fps: number) => void;
-  setPlayerId: (playerId: string) => void;
+  setPlayerId: (playerId: string | null) => void;
   setPlayerObject: (playerObject: Container | null) => void;
   setDeathPosition: (position: { x: number; y: number } | null) => void;
   setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => void;
@@ -51,6 +53,7 @@ type StatsStoreActions = {
   setWorldRadius: (radius: number) => void;
   setTickDuration: (tickDuration: number) => void;
   setConnectionError: (error: boolean) => void;
+  setIsReconnecting: (isReconnecting: boolean) => void;
   setInboundBytes: (bytesPerSecond: number) => void;
   setOutboundBytes: (bytesPerSecond: number) => void;
 };
@@ -72,6 +75,7 @@ export const useStats = create<StatsStore>((set) => ({
   worldRadius: 5000,
   tickDuration: 0,
   connectionError: false,
+  isReconnecting: false,
   inboundBytesPerSecond: 0,
   outboundBytesPerSecond: 0,
   setLatency: (latency: number) => set({ latency }),
@@ -79,7 +83,7 @@ export const useStats = create<StatsStore>((set) => ({
   setHasTimeSync: (hasTimeSync: boolean) => set({ hasTimeSync }),
   setObjectsCount: (objectsCount: number) => set({ objectsCount }),
   setFps: (fps: number) => set({ fps }),
-  setPlayerId: (playerId: string) => set({ playerId }),
+  setPlayerId: (playerId: string| null) => set({ playerId }),
   setPlayerObject: (playerObject: Container | null) => set({ playerObject }),
   setDeathPosition: (position: { x: number; y: number } | null) => set({ deathPosition: position }),
   setPlayers: (players: Array<{ id: string; name: string; score: number; alive: boolean }>) => set({ players }),
@@ -88,6 +92,7 @@ export const useStats = create<StatsStore>((set) => ({
   setWorldRadius: (radius: number) => set({ worldRadius: radius }),
   setTickDuration: (tickDuration: number) => set({ tickDuration }),
   setConnectionError: (error: boolean) => set({ connectionError: error }),
+  setIsReconnecting: (isReconnecting: boolean) => set({ isReconnecting }),
   setInboundBytes: (bytesPerSecond: number) => set({ inboundBytesPerSecond: bytesPerSecond }),
   setOutboundBytes: (bytesPerSecond: number) => set({ outboundBytesPerSecond: bytesPerSecond }),
 }));

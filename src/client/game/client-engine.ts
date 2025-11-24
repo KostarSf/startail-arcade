@@ -991,6 +991,7 @@ export class ClientEngine {
     if (this.#connectionAttempts > this.#maxConnectionAttempts) {
       console.error("[net] Max connection attempts reached, giving up");
       this.#statsGetter().setConnectionError(true);
+      this.#statsGetter().setIsReconnecting(false);
       return;
     }
 
@@ -1007,6 +1008,7 @@ export class ClientEngine {
       console.log("[net] Connected successfully");
       this.#connectionAttempts = 0; // Reset on successful connection
       this.#statsGetter().setConnectionError(false);
+      this.#statsGetter().setIsReconnecting(false);
       this.#pingTicker.start();
       this.#networkStatsTicker.start();
       // Reset network stats counters on connect
@@ -1198,6 +1200,10 @@ export class ClientEngine {
     statsStore.setHasTimeSync(false);
     statsStore.setObjectsCount(0);
     statsStore.setPlayerObject(null);
+    statsStore.setPlayerId(null);
+    statsStore.setDeathPosition(null);
+    statsStore.setPlayers([]);
+    statsStore.setRadarData(null);
     statsStore.setInboundBytes(0);
     statsStore.setOutboundBytes(0);
     this.#inboundBytes = 0;
@@ -1224,6 +1230,9 @@ export class ClientEngine {
       this.#services.stores.networkState.clear();
     }
     this.#camera.removeChildren();
+
+    // Set reconnecting state before attempting to reconnect
+    statsStore.setIsReconnecting(true);
 
     if (this.#connectTimeout) clearTimeout(this.#connectTimeout);
     this.#connectTimeout = setTimeout(() => this.#connect(), 500);

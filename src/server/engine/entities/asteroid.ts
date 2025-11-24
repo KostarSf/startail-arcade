@@ -28,8 +28,8 @@ export class Asteroid extends LivingEntity {
     this.health = asteroid.health ?? this.maxHealth;
     this.radius = asteroid.radius ?? 10;
 
-    // Set earnable points based on radius
-    this.earnablePoints = Math.floor(this.radius * 1.25);
+    const expFactor = 1 + Math.random() * 0.5 - 0.2;
+    this.earnablePoints = Math.floor(this.radius * 1.25 * expFactor);
   }
 
   protected override onDamage(
@@ -55,7 +55,7 @@ export class Asteroid extends LivingEntity {
         this.position,
         relativeVelocity,
         Math.ceil(this.earnablePoints),
-        (this.radius ?? 0) * 0.7
+        (this.radius ?? 0) * 0.5
       );
     }
   }

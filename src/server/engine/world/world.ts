@@ -260,8 +260,15 @@ export class World {
   }
 
   broadcast(event: SerializableEvent) {
+    const entiyId =
+      "entityId" in event.payload ? event.payload.entityId : undefined;
+
     const data = event.serialize();
     for (const player of this.engine.network.players) {
+      if (entiyId && !player.lastSeenEntityIds.has(entiyId)) {
+        continue;
+      }
+
       player.ws.send(data);
     }
   }

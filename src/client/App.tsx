@@ -11,7 +11,7 @@ import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
 
-const VERSION = "v0.2.1";
+const VERSION = "v0.2.2";
 const DEBUG = false;
 
 export function App() {

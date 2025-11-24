@@ -111,6 +111,7 @@ export const RenderSystem: System<ClientServices> = {
         radius?: number;
         id: string;
         name: string;
+        level?: number;
       },
       isPlayer: boolean
     ) => {
@@ -125,15 +126,29 @@ export const RenderSystem: System<ClientServices> = {
       const healthYOffset = -(shipRadius + 16);
       const energyYOffset = healthYOffset + barHeight + 2;
 
-      // Add name label above health bar for enemy ships
+      // Add level and name labels above health bar for enemy ships
       if (!isPlayer) {
+        // Add name label (always shown)
         const nameLabel = ensureTextChild(uiContainer, "name-label");
         nameLabel.text = shipState.name || "Unknown";
         nameLabel.y = healthYOffset - 3; // 3px above health bar
         nameLabel.x = 0;
         nameLabel.style.fontSize = 6;
+
+        // Add level label above name if level exists
+        if (shipState.level !== undefined && shipState.level !== null) {
+          const levelLabel = ensureTextChild(uiContainer, "level-label");
+          levelLabel.text = `Lv.${shipState.level}`;
+          levelLabel.y = healthYOffset - 3 - 8; // 8px above name label
+          levelLabel.x = 0;
+          levelLabel.style.fontSize = 6;
+          levelLabel.style.fill = 0xffff00; // Yellow color
+        } else {
+          removeChildByName(uiContainer, "level-label");
+        }
       } else {
         removeChildByName(uiContainer, "name-label");
+        removeChildByName(uiContainer, "level-label");
       }
 
       const getBackgroundRect = (baseY: number) => ({

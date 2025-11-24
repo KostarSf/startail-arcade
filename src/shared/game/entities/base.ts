@@ -1,6 +1,3 @@
-import { Vector2 } from "@/shared/math/vector";
-import { SHIP_CONSTANTS } from "./ship";
-
 export type EntityType = "ship" | "asteroid" | "bullet" | "exp";
 
 export interface BaseEntityState {
@@ -16,6 +13,7 @@ export interface BaseEntityState {
   radius?: number | undefined;
   linearDamping?: number | undefined;
   targetSpeed?: number | undefined;
+  level?: number;
   health?: number;
   maxHealth?: number;
   energy?: number;

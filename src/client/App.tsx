@@ -1,3 +1,4 @@
+import { makeAryphmeticCurve } from "@/shared/math/levels";
 import { useEffect, useRef, useState } from "react";
 import {
   adjectives,
@@ -32,6 +33,7 @@ export function App() {
       <GameTagline />
       <Leaderboard />
       <Radar />
+      <LevelBar />
       <RespawnButton />
       <BottomRightButtons />
       {DEBUG ? <DebugDialog /> : null}
@@ -168,7 +170,9 @@ function RespawnButton() {
   // and when playerObject is null (not spawned yet or destroyed)
   // Hide button when playerObject exists (player is alive and spawned)
   // Also show during reconnection to indicate status
-  const shouldShow = (stats.playerId !== null && stats.playerObject === null) || stats.isReconnecting;
+  const shouldShow =
+    (stats.playerId !== null && stats.playerObject === null) ||
+    stats.isReconnecting;
 
   if (!shouldShow) return null;
 
@@ -222,8 +226,12 @@ function RespawnButton() {
         )}
         <button
           type="submit"
-          className={`respawn-button pointer-events-auto ${stats.isReconnecting ? "reconnecting" : ""}`}
-          onMouseEnter={() => !stats.isReconnecting && clientEngine.playUIHover()}
+          className={`respawn-button pointer-events-auto ${
+            stats.isReconnecting ? "reconnecting" : ""
+          }`}
+          onMouseEnter={() =>
+            !stats.isReconnecting && clientEngine.playUIHover()
+          }
           disabled={isDisabled}
         >
           {buttonText}
@@ -468,6 +476,46 @@ function HelpButton() {
             <span className="help-action">freeze camera</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function LevelBar() {
+  const stats = useStats();
+
+  // Only show level bar when player exists and is alive
+  if (!stats.playerObject) return null;
+
+  // Get current player from players array
+  const currentPlayer = stats.players.find((p) => p.id === stats.playerId);
+  if (!currentPlayer) return null;
+
+  // Create level curve with default parameters
+  const levelCurve = makeAryphmeticCurve(50, 1.05);
+
+  // Use player's score as XP
+  const xp = currentPlayer.score;
+  const currentLevel = levelCurve.levelFromXp(xp);
+
+  // Calculate XP progress to next level
+  const xpForCurrentLevel = levelCurve.xpTotalForLevel(currentLevel);
+  const xpForNextLevel = levelCurve.xpTotalForLevel(currentLevel + 1);
+  const xpNeededForNextLevel = xpForNextLevel - xpForCurrentLevel;
+  const xpProgress = xp - xpForCurrentLevel;
+  const progressPercent = Math.min(
+    (xpProgress / xpNeededForNextLevel) * 100,
+    100
+  );
+
+  return (
+    <div className="level-bar">
+      <div className="level-bar-label">LEVEL {currentLevel}</div>
+      <div className="level-bar-progress-container">
+        <div
+          className="level-bar-progress-fill"
+          style={{ width: `${progressPercent}%` }}
+        />
       </div>
     </div>
   );

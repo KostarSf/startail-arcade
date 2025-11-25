@@ -12,7 +12,7 @@ import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
 
-const VERSION = "v0.4.0";
+const VERSION = "v0.4.1";
 const DEBUG = true;
 
 export function App() {

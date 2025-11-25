@@ -357,5 +357,6 @@ export class World {
     this.#entities.clear();
     this.#grid.clear();
     this.#currentAsteroids = 0;
+    this.#currentPirates = 0;
   }
 }

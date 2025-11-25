@@ -13,7 +13,7 @@ import "./index.css";
 import { useStats } from "./store";
 
 const VERSION = "v0.4.1";
-const DEBUG = true;
+const DEBUG = false;
 
 export function App() {
   // Set custom cursor on mount

@@ -58,7 +58,7 @@ export interface ServerStateEvent {
 }
 
 export interface RadarData {
-  type: "player" | "ship" | "asteroid";
+  type: "player" | "ship" | "asteroid" | "pirate";
   x: number;
   y: number;
 }

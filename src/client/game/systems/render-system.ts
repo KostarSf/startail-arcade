@@ -130,7 +130,7 @@ export const RenderSystem: System<ClientServices> = {
       if (!isPlayer) {
         // Add name label (always shown)
         const nameLabel = ensureTextChild(uiContainer, "name-label");
-        nameLabel.text = shipState.name || "Unknown";
+        nameLabel.text = shipState.name;
         nameLabel.y = healthYOffset - 3; // 3px above health bar
         nameLabel.x = 0;
         nameLabel.style.fontSize = 6;

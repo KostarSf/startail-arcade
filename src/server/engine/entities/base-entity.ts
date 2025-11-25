@@ -1,5 +1,6 @@
 import {
   integrateMotion,
+  normalizeAngle,
   type BaseEntityState,
   type EntityType,
 } from "@/shared/game/entities/base";
@@ -97,7 +98,7 @@ export abstract class BaseEntity {
     this.x = entity.x ?? 0;
     this.y = entity.y ?? 0;
     this.#prevPos = new Vector2(this.x, this.y);
-    this.angle = entity.angle ?? 0;
+    this.angle = normalizeAngle(entity.angle ?? 0);
     this.vx = entity.vx ?? 0;
     this.vy = entity.vy ?? 0;
     this.va = entity.va ?? 0;

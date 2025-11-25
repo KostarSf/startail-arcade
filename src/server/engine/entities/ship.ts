@@ -3,6 +3,7 @@ import { SHIP_CONSTANTS, updateShipPhysics } from "@/shared/game/entities/ship";
 import { event } from "@/shared/network/utils";
 import type { ServerPlayer } from "../server-network";
 import type { World } from "../world/world";
+import type { ShipAI } from "./ai/ship-ai";
 import { Asteroid } from "./asteroid";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { Bullet } from "./bullet";
@@ -36,6 +37,7 @@ export class Ship extends LivingEntity {
   baseDamage = 10;
 
   player?: ServerPlayer;
+  ai?: ShipAI;
 
   override earnablePoints = 1;
   override radius = SHIP_CONSTANTS.radius;
@@ -84,6 +86,10 @@ export class Ship extends LivingEntity {
 
   override update(world: World, delta: number) {
     super.update(world, delta);
+
+    if (this.ai) {
+      this.ai.update(this, world, delta);
+    }
 
     const oldVX = this.vx;
     const oldVY = this.vy;

@@ -10,6 +10,7 @@ import type {
 import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
 import type { Engine } from "./engine";
+import { PirateAI } from "./entities/ai/pirate-ai";
 import type { BaseEntity } from "./entities/base-entity";
 import { Bullet } from "./entities/bullet";
 import { Ship } from "./entities/ship";
@@ -556,11 +557,17 @@ export class ServerNetwork {
     const allEntities = this.engine.world.entities;
     const asteroidRadarData: RadarData[] = [];
 
-    if (includeAllAsteroids) {
-      for (const entity of allEntities) {
-        if (entity.removed || entity.type !== "asteroid") continue;
+    for (const entity of allEntities) {
+      if (entity.removed) continue;
+
+      let type: RadarData["type"] | undefined;
+
+      if (entity.type === "asteroid" && includeAllAsteroids) type = "asteroid";
+      if (entity instanceof Ship && entity.ai) type = "pirate";
+
+      if (type) {
         asteroidRadarData.push({
-          type: "asteroid",
+          type,
           x: Math.round(entity.position.x * 10) / 10,
           y: Math.round(entity.position.y * 10) / 10,
         });

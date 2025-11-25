@@ -39,6 +39,8 @@ export class Ship extends LivingEntity {
   player?: ServerPlayer;
   ai?: ShipAI;
 
+  level?: number;
+
   override earnablePoints = 1;
   override radius = SHIP_CONSTANTS.radius;
 
@@ -63,6 +65,10 @@ export class Ship extends LivingEntity {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.15));
       this.markChanged();
+    }
+
+    if (this.ai) {
+      this.ai.onShipDamage(world, amount, source);
     }
 
     return amount;
@@ -278,7 +284,7 @@ export class Ship extends LivingEntity {
       lastInputSequence: this.lastInputSequence,
       energy: this.#energy,
       maxEnergy: this.maxEnergy,
-      level: this.player?.level,
+      level: this.level,
     };
   }
 }

@@ -55,6 +55,19 @@ export class World {
     return this.#entities.get(id);
   }
 
+  #asteroidVelocityFactor = Math.max(Math.random() * 140 - 40, 0);
+  #asteroidAngleFactor = Math.random() * Math.PI * 2 - Math.PI;
+
+  #getAsteroidSpawnVelocity() {
+    return this.#asteroidVelocityFactor > 0
+      ? Vector2.RIGHT.mul(Math.random() * this.#asteroidVelocityFactor).rotate(
+          Math.random() * Math.PI * 0.5 -
+            Math.PI * 0.25 +
+            this.#asteroidAngleFactor
+        )
+      : undefined;
+  }
+
   initialize(engine: Engine) {
     this.#engine = engine;
 
@@ -63,23 +76,11 @@ export class World {
       this.#maxAsteroids
     );
 
-    const velocityFactor = Math.max(Math.random() * 140 - 40, 0);
-    const angleFactor = Math.random() * Math.PI * 2 - Math.PI;
-
     for (const position of asteroidPositions) {
       this.#spawnAsteroid({
         position,
-        velocity:
-          velocityFactor > 0
-            ? Vector2.RIGHT.mul(Math.random() * velocityFactor).rotate(
-                Math.random() * Math.PI * 0.5 - Math.PI * 0.25 + angleFactor
-              )
-            : undefined,
+        velocity: this.#getAsteroidSpawnVelocity(),
       });
-    }
-
-    while (this.#currentPirates < this.#maxPirates) {
-      this.#spawnPirate();
     }
   }
 
@@ -280,7 +281,10 @@ export class World {
           (this.#asteroidsMaxBatchCount - this.#asteroidsMinBatchCount + 1)
       ) + this.#asteroidsMinBatchCount;
     for (let i = 0; i < batchCount; i++) {
-      this.#spawnAsteroid({ beyondBorder: true });
+      this.#spawnAsteroid({
+        beyondBorder: true,
+        velocity: this.#getAsteroidSpawnVelocity(),
+      });
     }
 
     if (this.engine.debug.asteroids) {

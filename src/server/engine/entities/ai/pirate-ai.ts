@@ -2,6 +2,9 @@ import { angleDiff, angleLerp, inverseLerp } from "@/shared/math/utils";
 import { Vector2 } from "@/shared/math/vector";
 import { TPS } from "../../constants";
 import type { World } from "../../world/world";
+import { Asteroid } from "../asteroid";
+import type { BaseEntity } from "../base-entity";
+import { Bullet } from "../bullet";
 import { Exp } from "../exp";
 import { LivingEntity } from "../living-entity";
 import { Ship } from "../ship";
@@ -18,18 +21,45 @@ export class PirateAI extends ShipAI {
   #alertRange = 500;
   #closeRange = 200;
 
-  #earnablePoints = 45;
+  #earnablePoints = 25;
 
   #targetAngle = 0;
 
-  constructor() {
+  #level: number;
+
+  constructor(level?: number) {
     const tickRate = Math.floor(TPS / 4); // 4x slower than the game
     super(tickRate);
+
+    this.#level = level ?? Math.floor(Math.random() * 15) + 5;
   }
 
   override initialize(ship: Ship, world: World) {
     this.#targetAngle = ship.angle;
-    ship.earnablePoints = this.#earnablePoints;
+
+    ship.level = this.#level;
+
+    ship.maxHealth = 100 + this.#level * 15;
+    ship.maxEnergy = 100 + this.#level * 10;
+    ship.energyRechargeRate = 20 + this.#level * 2;
+    ship.baseDamage = 10 + this.#level * 2;
+    ship.earnablePoints =
+      this.#earnablePoints +
+      this.#earnablePoints * Math.max(this.#level - 1, 0) * 0.1;
+  }
+
+  override onShipDamage(
+    world: World,
+    amount: number,
+    source?: BaseEntity
+  ): void {
+    if (
+      source instanceof Bullet &&
+      source.owner instanceof Ship &&
+      source.owner.isAlive
+    ) {
+      this.#updateTarget(source.owner);
+    }
   }
 
   override update(ship: Ship, world: World, delta: number) {
@@ -92,9 +122,10 @@ export class PirateAI extends ShipAI {
     const dynamicRange = this.#getDynamicAvoidanceRange(ship);
 
     // Predict ship position further ahead at high speeds (1.5-3 seconds)
-    const lookAheadTime = speed < 100
-      ? 1.5 + (speed / 200) // 1.5-2 seconds below 100 speed
-      : 2.0 + (speed / 250); // 2-3 seconds above 100 speed
+    const lookAheadTime =
+      speed < 100
+        ? 1.5 + speed / 200 // 1.5-2 seconds below 100 speed
+        : 2.0 + speed / 250; // 2-3 seconds above 100 speed
     const predictedPosition = this.#predictShipPosition(ship, lookAheadTime);
 
     let totalWeight = 0;
@@ -103,6 +134,11 @@ export class PirateAI extends ShipAI {
 
     for (const obstacle of this.#nearestObstacles) {
       if (!obstacle.isAlive) continue;
+
+      // At low speeds (<60), don't avoid the current target - pirate needs to get close to aim
+      if (speed < 60 && obstacle === this.#currentTarget) {
+        continue;
+      }
 
       const distance = ship.position.distance(obstacle.position);
       if (distance > dynamicRange) continue;
@@ -230,7 +266,16 @@ export class PirateAI extends ShipAI {
       }
     }
 
-    const nearbyEntities = world.query(ship.position, this.#alertRange).array();
+    const nearbyEntities = world
+      .query(ship.position, this.#alertRange)
+      .precise()
+      .array();
+
+    const healthPercentage = ship.health / ship.maxHealth;
+
+    // Collect candidates for exp/asteroid targeting
+    const expCandidates: Exp[] = [];
+    const asteroidCandidates: Asteroid[] = [];
 
     for (const entity of nearbyEntities) {
       if (entity === ship) continue;
@@ -245,14 +290,85 @@ export class PirateAI extends ShipAI {
         continue;
       }
 
+      // Pick player's ship as target if we don't have a target or current target is low priority
       if (
-        !this.#currentTarget &&
         entity instanceof Ship &&
         entity.player &&
-        entity.isAlive
+        entity.isAlive &&
+        (!this.#currentTarget || this.#isLowPriorityTarget(this.#currentTarget))
       ) {
         this.#updateTarget(entity);
         continue;
+      }
+
+      // Collect exp candidates (only if in close range)
+      if (
+        entity instanceof Exp &&
+        entity.isAlive &&
+        ship.position.distance(entity.position) <= this.#closeRange
+      ) {
+        expCandidates.push(entity);
+      }
+
+      // Collect asteroid candidates (only if in close range)
+      if (
+        entity instanceof Asteroid &&
+        entity.isAlive &&
+        ship.position.distance(entity.position) <= this.#closeRange
+      ) {
+        asteroidCandidates.push(entity);
+      }
+    }
+
+    // Pick closest exp or asteroid if we don't have any target and we lack full health
+    if (!this.#currentTarget && healthPercentage < 0.6) {
+      let closestTarget: LivingEntity | null = null;
+      let closestDistance = Infinity;
+
+      // Prefer exp over asteroid
+      for (const exp of expCandidates) {
+        const distance = ship.position.distance(exp.position);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestTarget = exp;
+        }
+      }
+
+      // If no exp found, look for asteroids
+      if (!closestTarget) {
+        for (const asteroid of asteroidCandidates) {
+          const distance = ship.position.distance(asteroid.position);
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestTarget = asteroid;
+          }
+        }
+      }
+
+      if (closestTarget) {
+        this.#updateTarget(closestTarget);
+      }
+    }
+
+    // Replace asteroid with closest exp if current target is asteroid and we lack full health
+    if (
+      this.#currentTarget instanceof Asteroid &&
+      healthPercentage < 0.8 &&
+      expCandidates.length > 0
+    ) {
+      let closestExp: Exp | null = null;
+      let closestDistance = Infinity;
+
+      for (const exp of expCandidates) {
+        const distance = ship.position.distance(exp.position);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestExp = exp;
+        }
+      }
+
+      if (closestExp) {
+        this.#updateTarget(closestExp);
       }
     }
   }
@@ -273,15 +389,21 @@ export class PirateAI extends ShipAI {
 
     const distance = ship.position.distance(target.position);
 
-    if (target instanceof Ship) {
-      const inCloseRange = distance < this.#closeRange;
-      ship.thrust = !inCloseRange;
+    const inCloseRange = distance < this.#closeRange;
+    ship.thrust = !inCloseRange;
 
-      const fireChange = inCloseRange ? 0.1 : 0.15;
-      const fire = Math.random() < fireChange;
-      if (fire) {
-        ship.fire(true);
-      }
+    const fireChance =
+      target instanceof Ship
+        ? inCloseRange
+          ? 0.1
+          : 0.15
+        : target instanceof Exp
+        ? 0
+        : 0.2;
+
+    const fire = Math.random() < fireChance;
+    if (fire) {
+      ship.fire(true);
     }
 
     if (distance > 100) {
@@ -294,8 +416,26 @@ export class PirateAI extends ShipAI {
     }
   }
 
+  #isLowPriorityTarget(target: LivingEntity) {
+    return target instanceof Asteroid || target instanceof Exp;
+  }
+
   #updateTarget(target: LivingEntity) {
     if (!this.#currentTarget) {
+      this.#currentTarget = target;
+      return;
+    }
+
+    if (target === this.#currentTarget) {
+      return;
+    }
+
+    if (
+      target instanceof Ship &&
+      (this.#currentTarget instanceof Asteroid ||
+        this.#currentTarget instanceof Exp)
+    ) {
+      this.#memorizedTarget = this.#currentTarget;
       this.#currentTarget = target;
       return;
     }

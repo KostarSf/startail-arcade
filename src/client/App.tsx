@@ -13,7 +13,7 @@ import "./index.css";
 import { useStats } from "./store";
 
 const VERSION = "v0.4.0";
-const DEBUG = false;
+const DEBUG = true;
 
 export function App() {
   // Set custom cursor on mount
@@ -560,7 +560,9 @@ function LevelBar() {
 
 function FloatingScoreTexts() {
   const floatingScoreTexts = useStats((state) => state.floatingScoreTexts);
-  const removeFloatingScoreText = useStats((state) => state.removeFloatingScoreText);
+  const removeFloatingScoreText = useStats(
+    (state) => state.removeFloatingScoreText
+  );
 
   useEffect(() => {
     // Clean up old texts (older than 1.2 seconds to ensure animation completes)
@@ -601,7 +603,9 @@ function FloatingScoreText({
   value: number;
   startTime: number;
 }) {
-  const removeFloatingScoreText = useStats((state) => state.removeFloatingScoreText);
+  const removeFloatingScoreText = useStats(
+    (state) => state.removeFloatingScoreText
+  );
   const [opacity, setOpacity] = useState(1);
   const [translateY, setTranslateY] = useState(0);
 

@@ -1,4 +1,5 @@
 import type { World } from "../../world/world";
+import type { BaseEntity } from "../base-entity";
 import type { Ship } from "../ship";
 
 export abstract class ShipAI {
@@ -11,6 +12,8 @@ export abstract class ShipAI {
   }
 
   initialize(ship: Ship, world: World): void {}
+
+  onShipDamage(world: World, amount: number, source?: BaseEntity): void {}
 
   update(ship: Ship, world: World, delta: number): void {
     if (world.engine.tick % this.tickRate === 0) {

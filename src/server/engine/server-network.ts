@@ -10,7 +10,6 @@ import type {
 import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
 import type { Engine } from "./engine";
-import { PirateAI } from "./entities/ai/pirate-ai";
 import type { BaseEntity } from "./entities/base-entity";
 import { Bullet } from "./entities/bullet";
 import { Ship } from "./entities/ship";
@@ -66,12 +65,14 @@ export class ServerPlayer {
       const oldMaxHealth = this.ship.maxHealth;
       const oldMaxEnergy = this.ship.maxEnergy;
 
-      this.ship.maxHealth += levelDifference * 5;
-      this.ship.maxEnergy += levelDifference * 0.5;
+      this.ship.maxHealth += levelDifference * 3;
+      this.ship.maxEnergy += levelDifference * 0.4;
       this.ship.energyRechargeRate += levelDifference * 0.1;
-      this.ship.baseDamage += 0.5 * levelDifference;
+      this.ship.baseDamage += 0.25 * levelDifference;
+      this.ship.level = this.level;
 
       // Preserve health and energy percentages when max values increase
+      // TODO: Корабль должен сам увеличивать свои stats при повышении уровня, а не нам
       this.ship.adjustStatsForLevelUp(oldMaxHealth, oldMaxEnergy);
 
       console.log(

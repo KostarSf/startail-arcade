@@ -8,6 +8,7 @@ export class Engine {
     lifecycle: false,
     ticksDuration: false,
     asteroids: false,
+    pirates: false,
     disablePartialStateUpdates: false,
     disableCompression: false,
   };

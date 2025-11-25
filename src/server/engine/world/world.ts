@@ -2,8 +2,10 @@ import { Vector2 } from "@/shared/math/vector";
 import type { SerializableEvent } from "@/shared/network/utils";
 import { TPS } from "../constants";
 import type { Engine } from "../engine";
+import { PirateAI } from "../entities/ai/pirate-ai";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
+import { Ship } from "../entities/ship";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
 import { generateWorld } from "./utils/fbm-domain-warp-world-generator";
@@ -17,6 +19,13 @@ export class World {
 
   #maxAsteroids = 2500;
   #currentAsteroids = 0;
+  #asteroidsRefillInterval = TPS * 5;
+  #asteroidsMinBatchCount = 10;
+  #asteroidsMaxBatchCount = 50;
+
+  #maxPirates = 5;
+  #currentPirates = 0;
+  #piratesRefillInterval = TPS * 20;
 
   #engine: Engine | null = null;
   get engine() {
@@ -68,6 +77,44 @@ export class World {
             : undefined,
       });
     }
+
+    while (this.#currentPirates < this.#maxPirates) {
+      this.#spawnPirate();
+    }
+  }
+
+  #spawnPirate() {
+    const position = new Vector2(
+      Math.random() * this.#borderRadius * 2 - this.#borderRadius,
+      Math.random() * this.#borderRadius * 2 - this.#borderRadius
+    );
+
+    const allPlayers = this.engine.network.players;
+    for (const player of allPlayers) {
+      if (!player.ship || player.ship.removed) continue;
+
+      const distance = player.ship.position.distance(position);
+      if (distance < 1000) {
+        if (this.engine.debug.pirates) {
+          console.log(
+            "pirate spawn denied, player too close at distance",
+            distance
+          );
+        }
+
+        return;
+      }
+    }
+
+    const pirate = new Ship({
+      x: position.x,
+      y: position.y,
+      angle: Math.random() * 2 * Math.PI - Math.PI,
+      name: "???",
+    });
+    pirate.ai = new PirateAI();
+    this.spawn(pirate);
+    this.#currentPirates++;
   }
 
   #spawnAsteroid(args?: {
@@ -142,6 +189,7 @@ export class World {
 
   update(delta: number) {
     this.#refillAsteroids();
+    this.#refillPirates();
 
     for (const entity of this.#entities.values()) {
       if (!entity.initialized) {
@@ -175,6 +223,10 @@ export class World {
       if (entity.type === "asteroid") {
         this.#currentAsteroids--;
       }
+
+      if (entity instanceof Ship && entity.ai instanceof PirateAI) {
+        this.#currentPirates--;
+      }
     }
 
     this.#removedEntities.clear();
@@ -184,12 +236,34 @@ export class World {
     }
   }
 
-  #refillInterval = TPS * 5;
-  #minBatchCount = 10;
-  #maxBatchCount = 50;
+  #refillPirates() {
+    if (
+      !this.#engine ||
+      this.#engine.tick % this.#piratesRefillInterval !== 0
+    ) {
+      return;
+    }
+
+    if (this.#currentPirates >= this.#maxPirates) {
+      if (this.engine.debug.pirates) {
+        console.log("max pirates reached, current: ", this.#currentPirates);
+      }
+      return;
+    }
+
+    this.#spawnPirate();
+
+    if (this.engine.debug.pirates) {
+      console.log("refilled pirates");
+      console.log(`current pirates: ${this.#currentPirates}`);
+    }
+  }
 
   #refillAsteroids() {
-    if (!this.#engine || this.#engine.tick % this.#refillInterval !== 0) {
+    if (
+      !this.#engine ||
+      this.#engine.tick % this.#asteroidsRefillInterval !== 0
+    ) {
       return;
     }
 
@@ -202,8 +276,9 @@ export class World {
 
     const batchCount =
       Math.floor(
-        Math.random() * (this.#maxBatchCount - this.#minBatchCount + 1)
-      ) + this.#minBatchCount;
+        Math.random() *
+          (this.#asteroidsMaxBatchCount - this.#asteroidsMinBatchCount + 1)
+      ) + this.#asteroidsMinBatchCount;
     for (let i = 0; i < batchCount; i++) {
       this.#spawnAsteroid({ beyondBorder: true });
     }

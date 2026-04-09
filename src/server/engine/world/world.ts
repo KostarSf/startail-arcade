@@ -192,27 +192,32 @@ export class World {
     this.#refillAsteroids();
     this.#refillPirates();
 
-    for (const entity of this.#entities.values()) {
-      if (!entity.initialized) {
-        entity.initialize(this);
+    this.engine.measurePerformance("entityUpdateMs", () => {
+      for (const entity of this.#entities.values()) {
+        if (!entity.initialized) {
+          entity.initialize(this);
+        }
+
+        entity.preUpdate(this, delta);
       }
 
-      entity.preUpdate(this, delta);
-    }
+      for (const entity of this.#entities.values()) {
+        if (!entity.removed) {
+          entity.update(this, delta);
+          this.#grid.update(entity);
+        }
 
-    for (const entity of this.#entities.values()) {
-      if (!entity.removed) {
-        entity.update(this, delta);
-        this.#grid.update(entity);
+        if (entity.removed) {
+          this.#removedEntities.set(entity.id, entity);
+          entity.onRemove(this);
+        }
       }
+    });
 
-      if (entity.removed) {
-        this.#removedEntities.set(entity.id, entity);
-        entity.onRemove(this);
-      }
-    }
-
-    this.#collisionResolver.update(this);
+    this.engine.measurePerformance("collisionMs", () => {
+      this.#collisionResolver.update(this);
+    });
+    this.engine.markProfiledTick();
   }
 
   postUpdate(delta: number) {
@@ -342,13 +347,17 @@ export class World {
     const entiyId =
       "entityId" in event.payload ? event.payload.entityId : undefined;
 
-    const data = event.serialize();
+    const data = this.engine.measurePerformance("networkSerializeMs", () =>
+      event.serialize()
+    );
     for (const player of this.engine.network.players) {
       if (entiyId && !player.lastSeenEntityIds.has(entiyId)) {
         continue;
       }
 
-      player.ws.send(data);
+      this.engine.measurePerformance("wsSendMs", () => {
+        player.ws.send(data);
+      });
     }
   }
 

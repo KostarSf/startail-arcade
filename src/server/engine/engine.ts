@@ -2,6 +2,12 @@ import { DT_MS, TPS } from "./constants";
 import { ServerNetwork } from "./server-network";
 import { World } from "./world/world";
 
+type PerformanceMetric =
+  | "entityUpdateMs"
+  | "collisionMs"
+  | "networkSerializeMs"
+  | "wsSendMs";
+
 export class Engine {
   debug = {
     collisions: false,
@@ -9,6 +15,7 @@ export class Engine {
     ticksDuration: false,
     asteroids: false,
     pirates: false,
+    performanceBreakdown: false,
     disablePartialStateUpdates: false,
     disableCompression: false,
   };
@@ -22,6 +29,14 @@ export class Engine {
   #lastTime = 0;
   #accumulatedTime = 0;
   #lastTickDuration = 0;
+  #performanceWindowStartedAt = 0;
+  #performanceWindow = {
+    ticks: 0,
+    entityUpdateMs: 0,
+    collisionMs: 0,
+    networkSerializeMs: 0,
+    wsSendMs: 0,
+  };
 
   get tick() {
     return this.#tick;
@@ -54,6 +69,8 @@ export class Engine {
     this.#startTime = performance.now();
     this.#lastTime = this.#startTime;
     this.#accumulatedTime = 0;
+    this.#performanceWindowStartedAt = this.#startTime;
+    this.#resetPerformanceWindow();
 
     this.#world.initialize(this);
 
@@ -85,6 +102,7 @@ export class Engine {
     this.#running = false;
     this.world.clear();
     this.#tick = 0;
+    this.#resetPerformanceWindow();
 
     console.log("engine stopped");
   }
@@ -128,5 +146,62 @@ export class Engine {
     }
 
     this.#lastTickDuration = performance.now() - tickStart;
+    this.#flushPerformanceWindowIfNeeded();
+  }
+
+  measurePerformance<T>(metric: PerformanceMetric, fn: () => T): T {
+    if (!this.debug.performanceBreakdown) {
+      return fn();
+    }
+
+    const startedAt = performance.now();
+    const result = fn();
+    this.#performanceWindow[metric] += performance.now() - startedAt;
+
+    return result;
+  }
+
+  markProfiledTick() {
+    if (!this.debug.performanceBreakdown) {
+      return;
+    }
+
+    this.#performanceWindow.ticks++;
+  }
+
+  #flushPerformanceWindowIfNeeded() {
+    if (!this.debug.performanceBreakdown) {
+      return;
+    }
+
+    const now = performance.now();
+    const elapsed = now - this.#performanceWindowStartedAt;
+    if (elapsed < 1000 || this.#performanceWindow.ticks === 0) {
+      return;
+    }
+
+    const ticks = this.#performanceWindow.ticks;
+    const average = (value: number) => value / ticks;
+
+    console.log(
+      `[perf] avg over ${ticks} ticks (${(elapsed / 1000).toFixed(1)}s): ` +
+        `entity update ${average(this.#performanceWindow.entityUpdateMs).toFixed(2)}ms, ` +
+        `collision ${average(this.#performanceWindow.collisionMs).toFixed(2)}ms, ` +
+        `network serialize ${average(this.#performanceWindow.networkSerializeMs).toFixed(2)}ms, ` +
+        `ws send ${average(this.#performanceWindow.wsSendMs).toFixed(2)}ms`
+    );
+
+    this.#performanceWindowStartedAt = now;
+    this.#resetPerformanceWindow();
+  }
+
+  #resetPerformanceWindow() {
+    this.#performanceWindow = {
+      ticks: 0,
+      entityUpdateMs: 0,
+      collisionMs: 0,
+      networkSerializeMs: 0,
+      wsSendMs: 0,
+    };
   }
 }

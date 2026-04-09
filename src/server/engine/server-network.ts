@@ -369,16 +369,25 @@ export class ServerNetwork {
         player.lastSeenEntityIds = visibleIds;
       }
 
-      player.ws.send(
-        event({
-          type: "server:state",
-          serverTime: this.engine.serverTime,
-          tickDuration: this.engine.lastTickDuration,
-          state,
-          radar: radarData?.get(player.id),
-          players: playersData,
-        }).serialize({ compress: !this.#engine.debug.disableCompression })
+      const payload = event({
+        type: "server:state",
+        serverTime: this.engine.serverTime,
+        tickDuration: this.engine.lastTickDuration,
+        state,
+        radar: radarData?.get(player.id),
+        players: playersData,
+      });
+      const serialized = this.#engine.measurePerformance(
+        "networkSerializeMs",
+        () =>
+          payload.serialize({
+            compress: !this.#engine.debug.disableCompression,
+          })
       );
+
+      this.#engine.measurePerformance("wsSendMs", () => {
+        player.ws.send(serialized);
+      });
     }
   }
 

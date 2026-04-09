@@ -20,6 +20,11 @@ function isMobileUserAgent(userAgent: string): boolean {
 }
 
 const engine = new Engine();
+const args = typeof Bun !== "undefined" ? Bun.argv : process.argv;
+
+if (args.includes("--debug-performance")) {
+  engine.debug.performanceBreakdown = true;
+}
 
 declare global {
   var game: { engine: Engine } | undefined;
@@ -84,5 +89,9 @@ const server = serve({
 });
 
 engine.network.initialize(server);
+
+if (engine.debug.performanceBreakdown) {
+  console.log("[debug] performance breakdown enabled");
+}
 
 console.log(`🚀 Server running at ${server.url}`);

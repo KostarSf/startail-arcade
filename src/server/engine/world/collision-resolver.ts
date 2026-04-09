@@ -29,19 +29,21 @@ export class CollisionResolver {
   }
 
   #detectDiscreteCollisions(world: World, a: BaseEntity) {
-    const neighbors = world.query(a.position, (a.radius ?? 0) * 2).array();
+    world.engine.measurePerformance("collisionDiscreteMs", () => {
+      const neighbors = world.query(a.position, (a.radius ?? 0) * 2).array();
 
-    for (const b of neighbors) {
-      if (a === b) continue;
-      if (!b.radius || !b.initialized) continue;
-      if (b.continuousCollision && b.moved) continue;
+      for (const b of neighbors) {
+        if (a === b) continue;
+        if (!b.radius || !b.initialized) continue;
+        if (b.continuousCollision && b.moved) continue;
 
-      if (this.#checkCircleCollision(a, b)) {
-        const key = this.#pairKey(a, b);
-        if (this.#currentPairs.has(key)) continue;
-        this.#currentPairs.add(key);
+        if (this.#checkCircleCollision(a, b)) {
+          const key = this.#pairKey(a, b);
+          if (this.#currentPairs.has(key)) continue;
+          this.#currentPairs.add(key);
+        }
       }
-    }
+    });
   }
 
   #checkCircleCollision(a: BaseEntity, b: BaseEntity) {
@@ -56,66 +58,68 @@ export class CollisionResolver {
   }
 
   #detectContinuousCollisions(world: World, entity: BaseEntity) {
-    const prevPos = entity.prevPos;
-    const currPos = entity.position;
-    const dx = currPos.x - prevPos.x;
-    const dy = currPos.y - prevPos.y;
-    const distance = Math.hypot(dx, dy);
+    world.engine.measurePerformance("collisionContinuousMs", () => {
+      const prevPos = entity.prevPos;
+      const currPos = entity.position;
+      const dx = currPos.x - prevPos.x;
+      const dy = currPos.y - prevPos.y;
+      const distance = Math.hypot(dx, dy);
 
-    // If entity hasn't moved, fall back to regular collision detection
-    if (distance < 0.001) {
-      this.#detectDiscreteCollisions(world, entity);
-      return;
-    }
-
-    const entityRadius = entity.radius ?? 0;
-    const queryRadius = distance + entityRadius * 2;
-    const midX = (prevPos.x + currPos.x) / 2;
-    const midY = (prevPos.y + currPos.y) / 2;
-
-    const candidates = world
-      .query(new Vector2(midX, midY), queryRadius)
-      .precise()
-      .array();
-
-    let earliestCollision: { entity: BaseEntity; t: number } | null = null;
-
-    for (const other of candidates) {
-      if (entity === other) continue;
-      if (!other.radius || !other.initialized) continue;
-
-      const collision = this.#sweptCircleCollision(
-        prevPos.x,
-        prevPos.y,
-        currPos.x,
-        currPos.y,
-        entityRadius,
-        other.x,
-        other.y,
-        other.radius ?? 0
-      );
-
-      if (
-        collision &&
-        (!earliestCollision || collision.t < earliestCollision.t)
-      ) {
-        earliestCollision = { entity: other, t: collision.t };
+      // If entity hasn't moved, fall back to regular collision detection
+      if (distance < 0.001) {
+        this.#detectDiscreteCollisions(world, entity);
+        return;
       }
-    }
 
-    // Handle the earliest collision
-    if (earliestCollision && earliestCollision.t <= 1.0) {
-      // Move entity to collision point
-      const t = Math.max(0, earliestCollision.t - 0.001); // Slight offset to prevent overlap
-      entity.position = new Vector2(prevPos.x + dx * t, prevPos.y + dy * t);
+      const entityRadius = entity.radius ?? 0;
+      const queryRadius = distance + entityRadius * 2;
+      const midX = (prevPos.x + currPos.x) / 2;
+      const midY = (prevPos.y + currPos.y) / 2;
 
-      // Mark as colliding
-      const key = this.#pairKey(entity, earliestCollision.entity);
-      this.#currentPairs.add(key);
-    } else {
-      // No collision detected, perform regular collision check at current position
-      this.#detectDiscreteCollisions(world, entity);
-    }
+      const candidates = world
+        .query(new Vector2(midX, midY), queryRadius)
+        .precise()
+        .array();
+
+      let earliestCollision: { entity: BaseEntity; t: number } | null = null;
+
+      for (const other of candidates) {
+        if (entity === other) continue;
+        if (!other.radius || !other.initialized) continue;
+
+        const collision = this.#sweptCircleCollision(
+          prevPos.x,
+          prevPos.y,
+          currPos.x,
+          currPos.y,
+          entityRadius,
+          other.x,
+          other.y,
+          other.radius ?? 0
+        );
+
+        if (
+          collision &&
+          (!earliestCollision || collision.t < earliestCollision.t)
+        ) {
+          earliestCollision = { entity: other, t: collision.t };
+        }
+      }
+
+      // Handle the earliest collision
+      if (earliestCollision && earliestCollision.t <= 1.0) {
+        // Move entity to collision point
+        const t = Math.max(0, earliestCollision.t - 0.001); // Slight offset to prevent overlap
+        entity.position = new Vector2(prevPos.x + dx * t, prevPos.y + dy * t);
+
+        // Mark as colliding
+        const key = this.#pairKey(entity, earliestCollision.entity);
+        this.#currentPairs.add(key);
+      } else {
+        // No collision detected, perform regular collision check at current position
+        this.#detectDiscreteCollisions(world, entity);
+      }
+    });
   }
 
   #sweptCircleCollision(
@@ -178,61 +182,72 @@ export class CollisionResolver {
   }
 
   #processEvents(world: World) {
-    for (const key of this.#currentPairs) {
-      const [aId, bId] = key.split(":");
-      const a = world.find(aId ?? "");
-      const b = world.find(bId ?? "");
-      if (!a || !b) continue;
-
-      if (!this.#lastPairs.has(key)) {
-        a.onCollisionStart(world, b);
-        b.onCollisionStart(world, a);
-      }
-
-      a.onCollision(world, b);
-      b.onCollision(world, a);
-    }
-
-    for (const key of this.#lastPairs) {
-      if (!this.#currentPairs.has(key)) {
-        const [aId, bId] = key.split(":");
-        const a = world.find(aId ?? "");
-        const b = world.find(bId ?? "");
+    world.engine.measurePerformance("collisionProcessEventsMs", () => {
+      for (const key of this.#currentPairs) {
+        const [a, b] = world.engine.measurePerformance(
+          "collisionPairDecodeMs",
+          () => this.#resolvePair(world, key)
+        );
         if (!a || !b) continue;
 
-        a.onCollisionEnd(world, b);
-        b.onCollisionEnd(world, a);
+        if (!this.#lastPairs.has(key)) {
+          a.onCollisionStart(world, b);
+          b.onCollisionStart(world, a);
+        }
+
+        a.onCollision(world, b);
+        b.onCollision(world, a);
       }
-    }
+
+      for (const key of this.#lastPairs) {
+        if (!this.#currentPairs.has(key)) {
+          const [a, b] = world.engine.measurePerformance(
+            "collisionPairDecodeMs",
+            () => this.#resolvePair(world, key)
+          );
+          if (!a || !b) continue;
+
+          a.onCollisionEnd(world, b);
+          b.onCollisionEnd(world, a);
+        }
+      }
+    });
   }
 
   removeEntity(world: World, entity: BaseEntity) {
-    const toEnd = new Set<string>();
+    world.engine.measurePerformance("collisionRemoveEntityMs", () => {
+      const toEnd = new Set<string>();
 
-    for (const key of this.#currentPairs) {
-      if (key.startsWith(entity.id + ":") || key.endsWith(":" + entity.id)) {
-        toEnd.add(key);
+      for (const key of this.#currentPairs) {
+        if (key.startsWith(entity.id + ":") || key.endsWith(":" + entity.id)) {
+          toEnd.add(key);
+        }
       }
-    }
-    for (const key of this.#lastPairs) {
-      if (key.startsWith(entity.id + ":") || key.endsWith(":" + entity.id)) {
-        toEnd.add(key);
+      for (const key of this.#lastPairs) {
+        if (key.startsWith(entity.id + ":") || key.endsWith(":" + entity.id)) {
+          toEnd.add(key);
+        }
       }
-    }
 
-    for (const key of toEnd) {
-      this.#currentPairs.delete(key);
-      this.#lastPairs.delete(key);
-    }
-
-    for (const key of toEnd) {
-      const [aId, bId] = key.split(":");
-      const otherId = aId === entity.id ? bId : aId;
-      const other = world.find(otherId ?? "");
-      if (other) {
-        entity.onCollisionEnd(world, other);
-        other.onCollisionEnd(world, entity);
+      for (const key of toEnd) {
+        this.#currentPairs.delete(key);
+        this.#lastPairs.delete(key);
       }
-    }
+
+      for (const key of toEnd) {
+        const [aId, bId] = key.split(":");
+        const otherId = aId === entity.id ? bId : aId;
+        const other = world.find(otherId ?? "");
+        if (other) {
+          entity.onCollisionEnd(world, other);
+          other.onCollisionEnd(world, entity);
+        }
+      }
+    });
+  }
+
+  #resolvePair(world: World, key: string) {
+    const [aId, bId] = key.split(":");
+    return [world.find(aId ?? ""), world.find(bId ?? "")] as const;
   }
 }

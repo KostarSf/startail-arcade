@@ -357,15 +357,23 @@ export class ServerNetwork {
 
       let state: FullServerState | PartialServerState;
       if (needFullState) {
-        state = this.#getFullState(player);
+        state = this.#engine.measurePerformance("networkBuildFullStateMs", () =>
+          this.#getFullState(player)
+        );
         // Update tracking with full state entities
         player.lastSeenEntityIds = new Set(
           state.entities.map((entity) => entity.id)
         );
       } else {
-        state = this.#getPartialState(player);
+        state = this.#engine.measurePerformance(
+          "networkBuildPartialStateMs",
+          () => this.#getPartialState(player)
+        );
         // Update tracking with currently visible entities
-        const visibleIds = this.#getVisibleEntityIds(player);
+        const visibleIds = this.#engine.measurePerformance(
+          "networkVisibleIdsMs",
+          () => this.#getVisibleEntityIds(player)
+        );
         player.lastSeenEntityIds = visibleIds;
       }
 

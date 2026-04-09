@@ -15,15 +15,15 @@ export class World {
   #grid = new UniformGrid();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 5000;
+  #borderRadius = 50000;
 
-  #maxAsteroids = 2500;
+  #maxAsteroids = 50000;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;
   #asteroidsMaxBatchCount = 50;
 
-  #maxPirates = 5;
+  #maxPirates = 50;
   #currentPirates = 0;
   #piratesRefillInterval = TPS * 20;
 
@@ -198,18 +198,29 @@ export class World {
           entity.initialize(this);
         }
 
-        entity.preUpdate(this, delta);
+        this.engine.measurePerformance("entityPreUpdateMs", () => {
+          entity.preUpdate(this, delta);
+        });
       }
 
       for (const entity of this.#entities.values()) {
         if (!entity.removed) {
-          entity.update(this, delta);
-          this.#grid.update(entity);
+          this.engine.measurePerformance(
+            this.#getEntityUpdateMetric(entity),
+            () => {
+              entity.update(this, delta);
+            }
+          );
+          this.engine.measurePerformance("gridUpdateMs", () => {
+            this.#grid.update(entity);
+          });
         }
 
         if (entity.removed) {
-          this.#removedEntities.set(entity.id, entity);
-          entity.onRemove(this);
+          this.engine.measurePerformance("entityRemovalQueueMs", () => {
+            this.#removedEntities.set(entity.id, entity);
+            entity.onRemove(this);
+          });
         }
       }
     });
@@ -239,6 +250,21 @@ export class World {
 
     for (const entity of this.#entities.values()) {
       entity.postUpdate(this, delta);
+    }
+  }
+
+  #getEntityUpdateMetric(entity: BaseEntity) {
+    switch (entity.type) {
+      case "asteroid":
+        return "entityUpdateAsteroidMs" as const;
+      case "ship":
+        return "entityUpdateShipMs" as const;
+      case "bullet":
+        return "entityUpdateBulletMs" as const;
+      case "exp":
+        return "entityUpdateExpMs" as const;
+      default:
+        return "entityUpdateOtherMs" as const;
     }
   }
 

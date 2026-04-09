@@ -4,9 +4,27 @@ import { World } from "./world/world";
 
 type PerformanceMetric =
   | "entityUpdateMs"
+  | "entityPreUpdateMs"
+  | "entityUpdateAsteroidMs"
+  | "entityUpdateShipMs"
+  | "entityUpdateBulletMs"
+  | "entityUpdateExpMs"
+  | "entityUpdateOtherMs"
+  | "gridUpdateMs"
+  | "entityRemovalQueueMs"
   | "collisionMs"
+  | "collisionDiscreteMs"
+  | "collisionContinuousMs"
+  | "collisionProcessEventsMs"
+  | "collisionPairDecodeMs"
+  | "collisionRemoveEntityMs"
   | "networkSerializeMs"
+  | "networkBuildFullStateMs"
+  | "networkBuildPartialStateMs"
+  | "networkVisibleIdsMs"
   | "wsSendMs";
+
+type PerformanceWindow = { ticks: number } & Record<PerformanceMetric, number>;
 
 export class Engine {
   debug = {
@@ -30,13 +48,7 @@ export class Engine {
   #accumulatedTime = 0;
   #lastTickDuration = 0;
   #performanceWindowStartedAt = 0;
-  #performanceWindow = {
-    ticks: 0,
-    entityUpdateMs: 0,
-    collisionMs: 0,
-    networkSerializeMs: 0,
-    wsSendMs: 0,
-  };
+  #performanceWindow: PerformanceWindow = this.#createEmptyPerformanceWindow();
 
   get tick() {
     return this.#tick;
@@ -182,13 +194,24 @@ export class Engine {
 
     const ticks = this.#performanceWindow.ticks;
     const average = (value: number) => value / ticks;
+    const avgMetric = (metric: PerformanceMetric) =>
+      average(this.#performanceWindow[metric]).toFixed(2);
 
     console.log(
-      `[perf] avg over ${ticks} ticks (${(elapsed / 1000).toFixed(1)}s): ` +
-        `entity update ${average(this.#performanceWindow.entityUpdateMs).toFixed(2)}ms, ` +
-        `collision ${average(this.#performanceWindow.collisionMs).toFixed(2)}ms, ` +
-        `network serialize ${average(this.#performanceWindow.networkSerializeMs).toFixed(2)}ms, ` +
-        `ws send ${average(this.#performanceWindow.wsSendMs).toFixed(2)}ms`
+      `[perf] avg over ${ticks} ticks (${(elapsed / 1000).toFixed(1)}s):\n` +
+        `  entity update ${avgMetric("entityUpdateMs")}ms ` +
+        `(pre ${avgMetric("entityPreUpdateMs")}ms, asteroid ${avgMetric("entityUpdateAsteroidMs")}ms, ` +
+        `ship ${avgMetric("entityUpdateShipMs")}ms, bullet ${avgMetric("entityUpdateBulletMs")}ms, ` +
+        `exp ${avgMetric("entityUpdateExpMs")}ms, other ${avgMetric("entityUpdateOtherMs")}ms, ` +
+        `grid ${avgMetric("gridUpdateMs")}ms, removal queue ${avgMetric("entityRemovalQueueMs")}ms)\n` +
+        `  collision ${avgMetric("collisionMs")}ms ` +
+        `(discrete ${avgMetric("collisionDiscreteMs")}ms, continuous ${avgMetric("collisionContinuousMs")}ms, ` +
+        `process events ${avgMetric("collisionProcessEventsMs")}ms, pair decode ${avgMetric("collisionPairDecodeMs")}ms, ` +
+        `remove entity ${avgMetric("collisionRemoveEntityMs")}ms)\n` +
+        `  network serialize ${avgMetric("networkSerializeMs")}ms ` +
+        `(full state ${avgMetric("networkBuildFullStateMs")}ms, partial state ${avgMetric("networkBuildPartialStateMs")}ms, ` +
+        `visible ids ${avgMetric("networkVisibleIdsMs")}ms)\n` +
+        `  ws send ${avgMetric("wsSendMs")}ms`
     );
 
     this.#performanceWindowStartedAt = now;
@@ -196,11 +219,31 @@ export class Engine {
   }
 
   #resetPerformanceWindow() {
-    this.#performanceWindow = {
+    this.#performanceWindow = this.#createEmptyPerformanceWindow();
+  }
+
+  #createEmptyPerformanceWindow(): PerformanceWindow {
+    return {
       ticks: 0,
       entityUpdateMs: 0,
+      entityPreUpdateMs: 0,
+      entityUpdateAsteroidMs: 0,
+      entityUpdateShipMs: 0,
+      entityUpdateBulletMs: 0,
+      entityUpdateExpMs: 0,
+      entityUpdateOtherMs: 0,
+      gridUpdateMs: 0,
+      entityRemovalQueueMs: 0,
       collisionMs: 0,
+      collisionDiscreteMs: 0,
+      collisionContinuousMs: 0,
+      collisionProcessEventsMs: 0,
+      collisionPairDecodeMs: 0,
+      collisionRemoveEntityMs: 0,
       networkSerializeMs: 0,
+      networkBuildFullStateMs: 0,
+      networkBuildPartialStateMs: 0,
+      networkVisibleIdsMs: 0,
       wsSendMs: 0,
     };
   }

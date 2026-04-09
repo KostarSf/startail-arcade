@@ -4,6 +4,9 @@ node_modules
 # output
 out
 dist
+.artifacts
+test-results
+playwright-report
 *.tgz
 
 # code coverage

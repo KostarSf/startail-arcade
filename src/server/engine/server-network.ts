@@ -127,6 +127,23 @@ export class ServerNetwork {
     return this.#players.size;
   }
 
+  getPlayerSnapshots() {
+    return this.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      score: player.score,
+      level: player.level,
+      alive: player.isAlive,
+      shipId: player.ship?.id ?? null,
+      position: player.ship
+        ? {
+            x: Math.round(player.ship.position.x * 10) / 10,
+            y: Math.round(player.ship.position.y * 10) / 10,
+          }
+        : null,
+    }));
+  }
+
   constructor(engine: Engine) {
     this.#engine = engine;
   }

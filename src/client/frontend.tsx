@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { init } from "./engine";
+import { installTestApi } from "./test-api";
 
 async function checkSupport() {
   try {
@@ -26,7 +27,13 @@ async function start() {
 
   const root = createRoot(document.getElementById("ui")!);
   root.render(<App />);
-  init(document.getElementById("game")!);
+  installTestApi();
+  try {
+    await init(document.getElementById("game")!);
+  } catch (error) {
+    console.error("Failed to initialize game client:", error);
+    throw error;
+  }
 }
 
 if (document.readyState === "loading") {

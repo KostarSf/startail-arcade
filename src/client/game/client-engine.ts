@@ -216,6 +216,23 @@ export class ClientEngine {
     return params.get("world-border") === "true";
   }
 
+  #resolveAgentModeFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("agent-mode") === "true";
+  }
+
+  #resolveAudioDisabledFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const audioParam = params.get("audio");
+    if (audioParam === "off" || audioParam === "false" || audioParam === "0") {
+      return true;
+    }
+
+    return this.#resolveAgentModeFromURL();
+  }
+
   #resolveDrawGridFromURL(): boolean {
     if (typeof window === "undefined") return false;
     const params = new URLSearchParams(window.location.search);
@@ -294,7 +311,108 @@ export class ClientEngine {
     return this.#drawColliders;
   }
 
+  isConnected(): boolean {
+    return this.#ws?.readyState === WebSocket.OPEN;
+  }
+
+  setDebugOptions(options: {
+    drawGrid?: boolean;
+    drawWorldBorder?: boolean;
+    drawColliders?: boolean;
+    simulatedLatencyMs?: number;
+  }) {
+    if (options.drawGrid !== undefined) {
+      this.setDrawGrid(options.drawGrid);
+    }
+    if (options.drawWorldBorder !== undefined) {
+      this.setDrawWorldBorder(options.drawWorldBorder);
+    }
+    if (options.drawColliders !== undefined) {
+      this.setDrawColliders(options.drawColliders);
+    }
+    if (options.simulatedLatencyMs !== undefined) {
+      this.setSimulatedLatency(options.simulatedLatencyMs);
+    }
+  }
+
+  getRuntimeSnapshot() {
+    const currentStats = this.#statsGetter();
+    const activePlayer = currentStats.playerId
+      ? currentStats.players.find((player) => player.id === currentStats.playerId)
+      : null;
+    const playerAlive = currentStats.playerObject !== null || activePlayer?.alive === true;
+
+    return {
+      connected: this.isConnected(),
+      connectionAttempts: this.#connectionAttempts,
+      reconnecting: currentStats.isReconnecting,
+      simulatedLatencyMs: this.#simulatedLatencyMs,
+      debug: {
+        drawGrid: this.#drawGrid,
+        drawWorldBorder: this.#drawWorldBorder,
+        drawColliders: this.#drawColliders,
+      },
+      player: {
+        id: currentStats.playerId,
+        alive: playerAlive,
+        x:
+          currentStats.playerObject !== null
+            ? Math.round(currentStats.playerObject.x * 10) / 10
+            : null,
+        y:
+          currentStats.playerObject !== null
+            ? Math.round(currentStats.playerObject.y * 10) / 10
+            : null,
+        rotation:
+          currentStats.playerObject !== null
+            ? Math.round(currentStats.playerObject.rotation * 1000) / 1000
+            : null,
+      },
+      stats: {
+        latency: Math.round(currentStats.latency * 100) / 100,
+        offset: Math.round(currentStats.offset * 100) / 100,
+        hasTimeSync: currentStats.hasTimeSync,
+        objectsCount: currentStats.objectsCount,
+        fps: Math.round(currentStats.fps * 10) / 10,
+        tickDuration: Math.round(currentStats.tickDuration * 100) / 100,
+        connectionError: currentStats.connectionError,
+        inboundBytesPerSecond:
+          Math.round(currentStats.inboundBytesPerSecond * 100) / 100,
+        outboundBytesPerSecond:
+          Math.round(currentStats.outboundBytesPerSecond * 100) / 100,
+        leaderboard: currentStats.players.map((player) => ({
+          id: player.id,
+          name: player.name,
+          score: player.score,
+          alive: player.alive,
+        })),
+        respawnError: currentStats.respawnError,
+        worldRadius: currentStats.worldRadius,
+        radarCount: currentStats.radarData?.length ?? 0,
+      },
+    };
+  }
+
+  sendInputForTest(input: {
+    thrust: boolean;
+    angle: number;
+    fire: boolean;
+    firingCompensation?: boolean;
+  }) {
+    return this.#sendInput(input, {
+      fields: ["thrust", "angle", "fire", "firingCompensation"],
+    });
+  }
+
   async initialize(parent: HTMLElement) {
+    if (this.#resolveAgentModeFromURL()) {
+      console.info("[agent] using headless client mode");
+      this.#audioEngine = new AudioEngine();
+      this.#setupTickers();
+      this.#connect();
+      return;
+    }
+
     await this.#app.init({
       background: "#000000",
       resizeTo: window,
@@ -331,6 +449,7 @@ export class ClientEngine {
     });
 
     await this.#loadTextures();
+    this.#audioEngine = new AudioEngine();
     await this.#initializeAudio();
     this.#setupServices();
     this.#setupPipeline();
@@ -340,7 +459,15 @@ export class ClientEngine {
   }
 
   async #initializeAudio() {
-    this.#audioEngine = new AudioEngine();
+    if (!this.#audioEngine) {
+      this.#audioEngine = new AudioEngine();
+    }
+
+    if (this.#resolveAudioDisabledFromURL()) {
+      console.info("[audio] disabled for agent/test run");
+      return;
+    }
+
     await this.#audioEngine.initialize();
 
     // Load audio settings from localStorage and apply them
@@ -1049,9 +1176,10 @@ export class ClientEngine {
         this.#handlePong(message);
         break;
       case "server:player-initialize":
-        if (!this.#services) return;
-        this.#services.player.id = message.playerId;
-        this.#services.world.radius = message.worldRadius;
+        if (this.#services) {
+          this.#services.player.id = message.playerId;
+          this.#services.world.radius = message.worldRadius;
+        }
         this.#statsGetter().setPlayerId(message.playerId);
         this.#statsGetter().setWorldRadius(message.worldRadius);
         break;
@@ -1059,6 +1187,19 @@ export class ClientEngine {
         this.#snapshotBuffer.add(message);
         this.#statsGetter().setPlayers(message.players);
         this.#statsGetter().setTickDuration(message.tickDuration);
+        if (message.state.type === "full") {
+          this.#statsGetter().setObjectsCount(message.state.entities.length);
+        } else {
+          const currentObjects = this.#statsGetter().objectsCount;
+          this.#statsGetter().setObjectsCount(
+            Math.max(
+              0,
+              currentObjects +
+                message.state.updated.length -
+                message.state.removed.length
+            )
+          );
+        }
         if (message.radar) {
           this.#statsGetter().setRadarData(message.radar);
         }

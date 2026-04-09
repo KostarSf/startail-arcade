@@ -15,15 +15,15 @@ export class World {
   #grid = new UniformGrid();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 50000;
+  #borderRadius = 5000;
 
-  #maxAsteroids = 50000;
+  #maxAsteroids = 2500;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;
   #asteroidsMaxBatchCount = 50;
 
-  #maxPirates = 50;
+  #maxPirates = 5;
   #currentPirates = 0;
   #piratesRefillInterval = TPS * 20;
 
@@ -41,6 +41,14 @@ export class World {
 
   get entities() {
     return Array.from(this.#entities.values());
+  }
+
+  getEntityCountsByType() {
+    const counts: Record<string, number> = {};
+    for (const entity of this.#entities.values()) {
+      counts[entity.type] = (counts[entity.type] ?? 0) + 1;
+    }
+    return counts;
   }
 
   spawn(entity: BaseEntity) {

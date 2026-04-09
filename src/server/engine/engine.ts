@@ -2,7 +2,7 @@ import { DT_MS, TPS } from "./constants";
 import { ServerNetwork } from "./server-network";
 import { World } from "./world/world";
 
-type PerformanceMetric =
+export type PerformanceMetric =
   | "entityUpdateMs"
   | "entityPreUpdateMs"
   | "entityUpdateAsteroidMs"
@@ -25,6 +25,12 @@ type PerformanceMetric =
   | "wsSendMs";
 
 type PerformanceWindow = { ticks: number } & Record<PerformanceMetric, number>;
+
+export type PerformanceSummary = {
+  ticks: number;
+  elapsedMs: number;
+  averagesMs: Record<PerformanceMetric, number>;
+};
 
 export class Engine {
   debug = {
@@ -49,6 +55,7 @@ export class Engine {
   #lastTickDuration = 0;
   #performanceWindowStartedAt = 0;
   #performanceWindow: PerformanceWindow = this.#createEmptyPerformanceWindow();
+  #lastPerformanceSummary: PerformanceSummary | null = null;
 
   get tick() {
     return this.#tick;
@@ -68,6 +75,10 @@ export class Engine {
 
   get lastTickDuration() {
     return this.#lastTickDuration;
+  }
+
+  get lastPerformanceSummary() {
+    return this.#lastPerformanceSummary;
   }
 
   constructor() {
@@ -114,6 +125,7 @@ export class Engine {
     this.#running = false;
     this.world.clear();
     this.#tick = 0;
+    this.#lastTickDuration = 0;
     this.#resetPerformanceWindow();
 
     console.log("engine stopped");
@@ -196,6 +208,13 @@ export class Engine {
     const average = (value: number) => value / ticks;
     const avgMetric = (metric: PerformanceMetric) =>
       average(this.#performanceWindow[metric]).toFixed(2);
+    const averagesMs = this.#createAveragesSnapshot(average);
+
+    this.#lastPerformanceSummary = {
+      ticks,
+      elapsedMs: elapsed,
+      averagesMs,
+    };
 
     console.log(
       `[perf] avg over ${ticks} ticks (${(elapsed / 1000).toFixed(1)}s):\n` +
@@ -220,6 +239,51 @@ export class Engine {
 
   #resetPerformanceWindow() {
     this.#performanceWindow = this.#createEmptyPerformanceWindow();
+  }
+
+  #createAveragesSnapshot(
+    average: (value: number) => number
+  ): Record<PerformanceMetric, number> {
+    return {
+      entityUpdateMs: average(this.#performanceWindow.entityUpdateMs),
+      entityPreUpdateMs: average(this.#performanceWindow.entityPreUpdateMs),
+      entityUpdateAsteroidMs: average(
+        this.#performanceWindow.entityUpdateAsteroidMs
+      ),
+      entityUpdateShipMs: average(this.#performanceWindow.entityUpdateShipMs),
+      entityUpdateBulletMs: average(
+        this.#performanceWindow.entityUpdateBulletMs
+      ),
+      entityUpdateExpMs: average(this.#performanceWindow.entityUpdateExpMs),
+      entityUpdateOtherMs: average(this.#performanceWindow.entityUpdateOtherMs),
+      gridUpdateMs: average(this.#performanceWindow.gridUpdateMs),
+      entityRemovalQueueMs: average(
+        this.#performanceWindow.entityRemovalQueueMs
+      ),
+      collisionMs: average(this.#performanceWindow.collisionMs),
+      collisionDiscreteMs: average(this.#performanceWindow.collisionDiscreteMs),
+      collisionContinuousMs: average(
+        this.#performanceWindow.collisionContinuousMs
+      ),
+      collisionProcessEventsMs: average(
+        this.#performanceWindow.collisionProcessEventsMs
+      ),
+      collisionPairDecodeMs: average(
+        this.#performanceWindow.collisionPairDecodeMs
+      ),
+      collisionRemoveEntityMs: average(
+        this.#performanceWindow.collisionRemoveEntityMs
+      ),
+      networkSerializeMs: average(this.#performanceWindow.networkSerializeMs),
+      networkBuildFullStateMs: average(
+        this.#performanceWindow.networkBuildFullStateMs
+      ),
+      networkBuildPartialStateMs: average(
+        this.#performanceWindow.networkBuildPartialStateMs
+      ),
+      networkVisibleIdsMs: average(this.#performanceWindow.networkVisibleIdsMs),
+      wsSendMs: average(this.#performanceWindow.wsSendMs),
+    };
   }
 
   #createEmptyPerformanceWindow(): PerformanceWindow {

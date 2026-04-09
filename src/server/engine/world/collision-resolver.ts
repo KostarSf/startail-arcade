@@ -1,4 +1,5 @@
 import { Vector2 } from "@/shared/math/vector";
+import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import type { World } from "./world";
 
@@ -14,18 +15,17 @@ export class CollisionResolver {
   }
 
   #detectCollisions(world: World) {
-    const allEntities = world.entities;
-
-    for (const a of allEntities) {
-      if (!a.radius || !a.initialized) continue;
+    world.forEachCollisionEntity((a) => {
+      if (!a.radius || !a.initialized) return;
+      if (world.chunkActivity.isEntitySleeping(a)) return;
 
       if (a.continuousCollision && a.moved) {
         this.#detectContinuousCollisions(world, a);
-        continue;
+        return;
       }
 
       this.#detectDiscreteCollisions(world, a);
-    }
+    });
   }
 
   #detectDiscreteCollisions(world: World, a: BaseEntity) {
@@ -36,6 +36,7 @@ export class CollisionResolver {
         if (a === b) continue;
         if (!b.radius || !b.initialized) continue;
         if (b.continuousCollision && b.moved) continue;
+        if (!this.#canCollide(world, a, b)) continue;
 
         if (this.#checkCircleCollision(a, b)) {
           const key = this.#pairKey(a, b);
@@ -86,6 +87,7 @@ export class CollisionResolver {
       for (const other of candidates) {
         if (entity === other) continue;
         if (!other.radius || !other.initialized) continue;
+        if (!this.#canCollide(world, entity, other)) continue;
 
         const collision = this.#sweptCircleCollision(
           prevPos.x,
@@ -249,5 +251,21 @@ export class CollisionResolver {
   #resolvePair(world: World, key: string) {
     const [aId, bId] = key.split(":");
     return [world.find(aId ?? ""), world.find(bId ?? "")] as const;
+  }
+
+  #canCollide(world: World, a: BaseEntity, b: BaseEntity) {
+    if (world.chunkActivity.isEntitySleeping(a)) {
+      return false;
+    }
+
+    if (world.chunkActivity.isEntitySleeping(b)) {
+      return false;
+    }
+
+    if (a instanceof Asteroid && b instanceof Asteroid) {
+      return world.chunkActivity.isAsteroidCollisionEnabled(a, b);
+    }
+
+    return true;
   }
 }

@@ -6,6 +6,12 @@ import {
 } from "@/shared/game/entities/base";
 import { Vector2 } from "@/shared/math/vector";
 import type { World } from "../world/world";
+import type {
+  ChunkSleepBehavior,
+  ChunkWakeSource,
+} from "../world/chunk-activity-manager";
+
+const EMPTY_CHUNK_WAKE_SOURCES: readonly ChunkWakeSource[] = [];
 
 export type IBaseEntity = BaseEntityState & {
   continuousCollision?: boolean;
@@ -121,6 +127,34 @@ export abstract class BaseEntity {
    */
   markChanged() {
     this.changed = true;
+  }
+
+  /**
+   * Declares whether this entity may be skipped while its activation chunk is
+   * sleeping.
+   */
+  getChunkSleepBehavior(): ChunkSleepBehavior {
+    return "never";
+  }
+
+  /**
+   * Declares whether this entity should keep chunks awake around itself.
+   */
+  canWakeChunks(): boolean {
+    return false;
+  }
+
+  /**
+   * Returns chunk wake shapes for the current tick.
+   *
+   * Implementations should return world-space points or circles. The chunk
+   * activity manager handles wrap-aware mirroring and chunk conversion.
+   */
+  getChunkWakeSources(
+    _world: World,
+    _delta: number
+  ): readonly ChunkWakeSource[] {
+    return EMPTY_CHUNK_WAKE_SOURCES;
   }
 
   preUpdate(world: World, delta: number) {

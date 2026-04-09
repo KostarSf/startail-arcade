@@ -182,6 +182,7 @@ export function createGameServer(options: GameServerOptions = {}) {
           playerCount: engine.network.playerCount,
           entityCount: engine.world.entities.length,
           entityCounts: engine.world.getEntityCountsByType(),
+          activity: engine.world.getActivityStats(),
           performance: engine.lastPerformanceSummary,
           debug: {
             ...engine.debug,
@@ -200,6 +201,7 @@ export function createGameServer(options: GameServerOptions = {}) {
           serverTimeMs: Math.round(engine.serverTime),
           players: engine.network.getPlayerSnapshots(),
           entityCounts: engine.world.getEntityCountsByType(),
+          activity: engine.world.getActivityStats(),
           seed: resolved.seed,
         });
       },

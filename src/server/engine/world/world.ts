@@ -6,24 +6,27 @@ import { PirateAI } from "../entities/ai/pirate-ai";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import { Ship } from "../entities/ship";
+import { ChunkActivityManager } from "./chunk-activity-manager";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
 import { generateWorld } from "./utils/fbm-domain-warp-world-generator";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
+  #nonAsteroidEntities = new Set<BaseEntity>();
   #grid = new UniformGrid();
+  #chunkActivity = new ChunkActivityManager();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 5000;
+  #borderRadius = 50000;
 
-  #maxAsteroids = 2500;
+  #maxAsteroids = 50000;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;
   #asteroidsMaxBatchCount = 50;
 
-  #maxPirates = 5;
+  #maxPirates = 50;
   #currentPirates = 0;
   #piratesRefillInterval = TPS * 20;
 
@@ -43,6 +46,12 @@ export class World {
     return Array.from(this.#entities.values());
   }
 
+  /** Exposes chunk activity state for systems that need sleep/awake decisions. */
+  get chunkActivity() {
+    return this.#chunkActivity;
+  }
+
+  /** Returns current entity counts grouped by network/entity type. */
   getEntityCountsByType() {
     const counts: Record<string, number> = {};
     for (const entity of this.#entities.values()) {
@@ -56,11 +65,50 @@ export class World {
       throw new Error("Entity already initialized");
     }
     this.#entities.set(entity.id, entity);
+    if (!(entity instanceof Asteroid)) {
+      this.#nonAsteroidEntities.add(entity);
+    }
     this.#grid.update(entity);
+    this.#chunkActivity.onSpawn(entity);
   }
 
   find(id: string) {
     return this.#entities.get(id);
+  }
+
+  /**
+   * Updates the spatial index and chunk activity index after an entity moved.
+   *
+   * This is the single place that keeps both indexes in sync.
+   */
+  updateSpatialIndex(entity: BaseEntity) {
+    this.#grid.update(entity);
+    this.#chunkActivity.onEntityMoved(entity);
+  }
+
+  /** Returns chunk activity counters for debugging, tests, and perf snapshots. */
+  getActivityStats() {
+    return this.#chunkActivity.getStats();
+  }
+
+  /**
+   * Iterates entities that participate in collision this tick.
+   *
+   * Non-asteroids are always included. Asteroids are included only if their
+   * activation chunk is currently awake.
+   */
+  forEachCollisionEntity(fn: (entity: BaseEntity) => void) {
+    for (const entity of this.#nonAsteroidEntities) {
+      if (!entity.removed) {
+        fn(entity);
+      }
+    }
+
+    for (const asteroid of this.#chunkActivity.getActiveAsteroids()) {
+      if (!asteroid.removed) {
+        fn(asteroid);
+      }
+    }
   }
 
   #asteroidVelocityFactor = Math.max(Math.random() * 140 - 40, 0);
@@ -78,6 +126,7 @@ export class World {
 
   initialize(engine: Engine) {
     this.#engine = engine;
+    this.#chunkActivity.initialize(this);
 
     const asteroidPositions = generateWorld(
       this.#borderRadius,
@@ -200,8 +249,15 @@ export class World {
     this.#refillAsteroids();
     this.#refillPirates();
 
+    this.engine.measurePerformance("chunkActivityUpdateMs", () => {
+      this.#chunkActivity.beginTick(this, delta);
+    });
+    this.engine.measurePerformance("wakeStabilizationMs", () => {
+      this.#chunkActivity.applyWakeStabilization(this);
+    });
+
     this.engine.measurePerformance("entityUpdateMs", () => {
-      for (const entity of this.#entities.values()) {
+      this.#forEachSimulatedEntity((entity) => {
         if (!entity.initialized) {
           entity.initialize(this);
         }
@@ -209,9 +265,9 @@ export class World {
         this.engine.measurePerformance("entityPreUpdateMs", () => {
           entity.preUpdate(this, delta);
         });
-      }
+      });
 
-      for (const entity of this.#entities.values()) {
+      this.#forEachSimulatedEntity((entity) => {
         if (!entity.removed) {
           this.engine.measurePerformance(
             this.#getEntityUpdateMetric(entity),
@@ -220,7 +276,7 @@ export class World {
             }
           );
           this.engine.measurePerformance("gridUpdateMs", () => {
-            this.#grid.update(entity);
+            this.updateSpatialIndex(entity);
           });
         }
 
@@ -230,7 +286,7 @@ export class World {
             entity.onRemove(this);
           });
         }
-      }
+      });
     });
 
     this.engine.measurePerformance("collisionMs", () => {
@@ -242,7 +298,9 @@ export class World {
   postUpdate(delta: number) {
     for (const entity of this.#removedEntities.values()) {
       this.#collisionResolver.removeEntity(this, entity);
+      this.#chunkActivity.onRemove(entity);
       this.#entities.delete(entity.id);
+      this.#nonAsteroidEntities.delete(entity);
       this.#grid.remove(entity);
 
       if (entity.type === "asteroid") {
@@ -256,9 +314,9 @@ export class World {
 
     this.#removedEntities.clear();
 
-    for (const entity of this.#entities.values()) {
+    this.#forEachSimulatedEntity((entity) => {
       entity.postUpdate(this, delta);
-    }
+    });
   }
 
   #getEntityUpdateMetric(entity: BaseEntity) {
@@ -398,8 +456,20 @@ export class World {
   clear() {
     this.#engine = null;
     this.#entities.clear();
+    this.#nonAsteroidEntities.clear();
     this.#grid.clear();
+    this.#chunkActivity.clear();
     this.#currentAsteroids = 0;
     this.#currentPirates = 0;
+  }
+
+  #forEachSimulatedEntity(fn: (entity: BaseEntity) => void) {
+    for (const entity of this.#nonAsteroidEntities) {
+      fn(entity);
+    }
+
+    for (const asteroid of this.#chunkActivity.getActiveAsteroids()) {
+      fn(asteroid);
+    }
   }
 }

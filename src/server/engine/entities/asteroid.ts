@@ -17,6 +17,10 @@ export class Asteroid extends LivingEntity {
 
   override radius: number;
 
+  override getChunkSleepBehavior() {
+    return "chunk" as const;
+  }
+
   constructor(asteroid: Partial<IAsteroid>) {
     if (!asteroid.name) {
       asteroid.name = `asteroid-${Asteroid.#nextId++}`;

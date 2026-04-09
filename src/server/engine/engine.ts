@@ -3,6 +3,8 @@ import { ServerNetwork } from "./server-network";
 import { World } from "./world/world";
 
 export type PerformanceMetric =
+  | "chunkActivityUpdateMs"
+  | "wakeStabilizationMs"
   | "entityUpdateMs"
   | "entityPreUpdateMs"
   | "entityUpdateAsteroidMs"
@@ -218,6 +220,8 @@ export class Engine {
 
     console.log(
       `[perf] avg over ${ticks} ticks (${(elapsed / 1000).toFixed(1)}s):\n` +
+        `  chunk activity ${avgMetric("chunkActivityUpdateMs")}ms ` +
+        `(wake stabilization ${avgMetric("wakeStabilizationMs")}ms)\n` +
         `  entity update ${avgMetric("entityUpdateMs")}ms ` +
         `(pre ${avgMetric("entityPreUpdateMs")}ms, asteroid ${avgMetric("entityUpdateAsteroidMs")}ms, ` +
         `ship ${avgMetric("entityUpdateShipMs")}ms, bullet ${avgMetric("entityUpdateBulletMs")}ms, ` +
@@ -245,6 +249,10 @@ export class Engine {
     average: (value: number) => number
   ): Record<PerformanceMetric, number> {
     return {
+      chunkActivityUpdateMs: average(
+        this.#performanceWindow.chunkActivityUpdateMs
+      ),
+      wakeStabilizationMs: average(this.#performanceWindow.wakeStabilizationMs),
       entityUpdateMs: average(this.#performanceWindow.entityUpdateMs),
       entityPreUpdateMs: average(this.#performanceWindow.entityPreUpdateMs),
       entityUpdateAsteroidMs: average(
@@ -289,6 +297,8 @@ export class Engine {
   #createEmptyPerformanceWindow(): PerformanceWindow {
     return {
       ticks: 0,
+      chunkActivityUpdateMs: 0,
+      wakeStabilizationMs: 0,
       entityUpdateMs: 0,
       entityPreUpdateMs: 0,
       entityUpdateAsteroidMs: 0,

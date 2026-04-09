@@ -20,6 +20,10 @@ export class Bullet extends BaseEntity {
 
   damage: number;
 
+  override canWakeChunks() {
+    return true;
+  }
+
   get owner() {
     return this.#owner;
   }
@@ -55,6 +59,17 @@ export class Bullet extends BaseEntity {
     super.update(world, delta);
 
     this.angle = Math.atan2(this.vy, this.vx);
+  }
+
+  override getChunkWakeSources(world: World, delta: number) {
+    return [
+      { shape: "point" as const, x: this.x, y: this.y },
+      {
+        shape: "point" as const,
+        x: this.x + this.vx * delta,
+        y: this.y + this.vy * delta,
+      },
+    ];
   }
 
   override onCollisionStart(world: World, other: BaseEntity): void {

@@ -15,6 +15,44 @@ import { Bullet } from "./entities/bullet";
 import { Ship } from "./entities/ship";
 import type { World } from "./world/world";
 
+export const MAX_CAMERA_QUERY_RADIUS = 1300;
+export const DEFAULT_CAMERA_QUERY_RADIUS = 900;
+
+/**
+ * Computes the server-authoritative camera query bounds used for visibility
+ * and chunk waking.
+ */
+export function getPlayerCameraQueryBounds(player: {
+  cameraViewBounds: {
+    centerX: number;
+    centerY: number;
+    width: number;
+    height: number;
+  } | null;
+  ship: Ship | null;
+}) {
+  if (player.cameraViewBounds) {
+    const expandedWidth = player.cameraViewBounds.width * 1.25;
+    const expandedHeight = player.cameraViewBounds.height * 1.25;
+
+    return {
+      queryRadius: Math.min(
+        Math.max(expandedWidth, expandedHeight) / 2,
+        MAX_CAMERA_QUERY_RADIUS
+      ),
+      queryPos: new Vector2(
+        player.cameraViewBounds.centerX,
+        player.cameraViewBounds.centerY
+      ),
+    };
+  }
+
+  return {
+    queryPos: player.ship?.position ?? Vector2.ZERO,
+    queryRadius: DEFAULT_CAMERA_QUERY_RADIUS,
+  };
+}
+
 export class ServerPlayer {
   id: string;
   ws: Bun.ServerWebSocket;
@@ -449,28 +487,7 @@ export class ServerNetwork {
   }
 
   #calculateCameraViewBounds(player: ServerPlayer) {
-    if (player.cameraViewBounds) {
-      // Use camera view bounds with 10% offset
-      const expandedWidth = player.cameraViewBounds.width * 1.25;
-      const expandedHeight = player.cameraViewBounds.height * 1.25;
-
-      return {
-        queryRadius: Math.min(
-          Math.max(expandedWidth, expandedHeight) / 2,
-          1300
-        ),
-        queryPos: new Vector2(
-          player.cameraViewBounds.centerX,
-          player.cameraViewBounds.centerY
-        ),
-      };
-    }
-
-    // Fallback to player position with fixed radius
-    return {
-      queryPos: player.ship?.position ?? Vector2.ZERO,
-      queryRadius: 900,
-    };
+    return getPlayerCameraQueryBounds(player);
   }
 
   #getPartialState(player: ServerPlayer): PartialServerState {

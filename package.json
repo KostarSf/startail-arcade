@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/index.ts --debug-performance",
+    "dev": "bun --hot src/index.ts",
+    "dev:debug": "bun --hot src/index.ts --debug-performance",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
     "typecheck": "tsgo --noEmit",

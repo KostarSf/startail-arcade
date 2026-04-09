@@ -7,7 +7,8 @@
     "dev": "bun --hot src/index.ts --debug-performance",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
-    "lint": "bun tsc --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "lint": "oxlint --type-aware src build.ts"
   },
   "dependencies": {
     "bun-plugin-tailwind": "^0.1.2",
@@ -22,6 +23,8 @@
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^5.9.3"
+    "@typescript/native-preview": "^7.0.0-dev.20260409.1",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.20.0"
   }
 }

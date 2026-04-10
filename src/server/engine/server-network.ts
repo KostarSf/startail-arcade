@@ -6,6 +6,7 @@ import type {
   NetworkEvent,
   PartialServerState,
   RadarData,
+  ReplicatedWorldEvent,
 } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
@@ -62,6 +63,8 @@ export class ServerPlayer {
   score: number = 0;
   level = levelUtils.levelFromXp(this.score);
   totalScoreToNextLevel = levelUtils.xpTotalForLevel(this.level + 1);
+  lastSentTick = 0;
+  networkFrameIndex = 0;
 
   needFullState = true;
 
@@ -87,14 +90,14 @@ export class ServerPlayer {
     const previousLevel = this.level;
 
     this.score += points;
-    // Send score event to the player
-    this.ws.send(
-      event({
-        type: "player:score",
-        score: this.score,
-        delta: points,
-      }).serialize()
-    );
+    this.ship.world.emit({
+      kind: "player-score",
+      replication: "global",
+      targetPlayerId: this.id,
+      playerId: this.id,
+      score: this.score,
+      delta: points,
+    });
     this.level = levelUtils.levelFromXp(this.score);
     this.totalScoreToNextLevel = levelUtils.xpTotalForLevel(this.level + 1);
 
@@ -123,14 +126,15 @@ export class ServerPlayer {
         this.ship.baseDamage
       );
 
-      this.ws.send(
-        event({
-          type: "player:level-up",
-          level: this.level,
-          score: this.score,
-          nextLevelScore: this.totalScoreToNextLevel,
-        }).serialize()
-      );
+      this.ship.world.emit({
+        kind: "player-level-up",
+        replication: "global",
+        targetPlayerId: this.id,
+        playerId: this.id,
+        level: this.level,
+        score: this.score,
+        nextLevelScore: this.totalScoreToNextLevel,
+      });
     }
   }
 
@@ -149,9 +153,19 @@ export class ServerNetwork {
   #playerByShipId = new Map<string, ServerPlayer>();
   #engine: Engine;
   #bunServer: Bun.Server<undefined> | null = null;
+  #schedulerTimer: ReturnType<typeof setInterval> | null = null;
+  #lastCommittedTick = 0;
+  #lastCommittedServerTimeMs = 0;
 
   #keyframesRate = TPS;
   #radarStatesRate = TPS;
+  #schedulerIntervalMs = 1000 / TPS;
+  #schedulerStats = {
+    schedulerTicks: 0,
+    skippedSlots: 0,
+    sentFrames: 0,
+    lastSentCommittedTick: 0,
+  };
 
   get engine() {
     return this.#engine;
@@ -254,17 +268,15 @@ export class ServerNetwork {
       if (victim) victim.resetScore();
     }
 
-    // Broadcast entity destroy event
-    world.broadcast(
-      event({
-        type: "entity:destroy",
-        entityId: entity.id,
-        x: entity.position.x,
-        y: entity.position.y,
-        sourceId: source?.id,
-        playerId: killerPlayerId,
-      })
-    );
+    world.emit({
+      kind: "entity-destroy",
+      replication: "relevant",
+      entityId: entity.id,
+      x: entity.position.x,
+      y: entity.position.y,
+      sourceId: source?.id,
+      playerId: killerPlayerId,
+    });
   }
 
   connectPlayer(ws: Bun.ServerWebSocket) {
@@ -385,73 +397,164 @@ export class ServerNetwork {
 
   initialize(bunServer: Bun.Server<undefined>) {
     this.#bunServer = bunServer;
+    this.#startScheduler();
   }
 
-  sendServerState() {
-    if (!this.#bunServer) {
-      throw new Error("Bun server not set");
-    }
-
-    if (this.#players.size === 0) return;
-
-    // Build players summary for leaderboard
-    const playersData = this.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      score: p.score,
-      alive: p.isAlive,
-    }));
-
-    const radarData =
-      this.engine.tick % this.#radarStatesRate === 0
-        ? this.#getRadarData()
-        : undefined;
+  markTickCommitted(simTick: number) {
+    this.#lastCommittedTick = simTick;
+    this.#lastCommittedServerTimeMs = this.engine.serverTime;
 
     for (const player of this.#players.values()) {
-      const needFullState = this.#needFullState(player);
+      if (player.ship?.wasWarped) {
+        player.needFullState = true;
+      }
+    }
+  }
 
-      let state: FullServerState | PartialServerState;
-      if (needFullState) {
-        state = this.#engine.measurePerformance("networkBuildFullStateMs", () =>
-          this.#getFullState(player)
-        );
-        // Update tracking with full state entities
-        player.lastSeenEntityIds = new Set(
-          state.entities.map((entity) => entity.id)
-        );
-      } else {
-        state = this.#engine.measurePerformance(
-          "networkBuildPartialStateMs",
-          () => this.#getPartialState(player)
-        );
-        // Update tracking with currently visible entities
-        const visibleIds = this.#engine.measurePerformance(
-          "networkVisibleIdsMs",
-          () => this.#getVisibleEntityIds(player)
-        );
-        player.lastSeenEntityIds = visibleIds;
+  resetReplicationState() {
+    this.#lastCommittedTick = 0;
+    this.#schedulerStats.lastSentCommittedTick = 0;
+
+    for (const player of this.#players.values()) {
+      player.lastSentTick = 0;
+      player.networkFrameIndex = 0;
+      player.needFullState = true;
+      player.lastSeenEntityIds.clear();
+    }
+
+    this.engine.world.clearReplicatedEvents();
+  }
+
+  getSchedulerStats() {
+    return {
+      ...this.#schedulerStats,
+      lastCommittedTick: this.#lastCommittedTick,
+      lastCommittedServerTimeMs:
+        Math.round(this.#lastCommittedServerTimeMs * 100) / 100,
+    };
+  }
+
+  #startScheduler() {
+    if (this.#schedulerTimer) {
+      return;
+    }
+
+    this.#schedulerTimer = setInterval(() => {
+      this.#runSchedulerTick();
+    }, this.#schedulerIntervalMs);
+  }
+
+  #runSchedulerTick() {
+    this.#engine.measurePerformance("networkSchedulerTickMs", () => {
+      if (!this.#bunServer) {
+        throw new Error("Bun server not set");
       }
 
-      const payload = event({
-        type: "server:state",
-        serverTime: this.engine.serverTime,
-        tickDuration: this.engine.lastTickDuration,
-        state,
-        radar: radarData?.get(player.id),
-        players: playersData,
-      });
-      const serialized = this.#engine.measurePerformance(
-        "networkSerializeMs",
-        () =>
-          payload.serialize({
-            compress: !this.#engine.debug.disableCompression,
-          })
-      );
+      this.#schedulerStats.schedulerTicks++;
 
-      this.#engine.measurePerformance("wsSendMs", () => {
-        player.ws.send(serialized);
-      });
-    }
+      if (this.#players.size === 0) {
+        this.engine.world.clearReplicatedEvents();
+        this.#schedulerStats.skippedSlots++;
+        return;
+      }
+
+      const committedTick = this.#lastCommittedTick;
+      if (committedTick <= 0) {
+        this.#schedulerStats.skippedSlots++;
+        return;
+      }
+
+      const playersData = this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        alive: p.isAlive,
+      }));
+
+      let radarData: Map<string, RadarData[]> | undefined;
+      let sentAnyFrame = false;
+
+      for (const player of this.#players.values()) {
+        if (committedTick <= player.lastSentTick) {
+          continue;
+        }
+
+        const includeRadar =
+          player.networkFrameIndex % this.#radarStatesRate === 0;
+        if (includeRadar && !radarData) {
+          radarData = this.#getRadarData();
+        }
+
+        this.#engine.measurePerformance("networkBuildPerPlayerMs", () => {
+          const needFullState = this.#needFullState(player);
+
+          let state: FullServerState | PartialServerState;
+          if (needFullState) {
+            state = this.#engine.measurePerformance(
+              "networkBuildFullStateMs",
+              () => this.#getFullState(player)
+            );
+            player.lastSeenEntityIds = new Set(
+              state.entities.map((entity) => entity.id)
+            );
+          } else {
+            state = this.#engine.measurePerformance(
+              "networkBuildPartialStateMs",
+              () => this.#getPartialState(player)
+            );
+            const visibleIds = this.#engine.measurePerformance(
+              "networkVisibleIdsMs",
+              () => this.#getVisibleEntityIds(player)
+            );
+            player.lastSeenEntityIds = visibleIds;
+          }
+
+          const replicatedEvents = this.#engine.measurePerformance(
+            "networkBuildEventsMs",
+            () => this.#getReplicatedEvents(player, committedTick)
+          );
+
+          const payload = event({
+            type: "server:state",
+            serverTime: this.#lastCommittedServerTimeMs,
+            simTick: committedTick,
+            tickDuration: this.engine.lastTickDuration,
+            state,
+            events: replicatedEvents,
+            radar: includeRadar ? radarData?.get(player.id) : undefined,
+            players: playersData,
+          });
+          const serialized = this.#engine.measurePerformance(
+            "networkSerializeMs",
+            () =>
+              payload.serialize({
+                compress: !this.#engine.debug.disableCompression,
+              })
+          );
+
+          this.#engine.measurePerformance("wsSendMs", () => {
+            player.ws.send(serialized);
+          });
+
+          player.lastSentTick = committedTick;
+          player.networkFrameIndex++;
+          sentAnyFrame = true;
+        });
+      }
+
+      if (!sentAnyFrame) {
+        this.#schedulerStats.skippedSlots++;
+        return;
+      }
+
+      this.#schedulerStats.sentFrames++;
+      this.#schedulerStats.lastSentCommittedTick = committedTick;
+
+      const slowestPlayerTick = this.#getSlowestPlayerLastSentTick();
+      if (slowestPlayerTick !== null) {
+        this.engine.world.pruneReplicatedEventsThrough(slowestPlayerTick);
+      }
+    });
   }
 
   #needFullState(player: ServerPlayer) {
@@ -461,8 +564,7 @@ export class ServerNetwork {
     return (
       this.#engine.debug.disablePartialStateUpdates ||
       fullStateRequested ||
-      player.ship?.wasWarped ||
-      this.engine.tick % this.#keyframesRate === 0
+      player.networkFrameIndex % this.#keyframesRate === 0
     );
   }
 
@@ -538,7 +640,7 @@ export class ServerNetwork {
         // Entity is still alive
         const wasPreviouslyVisible = player.lastSeenEntityIds.has(entity.id);
         const isNewlyVisible = !wasPreviouslyVisible;
-        const hasChanged = entity.changed;
+        const hasChanged = entity.lastChangedTick > player.lastSentTick;
 
         if (isNewlyVisible || hasChanged) {
           // Newly appeared entity or entity that changed, add to updated
@@ -558,7 +660,7 @@ export class ServerNetwork {
           const wasPreviouslyVisible = player.lastSeenEntityIds.has(
             playerShip.id
           );
-          const hasChanged = playerShip.changed;
+          const hasChanged = playerShip.lastChangedTick > player.lastSentTick;
           if (!wasPreviouslyVisible || hasChanged) {
             updated.push(playerShip.toJSON());
           }
@@ -599,6 +701,81 @@ export class ServerNetwork {
     }
 
     return visibleIds;
+  }
+
+  #getReplicatedEvents(
+    player: ServerPlayer,
+    committedTick: number
+  ): ReplicatedWorldEvent[] {
+    const tickEvents = this.engine.world.getReplicatedEventsInRange(
+      player.lastSentTick,
+      committedTick
+    );
+
+    const replicatedEvents: ReplicatedWorldEvent[] = [];
+    for (const tickEvent of tickEvents) {
+      if (!this.#shouldReplicateEventToPlayer(player, tickEvent)) {
+        continue;
+      }
+
+      const {
+        replication: _replication,
+        targetPlayerId: _targetPlayerId,
+        ...replicatedEvent
+      } = tickEvent;
+      replicatedEvents.push(replicatedEvent);
+    }
+
+    return replicatedEvents;
+  }
+
+  #shouldReplicateEventToPlayer(
+    player: ServerPlayer,
+    event: {
+      replication: "none" | "global" | "relevant";
+      targetPlayerId?: string;
+      x?: number;
+      y?: number;
+      entityId?: string;
+    }
+  ) {
+    if (event.targetPlayerId && event.targetPlayerId !== player.id) {
+      return false;
+    }
+
+    if (event.replication === "global") {
+      return true;
+    }
+
+    if (event.replication !== "relevant") {
+      return false;
+    }
+
+    if (player.ship && event.entityId === player.ship.id) {
+      return true;
+    }
+
+    if (typeof event.x !== "number" || typeof event.y !== "number") {
+      return false;
+    }
+
+    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
+    const dx = event.x - queryPos.x;
+    const dy = event.y - queryPos.y;
+    return dx * dx + dy * dy <= queryRadius * queryRadius;
+  }
+
+  #getSlowestPlayerLastSentTick() {
+    let slowestTick: number | null = null;
+
+    for (const player of this.#players.values()) {
+      slowestTick =
+        slowestTick === null
+          ? player.lastSentTick
+          : Math.min(slowestTick, player.lastSentTick);
+    }
+
+    return slowestTick;
   }
 
   #getRadarData() {

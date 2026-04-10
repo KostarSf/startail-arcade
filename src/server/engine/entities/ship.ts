@@ -1,6 +1,5 @@
 import { integrateExpMagnetism } from "@/shared/game/entities/base";
 import { SHIP_CONSTANTS, updateShipPhysics } from "@/shared/game/entities/ship";
-import { event } from "@/shared/network/utils";
 import type { ServerPlayer } from "../server-network";
 import type { World } from "../world/world";
 import type { ShipAI } from "./ai/ship-ai";
@@ -193,15 +192,14 @@ export class Ship extends LivingEntity {
     this.health += amount;
     this.health = Math.min(this.health, this.maxHealth);
 
-    this.world.broadcast(
-      event({
-        type: "entity:damage",
-        entityId: this.id,
-        amount: -amount,
-        x: this.position.x,
-        y: this.position.y,
-      })
-    );
+    this.world.emit({
+      kind: "entity-damage",
+      replication: "relevant",
+      entityId: this.id,
+      amount: -amount,
+      x: this.position.x,
+      y: this.position.y,
+    });
 
     this.markChanged();
   }

@@ -10,6 +10,11 @@ import { ChunkActivityManager } from "./chunk-activity-manager";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
 import { generateWorld } from "./utils/fbm-domain-warp-world-generator";
+import type {
+  CommittedWorldEvent,
+  WorldEvent,
+  WorldEventListener,
+} from "./world-events";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
@@ -18,17 +23,20 @@ export class World {
   #chunkActivity = new ChunkActivityManager();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 20000;
+  #borderRadius = 5000;
 
-  #maxAsteroids = 50000;
+  #maxAsteroids = 2500;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;
   #asteroidsMaxBatchCount = 50;
 
-  #maxPirates = 50;
+  #maxPirates = 5;
   #currentPirates = 0;
   #piratesRefillInterval = TPS * 20;
+  #eventsByTick = new Map<number, CommittedWorldEvent[]>();
+  #eventListeners = new Set<WorldEventListener>();
+  #nextTickEventIndex = 0;
 
   #engine: Engine | null = null;
   get engine() {
@@ -89,6 +97,70 @@ export class World {
   /** Returns chunk activity counters for debugging, tests, and perf snapshots. */
   getActivityStats() {
     return this.#chunkActivity.getStats();
+  }
+
+  onEvent(listener: WorldEventListener) {
+    this.#eventListeners.add(listener);
+    return () => {
+      this.#eventListeners.delete(listener);
+    };
+  }
+
+  emit(event: WorldEvent) {
+    const simTick = this.engine.tick;
+    const committedEvent: CommittedWorldEvent = {
+      ...event,
+      simTick,
+      tickEventIndex: this.#nextTickEventIndex++,
+    };
+
+    for (const listener of this.#eventListeners) {
+      listener(committedEvent);
+    }
+
+    if (committedEvent.replication === "none") {
+      return committedEvent;
+    }
+
+    let tickEvents = this.#eventsByTick.get(simTick);
+    if (!tickEvents) {
+      tickEvents = [];
+      this.#eventsByTick.set(simTick, tickEvents);
+    }
+    tickEvents.push(committedEvent);
+
+    return committedEvent;
+  }
+
+  getReplicatedEventsInRange(
+    startExclusiveTick: number,
+    endInclusiveTick: number
+  ) {
+    const events: CommittedWorldEvent[] = [];
+    for (
+      let simTick = startExclusiveTick + 1;
+      simTick <= endInclusiveTick;
+      simTick++
+    ) {
+      const tickEvents = this.#eventsByTick.get(simTick);
+      if (tickEvents) {
+        events.push(...tickEvents);
+      }
+    }
+
+    return events;
+  }
+
+  pruneReplicatedEventsThrough(maxInclusiveTick: number) {
+    for (const simTick of this.#eventsByTick.keys()) {
+      if (simTick <= maxInclusiveTick) {
+        this.#eventsByTick.delete(simTick);
+      }
+    }
+  }
+
+  clearReplicatedEvents() {
+    this.#eventsByTick.clear();
   }
 
   /**
@@ -246,6 +318,7 @@ export class World {
   }
 
   update(delta: number) {
+    this.#nextTickEventIndex = 0;
     this.#refillAsteroids();
     this.#refillPirates();
 
@@ -459,6 +532,8 @@ export class World {
     this.#nonAsteroidEntities.clear();
     this.#grid.clear();
     this.#chunkActivity.clear();
+    this.#eventsByTick.clear();
+    this.#nextTickEventIndex = 0;
     this.#currentAsteroids = 0;
     this.#currentPirates = 0;
   }

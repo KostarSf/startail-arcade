@@ -56,6 +56,7 @@ import { audioSettings } from "../audio/audio-settings";
 import { isDevelopmentClient } from "../dev-mode";
 import { InputBuffer } from "./network/input-buffer";
 import { NetworkDecoder } from "./network/network-decoder";
+import { EventBuffer } from "./network/event-buffer";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { EdgeOfWorldFilter } from "./shaders/edge-of-world-filter";
 import { CameraShake } from "./systems/camera-shake";
@@ -69,6 +70,7 @@ import { ParticleSystem } from "./systems/particle-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
 import { AudioSystem } from "./systems/audio-system";
+import { WorldEventSystem } from "./systems/world-event-system";
 import type {
   ClientServices,
   ControlState,
@@ -112,6 +114,7 @@ export class ClientEngine {
   >(this.#entityManager);
 
   #snapshotBuffer = new SnapshotBuffer();
+  #eventBuffer = new EventBuffer();
   #inputBuffer = new InputBuffer();
   #cameraShake = new CameraShake();
   #entityIndex = new Map<string, EntityId>();
@@ -747,6 +750,7 @@ export class ClientEngine {
     this.#services = {
       controls: this.#controls,
       snapshotBuffer: this.#snapshotBuffer,
+      eventBuffer: this.#eventBuffer,
       inputBuffer: this.#inputBuffer,
       cameraShake: this.#cameraShake,
       entityIndex: this.#entityIndex,
@@ -831,6 +835,7 @@ export class ClientEngine {
       },
       world: {
         radius: 2000,
+        renderedSimTick: 0,
       },
       effectQueues,
       effects: {
@@ -857,6 +862,7 @@ export class ClientEngine {
     this.#pipeline.register(InputSystem);
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
+    this.#pipeline.register(WorldEventSystem);
     this.#pipeline.register(RenderSystem);
     this.#pipeline.register(EffectSystem);
     this.#pipeline.register(ParticleSystem);
@@ -1212,6 +1218,8 @@ export class ClientEngine {
     });
   }
 
+  #lastRawWsMessageTimeMs: number | null = null;
+
   #connect() {
     if (this.#connectTimeout) {
       clearTimeout(this.#connectTimeout);
@@ -1258,6 +1266,17 @@ export class ClientEngine {
     };
 
     this.#ws.onmessage = async (eventMessage) => {
+      const now = performance.now();
+      
+      if (this.#lastRawWsMessageTimeMs !== null) {
+        const intervalMs = now - this.#lastRawWsMessageTimeMs;
+        if (intervalMs > 80) {
+          console.warn(`[net] raw ws gap ${Math.round(intervalMs)}ms`);
+        }
+      }
+    
+      this.#lastRawWsMessageTimeMs = now;
+
       this.#trackInboundBytes(eventMessage.data);
       await this.#networkDecoder.process(eventMessage, (message) =>
         this.#handleMessage(message)
@@ -1292,6 +1311,7 @@ export class ClientEngine {
       case "server:state":
         this.#trackSnapshotArrivalTiming(message);
         this.#snapshotBuffer.add(message);
+        this.#eventBuffer.add(message.events);
         this.#statsGetter().setPlayers(message.players);
         this.#statsGetter().setTickDuration(message.tickDuration);
         if (message.state.type === "full") {
@@ -1313,107 +1333,6 @@ export class ClientEngine {
         break;
       case "server:respawn-denied":
         this.#statsGetter().setRespawnError(message.reason);
-        break;
-      case "entity:damage":
-        if (!this.#services) break;
-        {
-          const entityId = this.#services.entityIndex.get(message.entityId);
-          if (entityId === undefined) {
-            break;
-          }
-
-          // Verify entity exists in world - check if it has transform
-          const transform = this.#services.stores.transform.get(entityId);
-          if (!transform) {
-            // Entity doesn't exist in world yet, skip sound
-            break;
-          }
-
-          const isHealing = message.amount < 0;
-
-          this.#services.effects.queueDamageText({
-            amount: message.amount,
-            x: message.x,
-            y: message.y,
-          });
-
-          // Skip sounds and explosions for healing
-          if (isHealing) {
-            break;
-          }
-
-          const networkState = this.#services.stores.networkState.get(entityId);
-
-          // Play damage sound only if entity exists in world
-          if (networkState?.state?.type === "ship") {
-            // Ship damage - use snd_hit for ships
-            this.#services.audio.playOneShot({
-              soundId: "snd_hit",
-              position: { x: message.x, y: message.y },
-            });
-            // Queue explosion visual effect (explode sound will play on entity:destroy)
-            this.#services.effects.queueExplosion({
-              x: message.x,
-              y: message.y,
-            });
-          } else if (networkState?.state) {
-            // Other entity damage (asteroids, etc.) - use snd_small_hit
-            // Only play if entity has network state (exists in world)
-            this.#services.audio.playOneShot({
-              soundId: "snd_small_hit",
-              position: { x: message.x, y: message.y },
-            });
-          }
-
-          // Check if this damage killed the local player
-          if (message.entityId === this.#services.player.id) {
-            const entityNetworkState = this.#services.stores.networkState.get(entityId);
-            if (entityNetworkState?.state?.type === "ship") {
-              const health = entityNetworkState.state.health ?? entityNetworkState.state.maxHealth ?? 1;
-              if (health <= message.amount) {
-                // Player will die from this damage
-                this.#services.audio.playOneShot({ soundId: "snd_death" });
-              }
-            }
-          }
-        }
-        break;
-      case "entity:destroy":
-        if (!this.#services) break;
-        {
-          // Verify entity existed in world before playing explode sound
-          const entityId = this.#services.entityIndex.get(message.entityId);
-          const hadTransform = entityId !== undefined &&
-            this.#services.stores.transform.has(entityId);
-
-          // Only play explode sound if entity existed in world
-          if (hadTransform) {
-            // Play explosion sound immediately when event comes in
-            this.#services.audio.playOneShot({
-              soundId: "snd_explode",
-              position: { x: message.x, y: message.y },
-            });
-          }
-
-          // Queue explosion effect for visual (always, even if entity wasn't in world)
-          this.#services.effects.queueExplosion({
-            x: message.x,
-            y: message.y,
-          });
-        }
-        break;
-      case "player:score":
-        if (!this.#services) break;
-        // Play fuel sound when player gains exp/score with randomized pitch
-        const pitch = 0.8 + Math.random() * 0.4; // Random pitch between 0.8 and 1.2
-        this.#services.audio.playOneShot({ soundId: "snd_fuel", pitch });
-        // Add floating score text
-        this.#statsGetter().addFloatingScoreText(message.delta);
-        break;
-      case "player:level-up":
-        if (!this.#services) break;
-        // Play pick energy sound when player levels up
-        this.#services.audio.playOneShot({ soundId: "snd_pick_energy" });
         break;
     }
   }
@@ -1511,6 +1430,7 @@ export class ClientEngine {
     this.#ws = null;
     this.#resetSnapshotTimingDebug();
     this.#snapshotBuffer.clear();
+    this.#eventBuffer.clear();
     this.#inputBuffer.reset();
     this.#entityIndex.clear();
     this.#entityManager.clear();
@@ -1537,6 +1457,7 @@ export class ClientEngine {
     if (this.#services) {
       this.#services.player.entityId = null;
       this.#services.player.id = null;
+      this.#services.world.renderedSimTick = 0;
       this.#services.stores.renderable.forEach((renderable, _entity) => {
         if (renderable.ref) {
           this.#services?.pixi.camera.removeChild(renderable.ref);

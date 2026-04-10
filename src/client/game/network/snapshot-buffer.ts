@@ -16,6 +16,7 @@ export type LocalEntityState = GenericNetEntityState & {
 
 export type WorldState = {
   serverTime: number;
+  simTick: number;
   entities: Map<string, LocalEntityState>;
 };
 
@@ -57,12 +58,14 @@ export class SnapshotBuffer {
     if (serverState.state.type === "partial") {
       return this.#generatePartialSnapshot(
         serverState.state,
-        serverState.serverTime
+        serverState.serverTime,
+        serverState.simTick
       );
     }
 
     return {
       serverTime: serverState.serverTime,
+      simTick: serverState.simTick,
       entities: new Map(
         serverState.state.entities.map((entity) => [entity.id, entity])
       ),
@@ -71,7 +74,8 @@ export class SnapshotBuffer {
 
   #generatePartialSnapshot(
     state: PartialServerState,
-    serverTime: number
+    serverTime: number,
+    simTick: number
   ): WorldState | null {
     const latestSnapshot = this.getLatest();
     if (!latestSnapshot) return null;
@@ -105,7 +109,7 @@ export class SnapshotBuffer {
       updated.set(interpolatedEntity.id, interpolatedEntity);
     }
 
-    return { serverTime, entities: updated };
+    return { serverTime, simTick, entities: updated };
   }
 
   /** Магнитим орбы опыта вокруг кораблей, для которых не пришло состояние с сервера. */

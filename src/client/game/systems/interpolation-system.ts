@@ -296,6 +296,7 @@ export const InterpolationSystem: System<ClientServices> = {
 
     const fromSnapshot = previous ?? next!;
     const toSnapshot = next ?? previous!;
+    services.world.renderedSimTick = previous?.simTick ?? toSnapshot.simTick;
     const fromTime = fromSnapshot.serverTime;
     const toTime = toSnapshot.serverTime;
     const total = Math.max(toTime - fromTime, 1);

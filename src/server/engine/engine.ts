@@ -23,7 +23,10 @@ export type PerformanceMetric =
   | "networkSerializeMs"
   | "networkBuildFullStateMs"
   | "networkBuildPartialStateMs"
+  | "networkBuildPerPlayerMs"
+  | "networkBuildEventsMs"
   | "networkVisibleIdsMs"
+  | "networkSchedulerTickMs"
   | "wsSendMs";
 
 type PerformanceWindow = { ticks: number } & Record<PerformanceMetric, number>;
@@ -125,6 +128,7 @@ export class Engine {
 
   stop() {
     this.#running = false;
+    this.network.resetReplicationState();
     this.world.clear();
     this.#tick = 0;
     this.#lastTickDuration = 0;
@@ -153,9 +157,8 @@ export class Engine {
     this.#tick++;
     this.#world.update(dt);
 
-    this.network.sendServerState();
-
     this.#world.postUpdate(dt);
+    this.network.markTickCommitted(this.#tick);
 
     if (this.network.playerCount === 0) {
       this.#ticksWithoutPlayers++;
@@ -231,10 +234,16 @@ export class Engine {
         `(discrete ${avgMetric("collisionDiscreteMs")}ms, continuous ${avgMetric("collisionContinuousMs")}ms, ` +
         `process events ${avgMetric("collisionProcessEventsMs")}ms, pair decode ${avgMetric("collisionPairDecodeMs")}ms, ` +
         `remove entity ${avgMetric("collisionRemoveEntityMs")}ms)\n` +
-        `  network serialize ${avgMetric("networkSerializeMs")}ms ` +
-        `(full state ${avgMetric("networkBuildFullStateMs")}ms, partial state ${avgMetric("networkBuildPartialStateMs")}ms, ` +
-        `visible ids ${avgMetric("networkVisibleIdsMs")}ms)\n` +
-        `  ws send ${avgMetric("wsSendMs")}ms`
+        `  network replication ${(
+          averagesMs.networkSchedulerTickMs +
+          averagesMs.networkBuildPerPlayerMs +
+          averagesMs.networkSerializeMs +
+          averagesMs.wsSendMs
+        ).toFixed(2)}ms ` +
+        `(scheduler ${avgMetric("networkSchedulerTickMs")}ms, full state ${avgMetric("networkBuildFullStateMs")}ms, ` +
+        `partial state ${avgMetric("networkBuildPartialStateMs")}ms, per-player ${avgMetric("networkBuildPerPlayerMs")}ms, ` +
+        `events ${avgMetric("networkBuildEventsMs")}ms, visible ids ${avgMetric("networkVisibleIdsMs")}ms, ` +
+        `serialize ${avgMetric("networkSerializeMs")}ms, ws send ${avgMetric("wsSendMs")}ms)`
     );
 
     this.#performanceWindowStartedAt = now;
@@ -289,7 +298,16 @@ export class Engine {
       networkBuildPartialStateMs: average(
         this.#performanceWindow.networkBuildPartialStateMs
       ),
+      networkBuildPerPlayerMs: average(
+        this.#performanceWindow.networkBuildPerPlayerMs
+      ),
+      networkBuildEventsMs: average(
+        this.#performanceWindow.networkBuildEventsMs
+      ),
       networkVisibleIdsMs: average(this.#performanceWindow.networkVisibleIdsMs),
+      networkSchedulerTickMs: average(
+        this.#performanceWindow.networkSchedulerTickMs
+      ),
       wsSendMs: average(this.#performanceWindow.wsSendMs),
     };
   }
@@ -317,7 +335,10 @@ export class Engine {
       networkSerializeMs: 0,
       networkBuildFullStateMs: 0,
       networkBuildPartialStateMs: 0,
+      networkBuildPerPlayerMs: 0,
+      networkBuildEventsMs: 0,
       networkVisibleIdsMs: 0,
+      networkSchedulerTickMs: 0,
       wsSendMs: 0,
     };
   }

@@ -46,6 +46,7 @@ export abstract class BaseEntity {
   continuousCollision: boolean;
 
   changed = true;
+  lastChangedTick = 0;
 
   #wasWarped = false;
   /** True if the entity was warped since the last update */
@@ -115,6 +116,9 @@ export abstract class BaseEntity {
 
   initialize(world: World) {
     this.#world = world;
+    if (this.changed) {
+      this.lastChangedTick = world.engine.tick;
+    }
 
     if (world.engine.debug.lifecycle) {
       console.log(`entity initialized: ${this.name}`);
@@ -127,6 +131,9 @@ export abstract class BaseEntity {
    */
   markChanged() {
     this.changed = true;
+    if (this.#world) {
+      this.lastChangedTick = this.#world.engine.tick;
+    }
   }
 
   /**

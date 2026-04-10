@@ -184,6 +184,7 @@ export function createGameServer(options: GameServerOptions = {}) {
           entityCounts: engine.world.getEntityCountsByType(),
           activity: engine.world.getActivityStats(),
           performance: engine.lastPerformanceSummary,
+          networkScheduler: engine.network.getSchedulerStats(),
           debug: {
             ...engine.debug,
           },

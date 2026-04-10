@@ -19,6 +19,7 @@ import type { CameraShake } from "./systems/camera-shake";
 import type { AudioEngine } from "../audio/audio-engine";
 import type { StatsStore } from "../store";
 import type { AudioSettingsStore } from "../audio/audio-settings";
+import type { EventBuffer } from "./network/event-buffer";
 
 export interface DamageTextRequest {
   amount: number;
@@ -53,6 +54,7 @@ export interface ControlState {
 export interface ClientServices extends Record<string, unknown> {
   controls: ControlState;
   snapshotBuffer: SnapshotBuffer;
+  eventBuffer: EventBuffer;
   inputBuffer: InputBuffer;
   cameraShake: CameraShake;
   entityIndex: Map<string, EntityId>;
@@ -136,6 +138,7 @@ export interface ClientServices extends Record<string, unknown> {
   };
   world: {
     radius: number;
+    renderedSimTick: number;
   };
   effectQueues: {
     damageTexts: DamageTextRequest[];

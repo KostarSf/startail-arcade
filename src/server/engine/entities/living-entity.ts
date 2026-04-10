@@ -1,4 +1,3 @@
-import { event } from "@/shared/network/utils";
 import type { World } from "../world/world";
 import { BaseEntity } from "./base-entity";
 
@@ -34,15 +33,15 @@ export abstract class LivingEntity extends BaseEntity implements Damageable {
     this.health -= damage;
     this.#lastDamageSource = source;
 
-    world.broadcast(
-      event({
-        type: "entity:damage",
-        entityId: this.id,
-        amount: damage,
-        x: this.position.x,
-        y: this.position.y,
-      })
-    );
+    world.emit({
+      kind: "entity-damage",
+      replication: "relevant",
+      entityId: this.id,
+      amount: damage,
+      x: this.position.x,
+      y: this.position.y,
+      sourceId: source?.id,
+    });
 
     if (!this.isAlive) {
       this.onDeath(world, source);

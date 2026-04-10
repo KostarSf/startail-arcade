@@ -123,6 +123,7 @@ export interface ClientServices extends Record<string, unknown> {
     }) => void;
     predictedServerTime: () => number;
     renderDelayMs: number;
+    simulationTickMs: number;
   };
   debug: {
     drawGrid: boolean;

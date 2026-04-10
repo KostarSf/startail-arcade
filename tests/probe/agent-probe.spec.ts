@@ -12,6 +12,12 @@ function parseEnvNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseEnvBoolean(name: string): boolean {
+  const raw = process.env[name];
+  if (!raw) return false;
+  return raw === "1" || raw.toLowerCase() === "true";
+}
+
 async function getFreePort() {
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();
@@ -99,6 +105,11 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   const port = parseEnvNumber("PROBE_PORT", await getFreePort());
   const probeName = process.env.PROBE_NAME || "Agent Probe";
   const debugPerformance = process.env.PROBE_DEBUG_PERFORMANCE === "1";
+  const disableReconciliation = parseEnvBoolean(
+    "PROBE_DISABLE_RECONCILIATION"
+  );
+  const captureDebugTrace = parseEnvBoolean("PROBE_CAPTURE_DEBUG_TRACE");
+  const traceIntervalMs = parseEnvNumber("PROBE_TRACE_INTERVAL_MS", 50);
   const baseUrl = `http://127.0.0.1:${port}`;
 
   await mkdir(artifactsDir, { recursive: true });
@@ -111,8 +122,11 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     baseUrl,
     seed,
     durationMs,
+    disableReconciliation,
+    captureDebugTrace,
     startedAt: new Date().toISOString(),
   };
+  const debugTrace: Array<Record<string, unknown>> = [];
 
   const serverProcess = spawn(
     process.env.BUN_PATH || "bun",
@@ -158,11 +172,12 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       return window.__STARTAIL_TEST_API__?.ping() === "pong";
     });
 
-    await page.evaluate(() => {
+    await page.evaluate(({ disableReconciliation }) => {
       window.__STARTAIL_TEST_API__?.configureDebug({
         simulatedLatencyMs: 0,
+        disableReconciliation,
       });
-    });
+    }, { disableReconciliation });
 
     await page.waitForFunction(() => {
       const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
@@ -189,27 +204,50 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
         fire: false,
       });
     });
-    await page.waitForTimeout(1_000);
-    await page.evaluate(() => {
-      window.__STARTAIL_TEST_API__?.sendInput({
-        thrust: true,
-        angle: 0,
-        fire: true,
-        firingCompensation: true,
-      });
-    });
-    await page.waitForTimeout(250);
-    await page.evaluate(() => {
-      window.__STARTAIL_TEST_API__?.sendInput({
-        thrust: false,
-        angle: 0,
-        fire: false,
-      });
-    });
 
-    const remainingMs = Math.max(durationMs - 1_250, 0);
-    if (remainingMs > 0) {
-      await page.waitForTimeout(remainingMs);
+    const traceStartedAt = Date.now();
+    let fireSent = false;
+    let stopSent = false;
+
+    while (Date.now() - traceStartedAt < durationMs) {
+      const elapsedMs = Date.now() - traceStartedAt;
+
+      if (!fireSent && elapsedMs >= 1_000) {
+        fireSent = true;
+        await page.evaluate(() => {
+          window.__STARTAIL_TEST_API__?.sendInput({
+            thrust: true,
+            angle: 0,
+            fire: true,
+            firingCompensation: true,
+          });
+        });
+      }
+
+      if (!stopSent && elapsedMs >= 1_250) {
+        stopSent = true;
+        await page.evaluate(() => {
+          window.__STARTAIL_TEST_API__?.sendInput({
+            thrust: false,
+            angle: 0,
+            fire: false,
+          });
+        });
+      }
+
+      if (captureDebugTrace) {
+        const traceSample = await page.evaluate(() => ({
+          runtime: window.__STARTAIL_TEST_API__?.getSnapshot() ?? null,
+          debug:
+            window.__STARTAIL_TEST_API__?.getDebugNetworkSnapshot() ?? null,
+        }));
+        debugTrace.push({
+          elapsedMs,
+          ...traceSample,
+        });
+      }
+
+      await page.waitForTimeout(traceIntervalMs);
     }
 
     const clientSnapshot = await page.evaluate(() => {
@@ -234,6 +272,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       clientSnapshot,
       serverMetrics,
       serverSnapshot,
+      debugTraceSamples: debugTrace.length,
     });
 
     await writeFile(
@@ -248,6 +287,13 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
         2
       )
     );
+
+    if (captureDebugTrace) {
+      await writeFile(
+        path.join(artifactsDir, "debug-trace.json"),
+        JSON.stringify(debugTrace, null, 2)
+      );
+    }
   } catch (error) {
     Object.assign(summary, {
       ok: false,

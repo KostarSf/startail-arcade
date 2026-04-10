@@ -229,6 +229,7 @@ const ensureEntity = (
 
   stores.networkState.ensure(entityId, () => ({
     lastServerTime: serverTime,
+    lastSimTick: 0,
     predictedServerTime: services.network.predictedServerTime(),
     renderDelay: services.network.renderDelayMs,
     snapshots: [],
@@ -363,6 +364,7 @@ export const InterpolationSystem: System<ClientServices> = {
       const networkState = services.stores.networkState.get(entityId);
       if (networkState) {
         networkState.lastServerTime = target.serverTime;
+        networkState.lastSimTick = toSnapshot.simTick;
         networkState.predictedServerTime =
           services.network.predictedServerTime();
         networkState.renderDelay = services.network.renderDelayMs;

@@ -76,6 +76,7 @@ export class ServerPlayer {
   } | null = null;
 
   lastSeenEntityIds = new Set<string>();
+  pendingInputs: Extract<NetworkEvent, { type: "player:input" }>[] = [];
 
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
@@ -324,19 +325,7 @@ export class ServerNetwork {
     switch (message.type) {
       case "player:input":
         if (!player.ship || player.ship.removed) break;
-        player.ship.markChanged();
-
-        if (message.input.thrust !== undefined) {
-          player.ship.thrust = !!message.input.thrust;
-        }
-        if (message.input.angle !== undefined) {
-          player.ship.angle = message.input.angle;
-        }
-        if (message.input.fire) {
-          player.ship.fire(message.input.firingCompensation);
-        }
-        player.ship.lastInputSequence = message.sequence;
-
+        player.pendingInputs.push(message);
         break;
 
       case "player:ping":
@@ -373,6 +362,7 @@ export class ServerNetwork {
         // Set player name and reset score
         player.name = message.name.trim();
         player.resetScore();
+        player.pendingInputs.length = 0;
 
         // Reset visibility tracking on respawn
         player.lastSeenEntityIds.clear();
@@ -400,6 +390,32 @@ export class ServerNetwork {
     this.#startScheduler();
   }
 
+  beginSimulationTick(_simTick: number) {
+    for (const player of this.#players.values()) {
+      const ship = player.ship;
+      if (!ship || ship.removed || player.pendingInputs.length === 0) {
+        continue;
+      }
+
+      ship.markChanged();
+
+      for (const inputEvent of player.pendingInputs) {
+        if (inputEvent.input.thrust !== undefined) {
+          ship.thrust = !!inputEvent.input.thrust;
+        }
+        if (inputEvent.input.angle !== undefined) {
+          ship.angle = inputEvent.input.angle;
+        }
+        if (inputEvent.input.fire) {
+          ship.fire(inputEvent.input.firingCompensation);
+        }
+        ship.lastInputSequence = inputEvent.sequence;
+      }
+
+      player.pendingInputs.length = 0;
+    }
+  }
+
   markTickCommitted(simTick: number) {
     this.#lastCommittedTick = simTick;
     this.#lastCommittedServerTimeMs = this.engine.serverTime;
@@ -420,6 +436,7 @@ export class ServerNetwork {
       player.networkFrameIndex = 0;
       player.needFullState = true;
       player.lastSeenEntityIds.clear();
+      player.pendingInputs.length = 0;
     }
 
     this.engine.world.clearReplicatedEvents();

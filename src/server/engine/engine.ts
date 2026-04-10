@@ -155,6 +155,7 @@ export class Engine {
     }
 
     this.#tick++;
+    this.network.beginSimulationTick(this.#tick);
     this.#world.update(dt);
 
     this.#world.postUpdate(dt);

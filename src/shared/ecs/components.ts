@@ -41,6 +41,7 @@ export interface SnapshotState<TState = BaseEntityState> {
 
 export interface NetworkStateComponent<TState = BaseEntityState> {
   lastServerTime: number;
+  lastSimTick: number;
   predictedServerTime: number;
   renderDelay: number;
   snapshots: SnapshotState<TState>[];

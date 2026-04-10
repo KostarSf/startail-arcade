@@ -42,7 +42,7 @@ type ChunkState = {
 };
 
 export class ChunkActivityManager {
-  static DEFAULT_CHUNK_SIZE = 500 * 4;
+  static DEFAULT_CHUNK_SIZE = 500 * 2;
   static DEFAULT_SLEEP_DELAY_TICKS = TPS;
   static PLAYER_WAKE_CHUNK_PADDING = 1;
 
@@ -70,10 +70,7 @@ export class ChunkActivityManager {
   initialize(world: World) {
     this.#borderRadius = world.borderRadius;
     this.#worldSize = world.borderRadius * 2;
-    this.#chunksPerAxis = Math.max(
-      1,
-      Math.ceil(this.#worldSize / this.#chunkSize)
-    );
+    this.#chunksPerAxis = Math.max(1, Math.ceil(this.#worldSize / this.#chunkSize));
     this.#totalChunks = this.#chunksPerAxis * this.#chunksPerAxis;
   }
 
@@ -273,10 +270,7 @@ export class ChunkActivityManager {
         }
 
         for (const neighborChunkIndex of this.#getNeighborChunkIndices(chunkIndex)) {
-          if (
-            neighborChunkIndex !== chunkIndex &&
-            !this.#awakeChunks.has(neighborChunkIndex)
-          ) {
+          if (neighborChunkIndex !== chunkIndex && !this.#awakeChunks.has(neighborChunkIndex)) {
             continue;
           }
 
@@ -298,12 +292,7 @@ export class ChunkActivityManager {
             }
             processedPairs.add(pairKey);
 
-            this.#separateAsteroidPair(
-              world,
-              asteroid,
-              other,
-              neighborJustWoke
-            );
+            this.#separateAsteroidPair(world, asteroid, other, neighborJustWoke);
           }
         }
       }
@@ -350,12 +339,11 @@ export class ChunkActivityManager {
       sleepingChunks: this.#totalChunks - this.#awakeChunks.size,
       justWokeChunks: this.#justWokeChunks.size,
       activeAsteroids: this.#activeAsteroids.size,
-      sleepingAsteroids:
-        this.#asteroidChunkIndices.size - this.#activeAsteroids.size,
+      sleepingAsteroids: this.#asteroidChunkIndices.size - this.#activeAsteroids.size,
       trackedAsteroids: this.#asteroidChunkIndices.size,
       wakeEntities: this.#wakeEntities.size,
       pendingStabilizationChunks: Array.from(this.#chunkStates.values()).filter(
-        (state) => state.stabilizationPending
+        (state) => state.stabilizationPending,
       ).length,
     };
   }
@@ -374,7 +362,7 @@ export class ChunkActivityManager {
         queryPos.x,
         queryPos.y,
         queryRadius + this.#chunkSize * ChunkActivityManager.PLAYER_WAKE_CHUNK_PADDING,
-        touchedChunks
+        touchedChunks,
       );
     }
   }
@@ -392,30 +380,18 @@ export class ChunkActivityManager {
           continue;
         }
 
-        this.#touchCircleWithWrap(
-          source.x,
-          source.y,
-          source.radius,
-          touchedChunks
-        );
+        this.#touchCircleWithWrap(source.x, source.y, source.radius, touchedChunks);
       }
     }
   }
 
   #touchPointWithWrap(x: number, y: number, touchedChunks: Set<number>) {
     for (const mirroredPoint of this.#getMirroredPoints(x, y)) {
-      touchedChunks.add(
-        this.getChunkIndexAt(mirroredPoint.x, mirroredPoint.y)
-      );
+      touchedChunks.add(this.getChunkIndexAt(mirroredPoint.x, mirroredPoint.y));
     }
   }
 
-  #touchCircleWithWrap(
-    x: number,
-    y: number,
-    radius: number,
-    touchedChunks: Set<number>
-  ) {
+  #touchCircleWithWrap(x: number, y: number, radius: number, touchedChunks: Set<number>) {
     for (const mirroredPoint of this.#getMirroredPoints(x, y, radius)) {
       this.#touchCircle(mirroredPoint.x, mirroredPoint.y, radius, touchedChunks);
     }
@@ -481,12 +457,7 @@ export class ChunkActivityManager {
     return neighbors;
   }
 
-  #separateAsteroidPair(
-    world: World,
-    asteroid: Asteroid,
-    other: Asteroid,
-    otherJustWoke: boolean
-  ) {
+  #separateAsteroidPair(world: World, asteroid: Asteroid, other: Asteroid, otherJustWoke: boolean) {
     const dx = other.x - asteroid.x;
     const dy = other.y - asteroid.y;
     const radiusSum = asteroid.radius + other.radius;
@@ -504,9 +475,7 @@ export class ChunkActivityManager {
     const normalX = distance > 0.0001 ? dx / distance : 1;
     const normalY = distance > 0.0001 ? dy / distance : 0;
 
-    const asteroidJustWoke = this.#justWokeChunks.has(
-      this.getChunkIndexAt(asteroid.x, asteroid.y)
-    );
+    const asteroidJustWoke = this.#justWokeChunks.has(this.getChunkIndexAt(asteroid.x, asteroid.y));
 
     if (asteroidJustWoke && otherJustWoke) {
       const shift = overlap * 0.5;
@@ -584,7 +553,7 @@ export class ChunkActivityManager {
   }
 
   #normalizeWorldPosition(value: number) {
-    return ((value + this.#borderRadius) % this.#worldSize + this.#worldSize) % this.#worldSize;
+    return (((value + this.#borderRadius) % this.#worldSize) + this.#worldSize) % this.#worldSize;
   }
 
   #wrapChunkCoord(value: number) {

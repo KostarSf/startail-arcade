@@ -19,9 +19,9 @@ export class World {
   #chunkActivity = new ChunkActivityManager();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 5000;
+  #borderRadius = 15000;
 
-  #maxAsteroids = 2500;
+  #maxAsteroids = 50000;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;

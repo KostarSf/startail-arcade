@@ -23,6 +23,7 @@ import type {
   VelocityComponent,
 } from "@/shared/ecs/components";
 import type { BaseEntityState } from "@/shared/game/entities/base";
+import type { GenericNetEntityState } from "@/shared/game/entities/base";
 import type { NetworkEvent, PlayerInputEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
@@ -200,6 +201,7 @@ export class ClientEngine {
   #snapshotTimingDebugEnabled = false;
   #snapshotArrivalIntervalsMs: number[] = [];
   #lastSnapshotArrivalTimeMs: number | null = null;
+  #serverTps = 20;
 
   #networkDecoder: NetworkDecoder;
 
@@ -485,6 +487,131 @@ export class ClientEngine {
         respawnError: currentStats.respawnError,
         worldRadius: currentStats.worldRadius,
         radarCount: currentStats.radarData?.length ?? 0,
+      },
+    };
+  }
+
+  getDebugNetworkSnapshot() {
+    const services = this.#services;
+    const predictedServerTime = this.#predictedServerTime();
+    const renderTargetTime = predictedServerTime - RENDER_DELAY_MS;
+    const latestSnapshot = this.#snapshotBuffer.getLatest();
+    const { previous, next } = this.#snapshotBuffer.getWindow(renderTargetTime);
+
+    const round = (value: number | null | undefined, precision = 2) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        return null;
+      }
+
+      const factor = 10 ** precision;
+      return Math.round(value * factor) / factor;
+    };
+
+    const summarizeSnapshot = (
+      snapshot: { serverTime: number; simTick: number } | null
+    ) =>
+      snapshot
+        ? {
+            serverTime: round(snapshot.serverTime),
+            simTick: snapshot.simTick,
+          }
+        : null;
+
+    const playerEntityId = services?.player.entityId ?? null;
+    const transform =
+      playerEntityId !== null ? services?.stores.transform.get(playerEntityId) : null;
+    const velocity =
+      playerEntityId !== null ? services?.stores.velocity.get(playerEntityId) : null;
+    const shipControl =
+      playerEntityId !== null ? services?.stores.shipControl.get(playerEntityId) : null;
+    const networkState =
+      playerEntityId !== null
+        ? services?.stores.networkState.get(playerEntityId)
+        : null;
+
+    const latestServerState =
+      networkState?.state?.type === "ship"
+        ? (networkState.state as GenericNetEntityState)
+        : null;
+
+    return {
+      predictedServerTime: round(predictedServerTime),
+      renderDelayMs: RENDER_DELAY_MS,
+      renderTargetTime: round(renderTargetTime),
+      world: {
+        renderedSimTick: services?.world.renderedSimTick ?? 0,
+      },
+      snapshots: {
+        latest: summarizeSnapshot(latestSnapshot),
+        previous: summarizeSnapshot(previous),
+        next: summarizeSnapshot(next),
+      },
+      timing: {
+        simulationTickMs: round(1000 / this.#serverTps),
+      },
+      inputBuffer: {
+        baseline: this.#inputBuffer.baseline
+          ? {
+              sequence: this.#inputBuffer.baseline.sequence,
+              timestamp: round(this.#inputBuffer.baseline.timestamp),
+              thrust: this.#inputBuffer.baseline.thrust,
+              angle: round(this.#inputBuffer.baseline.angle, 4),
+            }
+          : null,
+        pending: this.#inputBuffer.pending.map((command) => ({
+          sequence: command.sequence,
+          timestamp: round(command.timestamp),
+          thrust: command.thrust,
+          angle: round(command.angle, 4),
+          fire: command.fire,
+        })),
+      },
+      player: {
+        id: services?.player.id ?? null,
+        entityId: playerEntityId,
+        transform: transform
+          ? {
+              x: round(transform.x),
+              y: round(transform.y),
+              angle: round(transform.angle, 4),
+            }
+          : null,
+        velocity: velocity
+          ? {
+              vx: round(velocity.vx),
+              vy: round(velocity.vy),
+              va: round(velocity.va, 4),
+            }
+          : null,
+        shipControl: shipControl
+          ? {
+              thrust: shipControl.thrust,
+              angle: round(shipControl.angle, 4),
+              fire: shipControl.fire,
+              lastServerSequence: shipControl.lastServerSequence,
+            }
+          : null,
+        networkState: networkState
+          ? {
+              lastServerTime: round(networkState.lastServerTime),
+              lastSimTick: networkState.lastSimTick,
+              predictedServerTime: round(networkState.predictedServerTime),
+              renderDelay: networkState.renderDelay,
+              lastAcknowledgedInput: networkState.lastAcknowledgedInput,
+              state:
+                latestServerState !== null
+                  ? {
+                      x: round(latestServerState.x),
+                      y: round(latestServerState.y),
+                      angle: round(latestServerState.angle, 4),
+                      vx: round(latestServerState.vx),
+                      vy: round(latestServerState.vy),
+                      thrust: latestServerState.thrust ?? false,
+                      lastInputSequence: latestServerState.lastInputSequence ?? -1,
+                    }
+                  : null,
+            }
+          : null,
       },
     };
   }
@@ -795,12 +922,15 @@ export class ClientEngine {
         id: null,
         entityId: null,
       },
-      network: {
-        sendInput: (input, options) => this.#sendInput(input, options),
-        sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
-        predictedServerTime: () => this.#predictedServerTime(),
-        renderDelayMs: RENDER_DELAY_MS,
-      },
+        network: {
+          sendInput: (input, options) => this.#sendInput(input, options),
+          sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
+          predictedServerTime: () => this.#predictedServerTime(),
+          renderDelayMs: RENDER_DELAY_MS,
+          get simulationTickMs() {
+            return 1000 / self.#serverTps;
+          },
+        },
       debug: {
         get drawGrid() {
           return self.#drawGrid;
@@ -1301,6 +1431,7 @@ export class ClientEngine {
         this.#handlePong(message);
         break;
       case "server:player-initialize":
+        this.#serverTps = message.tps > 0 ? message.tps : this.#serverTps;
         if (this.#services) {
           this.#services.player.id = message.playerId;
           this.#services.world.radius = message.worldRadius;

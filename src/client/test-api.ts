@@ -15,9 +15,12 @@ export type StartailTestApi = {
     drawColliders?: boolean;
     simulatedLatencyMs?: number;
     disableInterpolation?: boolean;
-    disableReconciliation?: boolean;
+      disableReconciliation?: boolean;
   }) => void;
   getSnapshot: () => ReturnType<typeof clientEngine.getRuntimeSnapshot>;
+  getDebugNetworkSnapshot: () => ReturnType<
+    typeof clientEngine.getDebugNetworkSnapshot
+  >;
 };
 
 declare global {
@@ -39,6 +42,7 @@ export function installTestApi() {
       clientEngine.setDebugOptions(options);
     },
     getSnapshot: () => clientEngine.getRuntimeSnapshot(),
+    getDebugNetworkSnapshot: () => clientEngine.getDebugNetworkSnapshot(),
   };
 
   console.info("[agent] test API ready");

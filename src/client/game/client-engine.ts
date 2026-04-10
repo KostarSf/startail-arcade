@@ -53,6 +53,7 @@ import { Starfield } from "../starfield";
 import { stats } from "../store";
 import { AudioEngine } from "../audio/audio-engine";
 import { audioSettings } from "../audio/audio-settings";
+import { isDevelopmentClient } from "../dev-mode";
 import { InputBuffer } from "./network/input-buffer";
 import { NetworkDecoder } from "./network/network-decoder";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
@@ -183,6 +184,8 @@ export class ClientEngine {
   #drawGrid = false;
   #drawWorldBorder = false;
   #drawColliders = false;
+  #disableInterpolation = false;
+  #disableReconciliation = false;
   #fpsSampleFrames = 0;
   #fpsLastSampleTime = 0;
   #connectionAttempts = 0;
@@ -206,8 +209,20 @@ export class ClientEngine {
     this.#drawWorldBorder = this.#resolveWorldBorderFromURL();
     this.#drawGrid = this.#resolveDrawGridFromURL();
     this.#drawColliders = this.#resolveDrawCollidersFromURL();
+    this.#disableInterpolation = this.#resolveDisableInterpolationFromURL();
+    this.#disableReconciliation = this.#resolveDisableReconciliationFromURL();
 
     this.#networkDecoder = new NetworkDecoder(this);
+  }
+
+  #isDevelopmentEnvironment(): boolean {
+    return isDevelopmentClient();
+  }
+
+  #resolveBooleanFlagFromURL(paramName: string): boolean {
+    if (typeof window === "undefined") return false;
+    const value = new URLSearchParams(window.location.search).get(paramName);
+    return value === "true" || value === "1" || value === "on";
   }
 
   #resolveWorldBorderFromURL(): boolean {
@@ -243,10 +258,17 @@ export class ClientEngine {
 
   #resolveDrawCollidersFromURL(): boolean {
     if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    const value = params.get("draw-colliders");
-    if (value === null) return false;
-    return value === "true";
+    return this.#resolveBooleanFlagFromURL("draw-colliders");
+  }
+
+  #resolveDisableInterpolationFromURL(): boolean {
+    if (!this.#isDevelopmentEnvironment()) return false;
+    return this.#resolveBooleanFlagFromURL("disable-interpolation");
+  }
+
+  #resolveDisableReconciliationFromURL(): boolean {
+    if (!this.#isDevelopmentEnvironment()) return false;
+    return this.#resolveBooleanFlagFromURL("disable-reconciliation");
   }
 
   setDrawGrid(value: boolean) {
@@ -291,6 +313,42 @@ export class ClientEngine {
     }
   }
 
+  setDisableInterpolation(value: boolean) {
+    if (!this.#isDevelopmentEnvironment()) {
+      this.#disableInterpolation = false;
+      return;
+    }
+
+    this.#disableInterpolation = value;
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("disable-interpolation", "true");
+      } else {
+        url.searchParams.delete("disable-interpolation");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
+  setDisableReconciliation(value: boolean) {
+    if (!this.#isDevelopmentEnvironment()) {
+      this.#disableReconciliation = false;
+      return;
+    }
+
+    this.#disableReconciliation = value;
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("disable-reconciliation", "true");
+      } else {
+        url.searchParams.delete("disable-reconciliation");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
   getSimulatedLatency(): number {
     return this.#simulatedLatencyMs;
   }
@@ -311,6 +369,14 @@ export class ClientEngine {
     return this.#drawColliders;
   }
 
+  getDisableInterpolation(): boolean {
+    return this.#disableInterpolation;
+  }
+
+  getDisableReconciliation(): boolean {
+    return this.#disableReconciliation;
+  }
+
   isConnected(): boolean {
     return this.#ws?.readyState === WebSocket.OPEN;
   }
@@ -320,6 +386,8 @@ export class ClientEngine {
     drawWorldBorder?: boolean;
     drawColliders?: boolean;
     simulatedLatencyMs?: number;
+    disableInterpolation?: boolean;
+    disableReconciliation?: boolean;
   }) {
     if (options.drawGrid !== undefined) {
       this.setDrawGrid(options.drawGrid);
@@ -332,6 +400,12 @@ export class ClientEngine {
     }
     if (options.simulatedLatencyMs !== undefined) {
       this.setSimulatedLatency(options.simulatedLatencyMs);
+    }
+    if (options.disableInterpolation !== undefined) {
+      this.setDisableInterpolation(options.disableInterpolation);
+    }
+    if (options.disableReconciliation !== undefined) {
+      this.setDisableReconciliation(options.disableReconciliation);
     }
   }
 
@@ -351,6 +425,8 @@ export class ClientEngine {
         drawGrid: this.#drawGrid,
         drawWorldBorder: this.#drawWorldBorder,
         drawColliders: this.#drawColliders,
+        disableInterpolation: this.#disableInterpolation,
+        disableReconciliation: this.#disableReconciliation,
       },
       player: {
         id: currentStats.playerId,
@@ -714,6 +790,12 @@ export class ClientEngine {
         get drawColliders() {
           return self.#drawColliders;
         },
+        get disableInterpolation() {
+          return self.#disableInterpolation;
+        },
+        get disableReconciliation() {
+          return self.#disableReconciliation;
+        },
         setDrawGrid: (value) => {
           self.setDrawGrid(value);
         },
@@ -722,6 +804,12 @@ export class ClientEngine {
         },
         setDrawColliders: (value) => {
           self.setDrawColliders(value);
+        },
+        setDisableInterpolation: (value) => {
+          self.setDisableInterpolation(value);
+        },
+        setDisableReconciliation: (value) => {
+          self.setDisableReconciliation(value);
         },
       },
       world: {

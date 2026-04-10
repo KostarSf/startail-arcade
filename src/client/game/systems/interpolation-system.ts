@@ -283,9 +283,15 @@ export const InterpolationSystem: System<ClientServices> = {
   id: "interpolation-system",
   stage: "prediction",
   tick({ services, entities }) {
-    const targetTime =
-      services.network.predictedServerTime() - services.network.renderDelayMs;
-    const { previous, next } = services.snapshotBuffer.getWindow(targetTime);
+    const disableInterpolation = services.debug.disableInterpolation;
+    const latestSnapshot = services.snapshotBuffer.getLatest();
+    const targetTime = disableInterpolation
+      ? latestSnapshot?.serverTime ?? 0
+      : services.network.predictedServerTime() - services.network.renderDelayMs;
+    const { previous, next } = disableInterpolation
+      ? { previous: latestSnapshot, next: latestSnapshot }
+      : services.snapshotBuffer.getWindow(targetTime);
+
     if (!previous && !next) return;
 
     const fromSnapshot = previous ?? next!;

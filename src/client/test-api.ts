@@ -14,6 +14,8 @@ export type StartailTestApi = {
     drawWorldBorder?: boolean;
     drawColliders?: boolean;
     simulatedLatencyMs?: number;
+    disableInterpolation?: boolean;
+    disableReconciliation?: boolean;
   }) => void;
   getSnapshot: () => ReturnType<typeof clientEngine.getRuntimeSnapshot>;
 };

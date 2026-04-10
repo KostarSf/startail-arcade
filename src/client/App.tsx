@@ -8,12 +8,13 @@ import {
 import cursorImage from "./assets/images/cursor.png";
 import { AudioSettings } from "./AudioSettings";
 import { DebugDialog } from "./DebugDialog";
+import { isDevelopmentClient } from "./dev-mode";
 import { clientEngine } from "./engine";
 import "./index.css";
 import { useStats } from "./store";
 
 const VERSION = "v0.4.1";
-const DEBUG = false;
+const DEBUG = isDevelopmentClient();
 
 export function App() {
   // Set custom cursor on mount

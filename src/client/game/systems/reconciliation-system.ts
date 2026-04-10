@@ -47,6 +47,10 @@ export const ReconciliationSystem: System<ClientServices> = {
   stage: "prediction",
   priority: 1,
   tick({ services }) {
+    if (services.debug.disableReconciliation) {
+      return;
+    }
+
     const { player, stores, inputBuffer, network } = services;
     if (player.entityId === null) return;
 

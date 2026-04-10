@@ -126,9 +126,13 @@ export interface ClientServices extends Record<string, unknown> {
     drawGrid: boolean;
     drawWorldBorder: boolean;
     drawColliders: boolean;
+    disableInterpolation: boolean;
+    disableReconciliation: boolean;
     setDrawGrid: (value: boolean) => void;
     setDrawWorldBorder: (value: boolean) => void;
     setDrawColliders: (value: boolean) => void;
+    setDisableInterpolation: (value: boolean) => void;
+    setDisableReconciliation: (value: boolean) => void;
   };
   world: {
     radius: number;

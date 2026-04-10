@@ -77,6 +77,10 @@ import type {
 } from "./types";
 
 const RENDER_DELAY_MS = 100;
+const SNAPSHOT_TIMING_SAMPLE_SIZE = 30;
+const SNAPSHOT_TIMING_MIN_SAMPLES = 5;
+const SNAPSHOT_TIMING_WARN_FACTOR = 1.5;
+const SNAPSHOT_TIMING_WARN_MIN_DELTA_MS = 8;
 
 export class ClientEngine {
   #app: Application;
@@ -190,6 +194,9 @@ export class ClientEngine {
   #fpsLastSampleTime = 0;
   #connectionAttempts = 0;
   #maxConnectionAttempts = 5;
+  #snapshotTimingDebugEnabled = false;
+  #snapshotArrivalIntervalsMs: number[] = [];
+  #lastSnapshotArrivalTimeMs: number | null = null;
 
   #networkDecoder: NetworkDecoder;
 
@@ -211,6 +218,8 @@ export class ClientEngine {
     this.#drawColliders = this.#resolveDrawCollidersFromURL();
     this.#disableInterpolation = this.#resolveDisableInterpolationFromURL();
     this.#disableReconciliation = this.#resolveDisableReconciliationFromURL();
+    this.#snapshotTimingDebugEnabled =
+      this.#resolveSnapshotTimingDebugFromURL();
 
     this.#networkDecoder = new NetworkDecoder(this);
   }
@@ -269,6 +278,14 @@ export class ClientEngine {
   #resolveDisableReconciliationFromURL(): boolean {
     if (!this.#isDevelopmentEnvironment()) return false;
     return this.#resolveBooleanFlagFromURL("disable-reconciliation");
+  }
+
+  #resolveSnapshotTimingDebugFromURL(): boolean {
+    return (
+      this.#resolveBooleanFlagFromURL("debug-snapshot-timing") ||
+      this.#resolveAgentModeFromURL() ||
+      this.#isDevelopmentEnvironment()
+    );
   }
 
   setDrawGrid(value: boolean) {
@@ -1222,6 +1239,7 @@ export class ClientEngine {
     this.#ws.onopen = () => {
       console.log("[net] Connected successfully");
       this.#connectionAttempts = 0; // Reset on successful connection
+      this.#resetSnapshotTimingDebug();
       this.#statsGetter().setConnectionError(false);
       this.#statsGetter().setIsReconnecting(false);
       this.#pingTicker.start();
@@ -1272,6 +1290,7 @@ export class ClientEngine {
         this.#statsGetter().setWorldRadius(message.worldRadius);
         break;
       case "server:state":
+        this.#trackSnapshotArrivalTiming(message);
         this.#snapshotBuffer.add(message);
         this.#statsGetter().setPlayers(message.players);
         this.#statsGetter().setTickDuration(message.tickDuration);
@@ -1422,10 +1441,75 @@ export class ClientEngine {
     }
   }
 
+  #trackSnapshotArrivalTiming(
+    message: Extract<NetworkEvent, { type: "server:state" }>
+  ) {
+    if (!this.#snapshotTimingDebugEnabled) {
+      return;
+    }
+
+    const now = performance.now();
+    const previousArrivalTime = this.#lastSnapshotArrivalTimeMs;
+    this.#lastSnapshotArrivalTimeMs = now;
+
+    if (previousArrivalTime === null) {
+      return;
+    }
+
+    const intervalMs = now - previousArrivalTime;
+    const averageIntervalMs = this.#getAverageSnapshotArrivalIntervalMs();
+
+    if (
+      averageIntervalMs !== null &&
+      this.#isTooLongSnapshotInterval(intervalMs, averageIntervalMs)
+    ) {
+      const snapshotKind = message.state.type === "full" ? "full" : "delta";
+      console.warn(
+        `[net] слишком долгий ${snapshotKind} кадр - ${Math.round(
+          intervalMs
+        )}мс (в среднем ${Math.round(averageIntervalMs)}мс)`
+      );
+    }
+
+    this.#snapshotArrivalIntervalsMs.push(intervalMs);
+    if (
+      this.#snapshotArrivalIntervalsMs.length > SNAPSHOT_TIMING_SAMPLE_SIZE
+    ) {
+      this.#snapshotArrivalIntervalsMs.shift();
+    }
+  }
+
+  #getAverageSnapshotArrivalIntervalMs() {
+    if (
+      this.#snapshotArrivalIntervalsMs.length < SNAPSHOT_TIMING_MIN_SAMPLES
+    ) {
+      return null;
+    }
+
+    const total = this.#snapshotArrivalIntervalsMs.reduce(
+      (sum, intervalMs) => sum + intervalMs,
+      0
+    );
+    return total / this.#snapshotArrivalIntervalsMs.length;
+  }
+
+  #isTooLongSnapshotInterval(intervalMs: number, averageIntervalMs: number) {
+    return (
+      intervalMs >= averageIntervalMs * SNAPSHOT_TIMING_WARN_FACTOR &&
+      intervalMs - averageIntervalMs >= SNAPSHOT_TIMING_WARN_MIN_DELTA_MS
+    );
+  }
+
+  #resetSnapshotTimingDebug() {
+    this.#snapshotArrivalIntervalsMs.length = 0;
+    this.#lastSnapshotArrivalTimeMs = null;
+  }
+
   #handleDisconnect() {
     this.#pingTicker.stop();
     this.#networkStatsTicker.stop();
     this.#ws = null;
+    this.#resetSnapshotTimingDebug();
     this.#snapshotBuffer.clear();
     this.#inputBuffer.reset();
     this.#entityIndex.clear();

@@ -47,11 +47,25 @@ Default command:
 bun run probe:agent
 ```
 
+Rendered probe mode:
+
+```bash
+bun run probe:agent --client-mode=rendered
+```
+
+Optional headed run:
+
+```bash
+bun run probe:agent --client-mode=rendered --headed
+```
+
 CLI flags are also supported:
 
 ```powershell
 bun run probe:agent --duration=15000 --seed=42 --debug-performance
 bun run probe:agent --artifacts-dir=.artifacts/perf-baseline --name="Feature Check"
+bun run probe:agent --client-mode=rendered --capture-debug-trace --trace-interval=50
+bun run probe:agent --client-mode=rendered --sim-latency=40
 ```
 
 Useful environment overrides:
@@ -61,6 +75,8 @@ $env:PROBE_DURATION_MS = "15000"; bun run probe:agent
 $env:PROBE_SEED = "42"; $env:PROBE_ARTIFACTS_DIR = ".artifacts/perf-baseline"; bun run probe:agent
 $env:PROBE_NAME = "Feature Check"; bun run probe:agent
 $env:PROBE_DEBUG_PERFORMANCE = "1"; bun run probe:agent
+$env:PROBE_CLIENT_MODE = "rendered"; bun run probe:agent
+$env:PROBE_HEADED = "1"; $env:PROBE_CLIENT_MODE = "rendered"; bun run probe:agent
 ```
 
 What the probe does:
@@ -69,6 +85,7 @@ What the probe does:
 - enables deterministic server-side randomness when `--seed` is set
 - opens the game in `agent-mode` with audio disabled
 - uses a lightweight headless client path that does not depend on Pixi/WebGL boot completing
+- or, when `--client-mode=rendered` is used, boots the full Pixi/render pipeline with audio disabled
 - waits for the browser test API to become available
 - joins the game
 - briefly exercises movement/fire input

@@ -202,6 +202,9 @@ export class ClientEngine {
   #snapshotArrivalIntervalsMs: number[] = [];
   #lastSnapshotArrivalTimeMs: number | null = null;
   #serverTps = 20;
+  #appInitialized = false;
+  #servicesReady = false;
+  #pipelineReady = false;
 
   #networkDecoder: NetworkDecoder;
 
@@ -251,6 +254,12 @@ export class ClientEngine {
     return params.get("agent-mode") === "true";
   }
 
+  #resolveRenderedProbeModeFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("agent-rendered") === "true";
+  }
+
   #resolveAudioDisabledFromURL(): boolean {
     if (typeof window === "undefined") return false;
     const params = new URLSearchParams(window.location.search);
@@ -259,7 +268,9 @@ export class ClientEngine {
       return true;
     }
 
-    return this.#resolveAgentModeFromURL();
+    return (
+      this.#resolveAgentModeFromURL() || this.#resolveRenderedProbeModeFromURL()
+    );
   }
 
   #resolveDrawGridFromURL(): boolean {
@@ -289,6 +300,7 @@ export class ClientEngine {
     return (
       this.#resolveBooleanFlagFromURL("debug-snapshot-timing") ||
       this.#resolveAgentModeFromURL() ||
+      this.#resolveRenderedProbeModeFromURL() ||
       this.#isDevelopmentEnvironment()
     );
   }
@@ -443,6 +455,13 @@ export class ClientEngine {
       connectionAttempts: this.#connectionAttempts,
       reconnecting: currentStats.isReconnecting,
       simulatedLatencyMs: this.#simulatedLatencyMs,
+      boot: {
+        lightweightAgentMode: this.#resolveAgentModeFromURL(),
+        renderedProbeMode: this.#resolveRenderedProbeModeFromURL(),
+        appInitialized: this.#appInitialized,
+        servicesReady: this.#servicesReady,
+        pipelineReady: this.#pipelineReady,
+      },
       debug: {
         drawGrid: this.#drawGrid,
         drawWorldBorder: this.#drawWorldBorder,
@@ -497,6 +516,14 @@ export class ClientEngine {
     const renderTargetTime = predictedServerTime - RENDER_DELAY_MS;
     const latestSnapshot = this.#snapshotBuffer.getLatest();
     const { previous, next } = this.#snapshotBuffer.getWindow(renderTargetTime);
+    const latestSnapshotAgeMs =
+      latestSnapshot !== null
+        ? predictedServerTime - latestSnapshot.serverTime
+        : null;
+    const interpolationBufferLeadMs =
+      latestSnapshot !== null
+        ? latestSnapshot.serverTime - renderTargetTime
+        : null;
 
     const round = (value: number | null | undefined, precision = 2) => {
       if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -538,6 +565,14 @@ export class ClientEngine {
       predictedServerTime: round(predictedServerTime),
       renderDelayMs: RENDER_DELAY_MS,
       renderTargetTime: round(renderTargetTime),
+      starvation: {
+        hasPreviousSnapshot: previous !== null,
+        hasNextSnapshot: next !== null,
+        latestSnapshotAgeMs: round(latestSnapshotAgeMs),
+        interpolationBufferLeadMs: round(interpolationBufferLeadMs),
+        interpolationStarved:
+          latestSnapshot !== null && latestSnapshot.serverTime < renderTargetTime,
+      },
       world: {
         renderedSimTick: services?.world.renderedSimTick ?? 0,
       },
@@ -642,6 +677,7 @@ export class ClientEngine {
       antialias: false,
       resolution: 1,
     });
+    this.#appInitialized = true;
 
     parent.appendChild(this.#app.canvas);
     // Disable CSS-level antialiasing for pixelated retro look
@@ -979,6 +1015,7 @@ export class ClientEngine {
       audio: this.#audioEngine,
       audioSettings: audioSettings,
     };
+    this.#servicesReady = true;
   }
 
   #setupPipeline() {
@@ -1002,6 +1039,7 @@ export class ClientEngine {
     this.#pipeline.register(AudioSystem);
     const now = performance.now();
     this.#pipeline.init(now);
+    this.#pipelineReady = true;
     this.#fpsLastSampleTime = now;
 
     this.#app.ticker.add((time) => {

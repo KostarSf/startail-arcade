@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "test:install-browsers": "playwright install chromium",
     "probe:agent": "node scripts/run-agent-probe.mjs",
+    "probe:agent:rendered": "PROBE_CLIENT_MODE=rendered node scripts/run-agent-probe.mjs",
     "typecheck": "tsgo --noEmit",
     "lint": "oxlint --type-aware src build.ts"
   },

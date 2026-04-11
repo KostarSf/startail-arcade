@@ -5,7 +5,7 @@ export default defineConfig({
   timeout: 120_000,
   fullyParallel: false,
   use: {
-    headless: true,
+    headless: process.env.PROBE_HEADED !== "1",
     launchOptions: {
       args: [
         "--enable-webgl",

@@ -94,6 +94,43 @@ async function terminateProcess(child: ChildProcess) {
   });
 }
 
+async function waitForClientCondition(
+  page: import("@playwright/test").Page,
+  condition: () => unknown,
+  options: {
+    timeoutMs: number;
+    description: string;
+    getPageErrors: () => string[];
+  }
+) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < options.timeoutMs) {
+    const pageErrors = options.getPageErrors();
+    if (pageErrors.length > 0) {
+      throw new Error(
+        `Client boot failed while waiting for ${options.description}: ${pageErrors[0]}`
+      );
+    }
+
+    const satisfied = await page.evaluate(condition);
+    if (satisfied) {
+      return;
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  const pageErrors = options.getPageErrors();
+  if (pageErrors.length > 0) {
+    throw new Error(
+      `Client boot failed while waiting for ${options.description}: ${pageErrors[0]}`
+    );
+  }
+
+  throw new Error(`Timed out waiting for ${options.description}`);
+}
+
 test("agent probe captures client and server artifacts", async ({ browser }) => {
   const cwd = process.cwd();
   const artifactsDir = path.resolve(
@@ -104,7 +141,10 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   const seed = parseEnvNumber("PROBE_SEED", 42);
   const port = parseEnvNumber("PROBE_PORT", await getFreePort());
   const probeName = process.env.PROBE_NAME || "Agent Probe";
+  const clientMode = process.env.PROBE_CLIENT_MODE || "lightweight";
   const debugPerformance = process.env.PROBE_DEBUG_PERFORMANCE === "1";
+  const simulatedLatencyMs = parseEnvNumber("PROBE_SIMULATED_LATENCY_MS", 0);
+  const disableInterpolation = parseEnvBoolean("PROBE_DISABLE_INTERPOLATION");
   const disableReconciliation = parseEnvBoolean(
     "PROBE_DISABLE_RECONCILIATION"
   );
@@ -117,11 +157,15 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   let serverStdout = "";
   let serverStderr = "";
   const clientLogs: string[] = [];
+  const pageErrors: string[] = [];
   const summary: Record<string, unknown> = {
     ok: false,
     baseUrl,
     seed,
     durationMs,
+    clientMode,
+    simulatedLatencyMs,
+    disableInterpolation,
     disableReconciliation,
     captureDebugTrace,
     startedAt: new Date().toISOString(),
@@ -160,41 +204,82 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     clientLogs.push(`[${message.type()}] ${message.text()}`);
   });
   page.on("pageerror", (error) => {
-    clientLogs.push(`[pageerror] ${error.stack ?? error.message}`);
+    const message = error.stack ?? error.message;
+    pageErrors.push(message);
+    clientLogs.push(`[pageerror] ${message}`);
   });
 
   try {
     await waitForHealth(baseUrl, 60_000);
 
-    await page.goto(`${baseUrl}/?agent-mode=true&audio=off`);
+    const searchParams = new URLSearchParams();
+    searchParams.set("audio", "off");
+    if (clientMode === "rendered") {
+      searchParams.set("agent-rendered", "true");
+    } else {
+      searchParams.set("agent-mode", "true");
+    }
 
-    await page.waitForFunction(() => {
+    await page.goto(`${baseUrl}/?${searchParams.toString()}`);
+
+    await waitForClientCondition(page, () => {
       return window.__STARTAIL_TEST_API__?.ping() === "pong";
+    }, {
+      timeoutMs: 20_000,
+      description: "test API to become available",
+      getPageErrors: () => pageErrors,
     });
 
-    await page.evaluate(({ disableReconciliation }) => {
+    if (clientMode === "rendered") {
+      await waitForClientCondition(page, () => {
+        const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
+        return Boolean(
+          snapshot?.boot.appInitialized &&
+            snapshot.boot.servicesReady &&
+            snapshot.boot.pipelineReady
+        );
+      }, {
+        timeoutMs: 20_000,
+        description: "rendered client pipeline to finish booting",
+        getPageErrors: () => pageErrors,
+      });
+    }
+
+    await page.evaluate(
+      ({ simulatedLatencyMs, disableInterpolation, disableReconciliation }) => {
       window.__STARTAIL_TEST_API__?.configureDebug({
-        simulatedLatencyMs: 0,
+        simulatedLatencyMs,
+        disableInterpolation,
         disableReconciliation,
       });
-    }, { disableReconciliation });
+      },
+      { simulatedLatencyMs, disableInterpolation, disableReconciliation }
+    );
 
-    await page.waitForFunction(() => {
+    await waitForClientCondition(page, () => {
       const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
       return Boolean(snapshot?.connected);
+    }, {
+      timeoutMs: 20_000,
+      description: "websocket connection",
+      getPageErrors: () => pageErrors,
     });
 
     await page.evaluate((name) => {
       window.__STARTAIL_TEST_API__?.respawn(name);
     }, probeName);
 
-    await page.waitForFunction(() => {
+    await waitForClientCondition(page, () => {
       const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
       return Boolean(
         snapshot?.connected &&
           snapshot.player.alive &&
           snapshot.stats.hasTimeSync
       );
+    }, {
+      timeoutMs: 20_000,
+      description: "spawned player with time sync",
+      getPageErrors: () => pageErrors,
     });
 
     await page.evaluate(() => {
@@ -272,6 +357,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       clientSnapshot,
       serverMetrics,
       serverSnapshot,
+      pageErrors,
       debugTraceSamples: debugTrace.length,
     });
 
@@ -298,6 +384,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     Object.assign(summary, {
       ok: false,
       finishedAt: new Date().toISOString(),
+      pageErrors,
       error: error instanceof Error ? error.stack ?? error.message : String(error),
     });
     throw error;

@@ -46,9 +46,28 @@ applyEnvOverride(env, "PROBE_SEED", options.seed);
 applyEnvOverride(env, "PROBE_NAME", options.name);
 applyEnvOverride(env, "PROBE_ARTIFACTS_DIR", options["artifacts-dir"]);
 applyEnvOverride(env, "PROBE_PORT", options.port);
+applyEnvOverride(env, "PROBE_CLIENT_MODE", options["client-mode"]);
+applyEnvOverride(env, "PROBE_SIMULATED_LATENCY_MS", options["sim-latency"]);
+applyEnvOverride(env, "PROBE_TRACE_INTERVAL_MS", options["trace-interval"]);
 
 if (options["debug-performance"] === true) {
   env.PROBE_DEBUG_PERFORMANCE = "1";
+}
+
+if (options["disable-reconciliation"] === true) {
+  env.PROBE_DISABLE_RECONCILIATION = "1";
+}
+
+if (options["disable-interpolation"] === true) {
+  env.PROBE_DISABLE_INTERPOLATION = "1";
+}
+
+if (options["capture-debug-trace"] === true) {
+  env.PROBE_CAPTURE_DEBUG_TRACE = "1";
+}
+
+if (options.headed === true) {
+  env.PROBE_HEADED = "1";
 }
 
 const playwrightCli = path.resolve(

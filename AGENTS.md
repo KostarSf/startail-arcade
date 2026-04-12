@@ -1,6 +1,6 @@
 # AGENTS
 
-This project has a lightweight agent-friendly test harness. Use it instead of ad-hoc manual runs whenever you need to debug gameplay, verify a feature, or compare optimization changes.
+This project has an agent-friendly test harness with two probe client modes: a fast lightweight mode and a rendered graphics mode. Use it instead of ad-hoc manual runs whenever you need to debug gameplay, verify a feature, or compare optimization changes.
 
 ## Setup
 
@@ -16,6 +16,8 @@ This project has a lightweight agent-friendly test harness. Use it instead of ad
   Use for browser-level regression checks with Playwright.
 - `bun run probe:agent`
   Use for short autonomous diagnostic runs that start the server, join the game, capture client/server metrics and logs, take a screenshot, and exit cleanly.
+- `bun run probe:agent --client-mode=rendered`
+  Use when you need the real graphics client to boot with Pixi, ECS, camera, and render systems active.
 
 ## Recommended Workflow
 
@@ -53,6 +55,12 @@ Rendered probe mode:
 bun run probe:agent --client-mode=rendered
 ```
 
+Shortcut:
+
+```bash
+bun run probe:agent:rendered
+```
+
 Optional headed run:
 
 ```bash
@@ -83,9 +91,14 @@ What the probe does:
 
 - starts the Bun server in `--test-mode`
 - enables deterministic server-side randomness when `--seed` is set
-- opens the game in `agent-mode` with audio disabled
-- uses a lightweight headless client path that does not depend on Pixi/WebGL boot completing
-- or, when `--client-mode=rendered` is used, boots the full Pixi/render pipeline with audio disabled
+- when `--client-mode=lightweight` is used:
+  - opens the game in `agent-mode` with audio disabled
+  - uses a lightweight client path that does not depend on Pixi/WebGL boot completing
+- when `--client-mode=rendered` is used:
+  - builds the frontend bundle first and serves `dist/` from the same test server origin
+  - opens the game in `agent-rendered` mode with audio disabled
+  - boots the real graphics client with Pixi, ECS, camera, input, networking, and render systems active
+  - uses a probe-compatible direct-stage renderer instead of the normal retro render-to-texture post-processing path, because that path is less stable under automated Playwright runs
 - waits for the browser test API to become available
 - joins the game
 - briefly exercises movement/fire input
@@ -97,9 +110,16 @@ What the probe does:
   - `server.stderr.log`
   - `screenshot.png`
 
+## Probe Modes
+
+- `lightweight`
+  Best default for networking, spawning, connection flow, and fast reproducible metrics. It is faster and more robust than the rendered path, but it does not boot the visual Pixi gameplay pipeline.
+- `rendered`
+  Best for visual gameplay checks and debugging client rendering behavior. It boots a real graphics client, but it is intentionally not pixel-identical to the normal retro presentation path because the harness uses a more automation-stable renderer.
+
 ## Browser Test API
 
-When the page is opened with `?agent-mode=true`, the client exposes:
+When the page is opened with `?agent-mode=true` or `?agent-rendered=true`, the client exposes:
 
 ```ts
 window.__STARTAIL_TEST_API__
@@ -128,8 +148,9 @@ Use them to fetch authoritative server-side state after a run. This is especiall
 ## Good Defaults For Agents
 
 - Prefer `bun run probe:agent` over manual browser poking when you need logs and metrics.
+- Escalate to `bun run probe:agent --client-mode=rendered` when the issue depends on graphics, camera, animation, or visual smoothing behavior.
 - Prefer a fixed `--seed` when comparing behavior across runs.
-- Prefer `?agent-mode=true&audio=off` for any automated browser session.
+- Prefer `?agent-mode=true&audio=off` for lightweight automation and `?agent-rendered=true&audio=off` for rendered automation.
 - Prefer Playwright plus the test API for repeatable flows.
 - Save evidence in `.artifacts/...` before making large refactors.
 
@@ -142,5 +163,7 @@ Use them to fetch authoritative server-side state after a run. This is especiall
 ## Notes
 
 - The server currently seeds process-wide `Math.random()` in test mode when `--seed` is provided. Keep the seed stable for apples-to-apples comparisons.
-- Audio is intentionally disabled in agent mode to avoid headless-browser instability.
+- Audio is intentionally disabled in both probe modes to avoid browser-automation instability.
+- `rendered` probe mode automatically runs a frontend build before launching Playwright. You do not need to build manually before using `bun run probe:agent --client-mode=rendered`.
+- The rendered harness uses a probe-compatible direct-stage graphics path. That makes it suitable for automation and visual debugging, but if you need to validate the exact production retro post-processing path, also sanity-check with a manual `bun dev` run.
 - If a probe fails, check `summary.json` first; it is the fastest way to see whether the failure was in boot, connection, spawn, or runtime.

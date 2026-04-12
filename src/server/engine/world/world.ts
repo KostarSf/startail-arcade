@@ -19,7 +19,7 @@ export class World {
   #chunkActivity = new ChunkActivityManager();
   #collisionResolver = new CollisionResolver();
 
-  #borderRadius = 15000;
+  #borderRadius = 50000;
 
   #maxAsteroids = 50000;
   #currentAsteroids = 0;

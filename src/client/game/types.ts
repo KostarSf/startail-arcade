@@ -8,13 +8,16 @@ import type {
   RenderableComponent,
   ShipControlComponent,
   NetworkStateComponent,
+  PresentationStateComponent,
 } from "@/shared/ecs";
 import type { BaseEntityState } from "@/shared/game/entities/base";
 import type { ShipInputCommand } from "@/shared/ecs/components";
+import type { SnapshotStreamHealth } from "@/shared/network/events";
 
 import type { Starfield } from "../starfield";
 import type { SnapshotBuffer } from "./network/snapshot-buffer";
 import type { InputBuffer } from "./network/input-buffer";
+import type { PresentationWindowObservation } from "./network/presentation-timing-controller";
 import type { CameraShake } from "./systems/camera-shake";
 import type { AudioEngine } from "../audio/audio-engine";
 import type { StatsStore } from "../store";
@@ -64,6 +67,7 @@ export interface ClientServices extends Record<string, unknown> {
     renderable: ComponentStore<RenderableComponent<Container>>;
     shipControl: ComponentStore<ShipControlComponent>;
     networkState: ComponentStore<NetworkStateComponent<BaseEntityState>>;
+    presentationState: ComponentStore<PresentationStateComponent>;
   };
   pixi: {
     app: import("pixi.js").Application;
@@ -122,8 +126,12 @@ export interface ClientServices extends Record<string, unknown> {
       height: number;
     }) => void;
     predictedServerTime: () => number;
+    updatePresentationWindow: (observation: PresentationWindowObservation) => void;
     renderDelayMs: number;
     simulationTickMs: number;
+    streamHealth: SnapshotStreamHealth;
+    starvationDurationMs: number;
+    latestSnapshotAgeMs: number | null;
   };
   debug: {
     drawGrid: boolean;

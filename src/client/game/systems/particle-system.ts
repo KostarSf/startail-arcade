@@ -1,9 +1,9 @@
 import type { System } from "@/shared/ecs";
-import { Graphics, Particle, ParticleContainer, Texture } from "pixi.js";
+import { Container, Sprite, Texture } from "pixi.js";
 import type { ClientServices } from "../types";
 
 interface TraceParticle {
-  particle: Particle;
+  particle: Sprite;
   vx: number;
   vy: number;
   lifespan: number;
@@ -19,19 +19,10 @@ interface BulletEmitter {
   particles: TraceParticle[];
 }
 
-// Create white pixel texture
-function createWhitePixelTexture(app: ClientServices["pixi"]["app"]): Texture {
-  const graphics = new Graphics();
-  graphics.rect(0, 0, 2, 2);
-  graphics.fill(0xffffff);
-  const texture = app.renderer.generateTexture({
-    target: graphics,
-    textureSourceOptions: {
-      scaleMode: "nearest",
-    },
-  });
-  graphics.destroy();
-  return texture;
+// Reuse the built-in white texture so rendered probe mode does not depend on
+// generateTexture internals during boot.
+function createWhitePixelTexture(_app: ClientServices["pixi"]["app"]): Texture {
+  return Texture.WHITE;
 }
 
 export const ParticleSystem: System<ClientServices> = {
@@ -39,7 +30,7 @@ export const ParticleSystem: System<ClientServices> = {
   stage: "presentation",
   init({ services }) {
     // Clean up existing particle system if it exists (for hot reload)
-    const existingContainer = (services as any).particleContainer as ParticleContainer | undefined;
+    const existingContainer = (services as any).particleContainer as Container | undefined;
     const existingTexture = (services as any).particleTexture as Texture | undefined;
     const existingEmitters = (services as any).bulletEmitters as Map<number, BulletEmitter> | undefined;
 
@@ -48,7 +39,7 @@ export const ParticleSystem: System<ClientServices> = {
       if (existingEmitters) {
         for (const emitter of existingEmitters.values()) {
           for (const traceParticle of emitter.particles) {
-            existingContainer.removeParticle(traceParticle.particle);
+            existingContainer.removeChild(traceParticle.particle);
           }
         }
       }
@@ -57,17 +48,12 @@ export const ParticleSystem: System<ClientServices> = {
       existingContainer.destroy();
     }
 
-    if (existingTexture) {
+    if (existingTexture && existingTexture !== Texture.WHITE) {
       existingTexture.destroy(true);
     }
 
     // Create particle container
-    const particleContainer = new ParticleContainer({
-      dynamicProperties: {
-        position: true,
-        color: true, // For alpha flickering
-      },
-    });
+    const particleContainer = new Container();
     services.pixi.camera.addChild(particleContainer);
 
     // Create white pixel texture
@@ -80,7 +66,7 @@ export const ParticleSystem: System<ClientServices> = {
   },
   tick({ services, dt, time }) {
     const particleContainer = (services as any)
-      .particleContainer as ParticleContainer;
+      .particleContainer as Container;
     const particleTexture = (services as any).particleTexture as Texture;
     const bulletEmitters = (services as any).bulletEmitters as Map<
       number,
@@ -151,20 +137,18 @@ export const ParticleSystem: System<ClientServices> = {
         const minAlpha = Math.random() * 0.4 + 0.4;
 
         // Create particle (smaller size)
-        const particle = new Particle({
+        const particle = new Sprite({
           texture: particleTexture,
-          x: emissionX,
-          y: emissionY,
-          scaleX: 0.5,
-          scaleY: 0.5,
-          anchorX: 0.5,
-          anchorY: 0.5,
-          rotation: emissionAngle,
-          tint: 0xffffff,
-          alpha: 1.0, // Start at max, will flicker
+          anchor: 0.5,
         });
+        particle.x = emissionX;
+        particle.y = emissionY;
+        particle.scale.set(0.5);
+        particle.rotation = emissionAngle;
+        particle.tint = 0xffffff;
+        particle.alpha = 1.0;
 
-        particleContainer.addParticle(particle);
+        particleContainer.addChild(particle);
 
         // Calculate velocity components: inherit bullet velocity but slower
         // Start with bullet's velocity scaled down, then add small random deviation
@@ -196,7 +180,7 @@ export const ParticleSystem: System<ClientServices> = {
 
         // Remove if expired
         if (traceParticle.age >= traceParticle.lifespan) {
-          particleContainer.removeParticle(traceParticle.particle);
+          particleContainer.removeChild(traceParticle.particle);
           emitter.particles.splice(i, 1);
           continue;
         }
@@ -237,7 +221,7 @@ export const ParticleSystem: System<ClientServices> = {
 
         // Remove if expired
         if (traceParticle.age >= traceParticle.lifespan) {
-          particleContainer.removeParticle(traceParticle.particle);
+          particleContainer.removeChild(traceParticle.particle);
           emitter.particles.splice(i, 1);
           continue;
         }

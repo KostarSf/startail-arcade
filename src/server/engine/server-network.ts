@@ -7,6 +7,8 @@ import type {
   PartialServerState,
   RadarData,
   ReplicatedWorldEvent,
+  SnapshotStreamHealth,
+  SnapshotStreamMetadata,
 } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { TPS } from "./constants";
@@ -18,6 +20,12 @@ import type { World } from "./world/world";
 
 export const MAX_CAMERA_QUERY_RADIUS = 1300;
 export const DEFAULT_CAMERA_QUERY_RADIUS = 900;
+
+const MAX_CATCH_UP_FRAMES_PER_SCHEDULER_TICK = 3;
+const STRESSED_QUEUE_DEPTH = 2;
+const DEGRADED_QUEUE_DEPTH = 5;
+const MAX_KEYFRAME_RATE_MULTIPLIER = 2;
+const MAX_RADAR_RATE_MULTIPLIER = 3;
 
 /**
  * Computes the server-authoritative camera query bounds used for visibility
@@ -54,6 +62,11 @@ export function getPlayerCameraQueryBounds(player: {
   };
 }
 
+type QueuedServerFrame = {
+  simTick: number;
+  serialized: string | Uint8Array;
+};
+
 export class ServerPlayer {
   id: string;
   ws: Bun.ServerWebSocket;
@@ -63,7 +76,8 @@ export class ServerPlayer {
   score: number = 0;
   level = levelUtils.levelFromXp(this.score);
   totalScoreToNextLevel = levelUtils.xpTotalForLevel(this.level + 1);
-  lastSentTick = 0;
+  lastQueuedTick = 0;
+  lastDeliveredTick = 0;
   networkFrameIndex = 0;
 
   needFullState = true;
@@ -77,6 +91,7 @@ export class ServerPlayer {
 
   lastSeenEntityIds = new Set<string>();
   pendingInputs: Extract<NetworkEvent, { type: "player:input" }>[] = [];
+  outboundFrames: QueuedServerFrame[] = [];
 
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
@@ -113,8 +128,7 @@ export class ServerPlayer {
       this.ship.baseDamage += 0.25 * levelDifference;
       this.ship.level = this.level;
 
-      // Preserve health and energy percentages when max values increase
-      // TODO: Корабль должен сам увеличивать свои stats при повышении уровня, а не нам
+      // Preserve health and energy percentages when max values increase.
       this.ship.adjustStatsForLevelUp(oldMaxHealth, oldMaxEnergy);
 
       console.log(
@@ -154,18 +168,17 @@ export class ServerNetwork {
   #playerByShipId = new Map<string, ServerPlayer>();
   #engine: Engine;
   #bunServer: Bun.Server<undefined> | null = null;
-  #schedulerTimer: ReturnType<typeof setInterval> | null = null;
   #lastCommittedTick = 0;
   #lastCommittedServerTimeMs = 0;
 
   #keyframesRate = TPS;
   #radarStatesRate = TPS;
-  #schedulerIntervalMs = 1000 / TPS;
   #schedulerStats = {
     schedulerTicks: 0,
     skippedSlots: 0,
     sentFrames: 0,
     lastSentCommittedTick: 0,
+    maxObservedQueueDepth: 0,
   };
 
   get engine() {
@@ -194,6 +207,9 @@ export class ServerNetwork {
             y: Math.round(player.ship.position.y * 10) / 10,
           }
         : null,
+      outboundQueueDepth: player.outboundFrames.length,
+      lastQueuedTick: player.lastQueuedTick,
+      lastDeliveredTick: player.lastDeliveredTick,
     }));
   }
 
@@ -213,7 +229,6 @@ export class ServerNetwork {
     name: string,
     currentPlayerId?: string
   ): { valid: boolean; reason?: string } {
-    // Trim and check length
     const trimmedName = name.trim();
     if (trimmedName.length === 0) {
       return { valid: false, reason: "Name cannot be empty" };
@@ -225,7 +240,6 @@ export class ServerNetwork {
       return { valid: false, reason: "Name too short (min 2 characters)" };
     }
 
-    // Check for forbidden phrases (case insensitive)
     const forbiddenPhrases = ["admin", "moderator", "server", "system", "bot"];
     const lowerName = trimmedName.toLowerCase();
     for (const phrase of forbiddenPhrases) {
@@ -234,7 +248,6 @@ export class ServerNetwork {
       }
     }
 
-    // Check if name is already taken by another player
     for (const player of this.#players.values()) {
       if (
         player.id !== currentPlayerId &&
@@ -250,7 +263,6 @@ export class ServerNetwork {
   handleEntityDestroyed(world: World, entity: BaseEntity, source?: BaseEntity) {
     let killerPlayerId: string | undefined;
 
-    // Determine the killer player
     if (source instanceof Bullet && source.owner) {
       const ownerPlayer = this.#playerByShipId.get(source.owner.id);
       if (ownerPlayer) {
@@ -263,7 +275,6 @@ export class ServerNetwork {
       }
     }
 
-    // If victim is a ship but no killer, still reset their score
     if (entity instanceof Ship) {
       const victim = this.#playerByShipId.get(entity.id);
       if (victim) victim.resetScore();
@@ -347,7 +358,6 @@ export class ServerNetwork {
       case "player:respawn":
         if (player.ship && !player.ship.removed) break;
 
-        // Validate player name
         const validation = this.validatePlayerName(message.name, player.id);
         if (!validation.valid) {
           ws.send(
@@ -359,15 +369,12 @@ export class ServerNetwork {
           break;
         }
 
-        // Set player name and reset score
         player.name = message.name.trim();
         player.resetScore();
         player.pendingInputs.length = 0;
-
-        // Reset visibility tracking on respawn
         player.lastSeenEntityIds.clear();
+        this.#resetPlayerReplicationState(player, this.#lastCommittedTick);
 
-        // Create new ship with player's name
         const newShip = new Ship({ id: player.id, name: player.name });
         newShip.position = new Vector2(
           Math.random() * this.engine.world.borderRadius * 2 -
@@ -387,7 +394,6 @@ export class ServerNetwork {
 
   initialize(bunServer: Bun.Server<undefined>) {
     this.#bunServer = bunServer;
-    this.#startScheduler();
   }
 
   beginSimulationTick(_simTick: number) {
@@ -420,22 +426,97 @@ export class ServerNetwork {
     this.#lastCommittedTick = simTick;
     this.#lastCommittedServerTimeMs = this.engine.serverTime;
 
+    const playersData = this.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      score: player.score,
+      alive: player.isAlive,
+    }));
+
+    let radarData: Map<string, RadarData[]> | undefined;
+
     for (const player of this.#players.values()) {
       if (player.ship?.wasWarped) {
         player.needFullState = true;
       }
+
+      this.#engine.measurePerformance("networkBuildPerPlayerMs", () => {
+        const stream = this.#getStreamMetadata(player);
+        const includeRadar = this.#shouldIncludeRadar(player, stream);
+        if (includeRadar && !radarData) {
+          radarData = this.#getRadarData();
+        }
+
+        const needFullState = this.#needFullState(player, stream);
+
+        let state: FullServerState | PartialServerState;
+        if (needFullState) {
+          state = this.#engine.measurePerformance(
+            "networkBuildFullStateMs",
+            () => this.#getFullState(player)
+          );
+          player.lastSeenEntityIds = new Set(
+            state.entities.map((entity) => entity.id)
+          );
+        } else {
+          state = this.#engine.measurePerformance(
+            "networkBuildPartialStateMs",
+            () => this.#getPartialState(player)
+          );
+          player.lastSeenEntityIds = this.#engine.measurePerformance(
+            "networkVisibleIdsMs",
+            () => this.#getVisibleEntityIds(player)
+          );
+        }
+
+        const replicatedEvents = this.#engine.measurePerformance(
+          "networkBuildEventsMs",
+          () => this.#getReplicatedEvents(player, simTick)
+        );
+
+        const payload = event({
+          type: "server:state",
+          serverTime: this.#lastCommittedServerTimeMs,
+          simTick,
+          tickDuration: this.engine.lastTickDuration,
+          stream,
+          state,
+          events: replicatedEvents,
+          radar: includeRadar ? radarData?.get(player.id) : undefined,
+          players: playersData,
+        });
+        const serialized = this.#engine.measurePerformance(
+          "networkSerializeMs",
+          () =>
+            payload.serialize({
+              compress: !this.#engine.debug.disableCompression,
+            })
+        );
+
+        player.outboundFrames.push({
+          simTick,
+          serialized,
+        });
+        player.lastQueuedTick = simTick;
+        player.networkFrameIndex++;
+        this.#schedulerStats.maxObservedQueueDepth = Math.max(
+          this.#schedulerStats.maxObservedQueueDepth,
+          player.outboundFrames.length
+        );
+      });
     }
+
+    this.#flushOutboundFrames();
   }
 
   resetReplicationState() {
     this.#lastCommittedTick = 0;
+    this.#lastCommittedServerTimeMs = 0;
     this.#schedulerStats.lastSentCommittedTick = 0;
+    this.#schedulerStats.maxObservedQueueDepth = 0;
 
     for (const player of this.#players.values()) {
-      player.lastSentTick = 0;
-      player.networkFrameIndex = 0;
-      player.needFullState = true;
-      player.lastSeenEntityIds.clear();
+      this.#resetPlayerReplicationState(player, 0);
       player.pendingInputs.length = 0;
     }
 
@@ -443,25 +524,20 @@ export class ServerNetwork {
   }
 
   getSchedulerStats() {
+    const queueDepths = this.players.map((player) => player.outboundFrames.length);
+    const pendingQueueDepth =
+      queueDepths.length > 0 ? Math.max(...queueDepths) : 0;
+
     return {
       ...this.#schedulerStats,
       lastCommittedTick: this.#lastCommittedTick,
       lastCommittedServerTimeMs:
         Math.round(this.#lastCommittedServerTimeMs * 100) / 100,
+      pendingQueueDepth,
     };
   }
 
-  #startScheduler() {
-    if (this.#schedulerTimer) {
-      return;
-    }
-
-    this.#schedulerTimer = setInterval(() => {
-      this.#runSchedulerTick();
-    }, this.#schedulerIntervalMs);
-  }
-
-  #runSchedulerTick() {
+  #flushOutboundFrames() {
     this.#engine.measurePerformance("networkSchedulerTickMs", () => {
       if (!this.#bunServer) {
         throw new Error("Bun server not set");
@@ -475,122 +551,79 @@ export class ServerNetwork {
         return;
       }
 
-      const committedTick = this.#lastCommittedTick;
-      if (committedTick <= 0) {
-        this.#schedulerStats.skippedSlots++;
-        return;
-      }
-
-      const playersData = this.players.map((p) => ({
-        id: p.id,
-        name: p.name,
-        score: p.score,
-        alive: p.isAlive,
-      }));
-
-      let radarData: Map<string, RadarData[]> | undefined;
-      let sentAnyFrame = false;
+      let sentFramesThisTick = 0;
+      let lastSentCommittedTick = this.#schedulerStats.lastSentCommittedTick;
 
       for (const player of this.#players.values()) {
-        if (committedTick <= player.lastSentTick) {
-          continue;
-        }
+        let catchUpFrames = 0;
 
-        const includeRadar =
-          player.networkFrameIndex % this.#radarStatesRate === 0;
-        if (includeRadar && !radarData) {
-          radarData = this.#getRadarData();
-        }
-
-        this.#engine.measurePerformance("networkBuildPerPlayerMs", () => {
-          const needFullState = this.#needFullState(player);
-
-          let state: FullServerState | PartialServerState;
-          if (needFullState) {
-            state = this.#engine.measurePerformance(
-              "networkBuildFullStateMs",
-              () => this.#getFullState(player)
-            );
-            player.lastSeenEntityIds = new Set(
-              state.entities.map((entity) => entity.id)
-            );
-          } else {
-            state = this.#engine.measurePerformance(
-              "networkBuildPartialStateMs",
-              () => this.#getPartialState(player)
-            );
-            const visibleIds = this.#engine.measurePerformance(
-              "networkVisibleIdsMs",
-              () => this.#getVisibleEntityIds(player)
-            );
-            player.lastSeenEntityIds = visibleIds;
+        while (
+          player.outboundFrames.length > 0 &&
+          catchUpFrames < MAX_CATCH_UP_FRAMES_PER_SCHEDULER_TICK
+        ) {
+          const frame = player.outboundFrames.shift();
+          if (!frame) {
+            break;
           }
 
-          const replicatedEvents = this.#engine.measurePerformance(
-            "networkBuildEventsMs",
-            () => this.#getReplicatedEvents(player, committedTick)
-          );
-
-          const payload = event({
-            type: "server:state",
-            serverTime: this.#lastCommittedServerTimeMs,
-            simTick: committedTick,
-            tickDuration: this.engine.lastTickDuration,
-            state,
-            events: replicatedEvents,
-            radar: includeRadar ? radarData?.get(player.id) : undefined,
-            players: playersData,
-          });
-          const serialized = this.#engine.measurePerformance(
-            "networkSerializeMs",
-            () =>
-              payload.serialize({
-                compress: !this.#engine.debug.disableCompression,
-              })
-          );
-
           this.#engine.measurePerformance("wsSendMs", () => {
-            player.ws.send(serialized);
+            player.ws.send(frame.serialized);
           });
 
-          player.lastSentTick = committedTick;
-          player.networkFrameIndex++;
-          sentAnyFrame = true;
-        });
+          player.lastDeliveredTick = frame.simTick;
+          catchUpFrames++;
+          sentFramesThisTick++;
+          lastSentCommittedTick = Math.max(lastSentCommittedTick, frame.simTick);
+        }
       }
 
-      if (!sentAnyFrame) {
+      if (sentFramesThisTick === 0) {
         this.#schedulerStats.skippedSlots++;
         return;
       }
 
-      this.#schedulerStats.sentFrames++;
-      this.#schedulerStats.lastSentCommittedTick = committedTick;
+      this.#schedulerStats.sentFrames += sentFramesThisTick;
+      this.#schedulerStats.lastSentCommittedTick = lastSentCommittedTick;
 
-      const slowestPlayerTick = this.#getSlowestPlayerLastSentTick();
-      if (slowestPlayerTick !== null) {
-        this.engine.world.pruneReplicatedEventsThrough(slowestPlayerTick);
+      const slowestDeliveredTick = this.#getSlowestPlayerLastDeliveredTick();
+      if (slowestDeliveredTick !== null) {
+        this.engine.world.pruneReplicatedEventsThrough(slowestDeliveredTick);
       }
     });
   }
 
-  #needFullState(player: ServerPlayer) {
+  #resetPlayerReplicationState(player: ServerPlayer, baseTick: number) {
+    player.lastQueuedTick = baseTick;
+    player.lastDeliveredTick = baseTick;
+    player.networkFrameIndex = 0;
+    player.needFullState = true;
+    player.lastSeenEntityIds.clear();
+    player.outboundFrames.length = 0;
+  }
+
+  #needFullState(
+    player: ServerPlayer,
+    stream: SnapshotStreamMetadata
+  ): boolean {
     const fullStateRequested = player.needFullState;
     player.needFullState = false;
 
-    return (
-      this.#engine.debug.disablePartialStateUpdates ||
-      fullStateRequested ||
-      player.networkFrameIndex % this.#keyframesRate === 0
-    );
+    if (this.#engine.debug.disablePartialStateUpdates) {
+      return true;
+    }
+
+    if (fullStateRequested) {
+      return true;
+    }
+
+    const keyframeRate = this.#getKeyframeRate(stream);
+    return player.networkFrameIndex % keyframeRate === 0;
   }
 
   #getFullState(player: ServerPlayer): FullServerState {
     const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
 
-    const visibleEntities = this.engine.world
-      .query(queryPos, queryRadius)
-      .array();
+    const visibleEntities = this.engine.world.query(queryPos, queryRadius).array();
 
     if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
       const playerShip = this.#engine.world.find(player.ship.id);
@@ -612,12 +645,10 @@ export class ServerNetwork {
   #getPartialState(player: ServerPlayer): PartialServerState {
     const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
 
-    // Get ALL entities in view (including removed ones)
     const allEntities = this.engine.world
       .query(queryPos, queryRadius, true)
       .array();
 
-    // Build set of currently visible entity IDs (non-removed entities)
     const currentVisibleIds = new Set<string>();
     for (const entity of allEntities) {
       if (!entity.removed) {
@@ -625,59 +656,48 @@ export class ServerNetwork {
       }
     }
 
-    // Handle player's own ship if it's not in view
     if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
       const playerShip = this.#engine.world.find(player.ship.id);
-      if (playerShip) {
-        if (!playerShip.removed) {
-          currentVisibleIds.add(playerShip.id);
-        }
+      if (playerShip && !playerShip.removed) {
+        currentVisibleIds.add(playerShip.id);
       }
     }
 
     const updated: GenericNetEntityState[] = [];
     const removedSet = new Set<string>();
 
-    // Find entities that disappeared from view (were seen before but not now)
     for (const entityId of player.lastSeenEntityIds) {
       if (!currentVisibleIds.has(entityId)) {
-        // Entity is no longer visible, add to removed
         removedSet.add(entityId);
       }
     }
 
-    // Process all entities in view
     for (const entity of allEntities) {
       if (entity.removed) {
-        // Entity was removed and was previously visible
         if (player.lastSeenEntityIds.has(entity.id)) {
           removedSet.add(entity.id);
         }
       } else {
-        // Entity is still alive
         const wasPreviouslyVisible = player.lastSeenEntityIds.has(entity.id);
         const isNewlyVisible = !wasPreviouslyVisible;
-        const hasChanged = entity.lastChangedTick > player.lastSentTick;
+        const hasChanged = entity.lastChangedTick > player.lastQueuedTick;
 
         if (isNewlyVisible || hasChanged) {
-          // Newly appeared entity or entity that changed, add to updated
           updated.push(entity.toJSON());
         }
       }
     }
 
-    // Handle player's own ship if it's not in view
     if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
       const playerShip = this.#engine.world.find(player.ship.id);
       if (playerShip) {
         if (playerShip.removed) {
           removedSet.add(playerShip.id);
         } else {
-          // Always include player ship updates if not in view
           const wasPreviouslyVisible = player.lastSeenEntityIds.has(
             playerShip.id
           );
-          const hasChanged = playerShip.lastChangedTick > player.lastSentTick;
+          const hasChanged = playerShip.lastChangedTick > player.lastQueuedTick;
           if (!wasPreviouslyVisible || hasChanged) {
             updated.push(playerShip.toJSON());
           }
@@ -700,16 +720,13 @@ export class ServerNetwork {
   #getVisibleEntityIds(player: ServerPlayer): Set<string> {
     const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
 
-    const visibleEntities = this.engine.world
-      .query(queryPos, queryRadius)
-      .array();
+    const visibleEntities = this.engine.world.query(queryPos, queryRadius).array();
 
     const visibleIds = new Set<string>();
     for (const entity of visibleEntities) {
       visibleIds.add(entity.id);
     }
 
-    // Always include player's own ship if it exists
     if (player.ship) {
       const playerShip = this.#engine.world.find(player.ship.id);
       if (playerShip && !playerShip.removed) {
@@ -725,7 +742,7 @@ export class ServerNetwork {
     committedTick: number
   ): ReplicatedWorldEvent[] {
     const tickEvents = this.engine.world.getReplicatedEventsInRange(
-      player.lastSentTick,
+      player.lastQueuedTick,
       committedTick
     );
 
@@ -782,17 +799,64 @@ export class ServerNetwork {
     return dx * dx + dy * dy <= queryRadius * queryRadius;
   }
 
-  #getSlowestPlayerLastSentTick() {
+  #getSlowestPlayerLastDeliveredTick() {
     let slowestTick: number | null = null;
 
     for (const player of this.#players.values()) {
       slowestTick =
         slowestTick === null
-          ? player.lastSentTick
-          : Math.min(slowestTick, player.lastSentTick);
+          ? player.lastDeliveredTick
+          : Math.min(slowestTick, player.lastDeliveredTick);
     }
 
     return slowestTick;
+  }
+
+  #getStreamMetadata(player: ServerPlayer): SnapshotStreamMetadata {
+    const queueDepth = player.outboundFrames.length;
+    let health: SnapshotStreamHealth = "normal";
+
+    if (queueDepth >= DEGRADED_QUEUE_DEPTH) {
+      health = "degraded";
+    } else if (queueDepth >= STRESSED_QUEUE_DEPTH) {
+      health = "stressed";
+    }
+
+    const degradedFeatures: SnapshotStreamMetadata["degradedFeatures"] = {};
+    if (health !== "normal") {
+      degradedFeatures.radarReduced = true;
+    }
+    if (health === "degraded") {
+      degradedFeatures.keyframesRelaxed = true;
+    }
+
+    return {
+      health,
+      degradedFeatures:
+        Object.keys(degradedFeatures).length > 0 ? degradedFeatures : undefined,
+    };
+  }
+
+  #getKeyframeRate(stream: SnapshotStreamMetadata) {
+    const relaxedMultiplier =
+      stream.degradedFeatures?.keyframesRelaxed === true
+        ? MAX_KEYFRAME_RATE_MULTIPLIER
+        : 1;
+    return Math.max(1, this.#keyframesRate * relaxedMultiplier);
+  }
+
+  #shouldIncludeRadar(
+    player: ServerPlayer,
+    stream: SnapshotStreamMetadata
+  ): boolean {
+    const radarMultiplier =
+      stream.health === "degraded"
+        ? MAX_RADAR_RATE_MULTIPLIER
+        : stream.health === "stressed"
+          ? 2
+          : 1;
+    const radarRate = Math.max(1, this.#radarStatesRate * radarMultiplier);
+    return player.networkFrameIndex % radarRate === 0;
   }
 
   #getRadarData() {
@@ -820,10 +884,8 @@ export class ServerNetwork {
       }
     }
 
-    // Get all alive players
     const alivePlayers = this.players.filter((p) => p.isAlive);
 
-    // Send radar data to each alive player
     for (const player of alivePlayers) {
       const playerRadarData: RadarData[] = [];
 

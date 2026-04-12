@@ -1,5 +1,17 @@
 import type { GenericNetEntityState } from "../game/entities/base";
 
+export type SnapshotStreamHealth = "normal" | "stressed" | "degraded";
+
+export interface SnapshotDegradedFeatures {
+  radarReduced?: boolean;
+  keyframesRelaxed?: boolean;
+}
+
+export interface SnapshotStreamMetadata {
+  health: SnapshotStreamHealth;
+  degradedFeatures?: SnapshotDegradedFeatures;
+}
+
 export interface ReplicatedWorldEventBase {
   simTick: number;
   tickEventIndex: number;
@@ -93,6 +105,7 @@ export interface ServerStateEvent {
   serverTime: number;
   simTick: number;
   tickDuration: number;
+  stream?: SnapshotStreamMetadata;
   state: FullServerState | PartialServerState;
   events: ReplicatedWorldEvent[];
   players: {

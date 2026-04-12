@@ -49,6 +49,13 @@ export interface NetworkStateComponent<TState = BaseEntityState> {
   state?: TState;
 }
 
+export interface PresentationStateComponent {
+  wasUsingTail: boolean;
+  visualOffsetX: number;
+  visualOffsetY: number;
+  visualOffsetAngle: number;
+}
+
 export interface BulletSpawnComponent {
   pending: BulletSpawnState[];
 }

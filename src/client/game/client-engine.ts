@@ -16,6 +16,7 @@ import {
 } from "@/shared/ecs";
 import type {
   NetworkStateComponent,
+  PresentationStateComponent,
   RenderableComponent,
   ShipControlComponent,
   ShipInputCommand,
@@ -58,6 +59,7 @@ import { isDevelopmentClient } from "../dev-mode";
 import { InputBuffer } from "./network/input-buffer";
 import { NetworkDecoder } from "./network/network-decoder";
 import { EventBuffer } from "./network/event-buffer";
+import { PresentationTimingController } from "./network/presentation-timing-controller";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { EdgeOfWorldFilter } from "./shaders/edge-of-world-filter";
 import { CameraShake } from "./systems/camera-shake";
@@ -79,7 +81,6 @@ import type {
   ExplosionRequest,
 } from "./types";
 
-const RENDER_DELAY_MS = 100;
 const SNAPSHOT_TIMING_SAMPLE_SIZE = 30;
 const SNAPSHOT_TIMING_MIN_SAMPLES = 5;
 const SNAPSHOT_TIMING_WARN_FACTOR = 1.5;
@@ -95,6 +96,7 @@ export class ClientEngine {
   #renderSprite: Sprite | null = null;
   #edgeOfWorldFilter: EdgeOfWorldFilter | null = null;
   #renderScale = 0.7;
+  #useRetroRendering = true;
   #lastScreenWidth = 0;
   #lastScreenHeight = 0;
   #audioEngine: AudioEngine | null = null;
@@ -113,6 +115,9 @@ export class ClientEngine {
   #networkStateStore = new ComponentStore<
     NetworkStateComponent<BaseEntityState>
   >(this.#entityManager);
+  #presentationStateStore = new ComponentStore<PresentationStateComponent>(
+    this.#entityManager
+  );
 
   #snapshotBuffer = new SnapshotBuffer();
   #eventBuffer = new EventBuffer();
@@ -186,6 +191,7 @@ export class ClientEngine {
   #pingSequence = 0;
   #pingTicker = new Ticker();
   #networkStatsTicker = new Ticker();
+  #frameTicker = new Ticker();
   #inboundBytes = 0;
   #outboundBytes = 0;
   #simulatedLatencyMs = 0;
@@ -205,6 +211,7 @@ export class ClientEngine {
   #appInitialized = false;
   #servicesReady = false;
   #pipelineReady = false;
+  #presentationTiming = new PresentationTimingController();
 
   #networkDecoder: NetworkDecoder;
 
@@ -228,6 +235,10 @@ export class ClientEngine {
     this.#disableReconciliation = this.#resolveDisableReconciliationFromURL();
     this.#snapshotTimingDebugEnabled =
       this.#resolveSnapshotTimingDebugFromURL();
+    this.#useRetroRendering = !this.#resolveRenderedProbeModeFromURL();
+    if (!this.#useRetroRendering) {
+      this.#renderScale = 1;
+    }
 
     this.#networkDecoder = new NetworkDecoder(this);
   }
@@ -462,6 +473,16 @@ export class ClientEngine {
         servicesReady: this.#servicesReady,
         pipelineReady: this.#pipelineReady,
       },
+      network: {
+        streamHealth: this.#presentationTiming.effectiveHealth,
+        renderDelayMs: Math.round(this.#presentationTiming.renderDelayMs * 100) / 100,
+        starvationDurationMs:
+          Math.round(this.#presentationTiming.starvationDurationMs * 100) / 100,
+        latestSnapshotAgeMs:
+          this.#presentationTiming.latestSnapshotAgeMs !== null
+            ? Math.round(this.#presentationTiming.latestSnapshotAgeMs * 100) / 100
+            : null,
+      },
       debug: {
         drawGrid: this.#drawGrid,
         drawWorldBorder: this.#drawWorldBorder,
@@ -513,7 +534,8 @@ export class ClientEngine {
   getDebugNetworkSnapshot() {
     const services = this.#services;
     const predictedServerTime = this.#predictedServerTime();
-    const renderTargetTime = predictedServerTime - RENDER_DELAY_MS;
+    const renderDelayMs = this.#presentationTiming.renderDelayMs;
+    const renderTargetTime = predictedServerTime - renderDelayMs;
     const latestSnapshot = this.#snapshotBuffer.getLatest();
     const { previous, next } = this.#snapshotBuffer.getWindow(renderTargetTime);
     const latestSnapshotAgeMs =
@@ -563,8 +585,9 @@ export class ClientEngine {
 
     return {
       predictedServerTime: round(predictedServerTime),
-      renderDelayMs: RENDER_DELAY_MS,
+      renderDelayMs: round(renderDelayMs),
       renderTargetTime: round(renderTargetTime),
+      streamHealth: this.#presentationTiming.effectiveHealth,
       starvation: {
         hasPreviousSnapshot: previous !== null,
         hasNextSnapshot: next !== null,
@@ -572,6 +595,7 @@ export class ClientEngine {
         interpolationBufferLeadMs: round(interpolationBufferLeadMs),
         interpolationStarved:
           latestSnapshot !== null && latestSnapshot.serverTime < renderTargetTime,
+        starvationDurationMs: round(this.#presentationTiming.starvationDurationMs),
       },
       world: {
         renderedSimTick: services?.world.renderedSimTick ?? 0,
@@ -695,17 +719,30 @@ export class ClientEngine {
       e.preventDefault();
     });
 
-    // Set up retro rendering: render game at 0.75x resolution
-    this.#setupRetroRendering();
+    if (this.#useRetroRendering) {
+      // Set up retro rendering for the normal game client.
+      this.#setupRetroRendering();
+    } else {
+      // Rendered probe mode uses a direct stage pipeline so Playwright can boot
+      // a real graphics client without relying on render-to-texture effects.
+      this.#setupRenderedProbeRendering();
+    }
 
     this.#app.stage.eventMode = "static";
     this.#app.stage.hitArea = this.#app.screen;
 
     // Ensure render texture is updated after initialization
     // Use requestAnimationFrame to ensure screen dimensions are set
-    requestAnimationFrame(() => {
-      this.#checkAndUpdateRenderTexture();
-    });
+    if (this.#useRetroRendering) {
+      requestAnimationFrame(() => {
+        this.#checkAndUpdateRenderTexture();
+      });
+    } else {
+      this.#controls.cursorScreen = {
+        x: this.#app.screen.width / 2,
+        y: this.#app.screen.height / 2,
+      };
+    }
 
     await this.#loadTextures();
     this.#audioEngine = new AudioEngine();
@@ -714,6 +751,7 @@ export class ClientEngine {
     this.#setupPipeline();
     this.#setupInputListeners();
     this.#setupTickers();
+    this.#frameTicker.start();
     this.#connect();
   }
 
@@ -824,7 +862,7 @@ export class ClientEngine {
     this.#app.renderer.on("resize", handleResize);
 
     // Render game container to texture each frame and check for size changes
-    this.#app.ticker.add(() => {
+    this.#frameTicker.add(() => {
       // Check if screen dimensions changed and update if needed
       this.#checkAndUpdateRenderTexture();
 
@@ -834,6 +872,22 @@ export class ClientEngine {
         });
       }
     });
+  }
+
+  #setupRenderedProbeRendering() {
+    this.#app.stage.addChild(this.#starfield.getContainer());
+    this.#app.stage.addChild(this.#camera);
+
+    const handleResize = () => {
+      this.#controls.cursorScreen = {
+        x: this.#app.screen.width / 2,
+        y: this.#app.screen.height / 2,
+      };
+    };
+
+    window.addEventListener("resize", handleResize);
+    this.#app.renderer.on("resize", handleResize);
+    handleResize();
   }
 
   #checkAndUpdateRenderTexture() {
@@ -923,6 +977,7 @@ export class ClientEngine {
         renderable: this.#renderableStore,
         shipControl: this.#shipControlStore,
         networkState: this.#networkStateStore,
+        presentationState: this.#presentationStateStore,
       },
       pixi: {
         app: this.#app,
@@ -958,15 +1013,28 @@ export class ClientEngine {
         id: null,
         entityId: null,
       },
-        network: {
-          sendInput: (input, options) => this.#sendInput(input, options),
-          sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
-          predictedServerTime: () => this.#predictedServerTime(),
-          renderDelayMs: RENDER_DELAY_MS,
-          get simulationTickMs() {
-            return 1000 / self.#serverTps;
-          },
+      network: {
+        sendInput: (input, options) => this.#sendInput(input, options),
+        sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
+        predictedServerTime: () => this.#predictedServerTime(),
+        updatePresentationWindow: (observation) =>
+          self.#presentationTiming.updateWindow(observation),
+        get renderDelayMs() {
+          return self.#presentationTiming.renderDelayMs;
         },
+        get simulationTickMs() {
+          return 1000 / self.#serverTps;
+        },
+        get streamHealth() {
+          return self.#presentationTiming.effectiveHealth;
+        },
+        get starvationDurationMs() {
+          return self.#presentationTiming.starvationDurationMs;
+        },
+        get latestSnapshotAgeMs() {
+          return self.#presentationTiming.latestSnapshotAgeMs;
+        },
+      },
       debug: {
         get drawGrid() {
           return self.#drawGrid;
@@ -1042,7 +1110,7 @@ export class ClientEngine {
     this.#pipelineReady = true;
     this.#fpsLastSampleTime = now;
 
-    this.#app.ticker.add((time) => {
+    this.#frameTicker.add((time) => {
       const dtSeconds = time.deltaMS / 1000;
       const nowTick = performance.now();
 
@@ -1478,6 +1546,7 @@ export class ClientEngine {
         this.#statsGetter().setWorldRadius(message.worldRadius);
         break;
       case "server:state":
+        this.#presentationTiming.observeSnapshot(message, performance.now());
         this.#trackSnapshotArrivalTiming(message);
         this.#snapshotBuffer.add(message);
         this.#eventBuffer.add(message.events);
@@ -1601,6 +1670,7 @@ export class ClientEngine {
     this.#snapshotBuffer.clear();
     this.#eventBuffer.clear();
     this.#inputBuffer.reset();
+    this.#presentationTiming.reset();
     this.#entityIndex.clear();
     this.#entityManager.clear();
     const statsStore = this.#statsGetter();
@@ -1638,6 +1708,7 @@ export class ClientEngine {
       this.#services.stores.renderable.clear();
       this.#services.stores.shipControl.clear();
       this.#services.stores.networkState.clear();
+      this.#services.stores.presentationState.clear();
     }
     this.#camera.removeChildren();
 

@@ -14,6 +14,7 @@ import {
   normalizeAngle,
   type GenericNetEntityState,
 } from "@/shared/game/entities/base";
+import type { SnapshotStreamHealth } from "@/shared/network/events";
 import { lerp } from "@/shared/math/utils";
 
 import type { WorldState } from "../network/snapshot-buffer";
@@ -21,6 +22,8 @@ import type { ClientServices } from "../types";
 import { addShadowToContainer } from "../utils/shadow-utils";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
 
 interface TimedEntity {
   state: GenericNetEntityState;
@@ -235,6 +238,13 @@ const ensureEntity = (
     snapshots: [],
     lastAcknowledgedInput: snapshot.lastInputSequence ?? -1,
   }));
+
+  stores.presentationState.ensure(entityId, () => ({
+    wasUsingTail: false,
+    visualOffsetX: 0,
+    visualOffsetY: 0,
+    visualOffsetAngle: 0,
+  }));
 };
 
 const removeMissingEntities = (
@@ -267,6 +277,7 @@ const removeMissingEntities = (
     services.stores.velocity.delete(entityId);
     services.stores.shipControl.delete(entityId);
     services.stores.networkState.delete(entityId);
+    services.stores.presentationState.delete(entityId);
     entities.destroy(entityId);
   }
 };
@@ -276,6 +287,69 @@ const angleLerp = (start: number, end: number, alpha: number) => {
   return normalizeAngle(start + delta * alpha);
 };
 
+const getTailDurationMs = (
+  entity: GenericNetEntityState,
+  health: SnapshotStreamHealth,
+  isPlayer: boolean
+) => {
+  if (isPlayer) {
+    return 0;
+  }
+
+  switch (entity.type) {
+    case "ship":
+      return health === "degraded" ? 40 : health === "stressed" ? 60 : 90;
+    case "asteroid":
+      return health === "degraded" ? 60 : health === "stressed" ? 90 : 130;
+    case "bullet":
+      return health === "normal" ? 16 : 0;
+    case "exp":
+      return health === "normal" ? 12 : 0;
+    default:
+      return 0;
+  }
+};
+
+const getCorrectionDurationMs = (
+  entity: GenericNetEntityState,
+  health: SnapshotStreamHealth
+) => {
+  switch (entity.type) {
+    case "asteroid":
+      return health === "degraded" ? 70 : health === "stressed" ? 90 : 120;
+    case "ship":
+      return health === "degraded" ? 60 : health === "stressed" ? 80 : 110;
+    case "bullet":
+    case "exp":
+      return 55;
+    default:
+      return 80;
+  }
+};
+
+const shouldSnapCorrection = (
+  entity: GenericNetEntityState,
+  distance: number,
+  worldRadius: number
+) => {
+  if (distance > worldRadius) {
+    return true;
+  }
+
+  switch (entity.type) {
+    case "bullet":
+      return distance > 25;
+    case "exp":
+      return distance > 18;
+    case "ship":
+      return distance > 150;
+    case "asteroid":
+      return distance > 180;
+    default:
+      return distance > 120;
+  }
+};
+
 /**
  * Buffers server snapshots, keeps the ECS in sync with streamed entities,
  * and interpolates transforms at predicted server time minus the render delay.
@@ -283,15 +357,23 @@ const angleLerp = (start: number, end: number, alpha: number) => {
 export const InterpolationSystem: System<ClientServices> = {
   id: "interpolation-system",
   stage: "prediction",
-  tick({ services, entities }) {
+  tick({ services, entities, dt }) {
     const disableInterpolation = services.debug.disableInterpolation;
     const latestSnapshot = services.snapshotBuffer.getLatest();
+    const predictedServerTime = services.network.predictedServerTime();
     const targetTime = disableInterpolation
       ? latestSnapshot?.serverTime ?? 0
-      : services.network.predictedServerTime() - services.network.renderDelayMs;
+      : predictedServerTime - services.network.renderDelayMs;
     const { previous, next } = disableInterpolation
       ? { previous: latestSnapshot, next: latestSnapshot }
       : services.snapshotBuffer.getWindow(targetTime);
+
+    services.network.updatePresentationWindow({
+      predictedServerTime,
+      latestSnapshotServerTime: latestSnapshot?.serverTime ?? null,
+      hasNextSnapshot: next !== null,
+      dtMs: dt * 1000,
+    });
 
     if (!previous && !next) return;
 
@@ -321,6 +403,11 @@ export const InterpolationSystem: System<ClientServices> = {
       const target = pair.to ?? pair.from!;
       let lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
       const isPlayer = serverId === services.player.id;
+      const usingTail =
+        !disableInterpolation &&
+        pair.from !== undefined &&
+        pair.to === undefined &&
+        targetTime > source.serverTime;
 
       const entityId = services.entityIndex.get(serverId) ?? entities.create();
       services.entityIndex.set(serverId, entityId);
@@ -332,7 +419,11 @@ export const InterpolationSystem: System<ClientServices> = {
       ensureRenderable(services, entityId, target.state);
 
       const transform = services.stores.transform.get(entityId);
+      const presentationState = services.stores.presentationState.get(entityId);
       if (transform) {
+        const previousX = transform.x;
+        const previousY = transform.y;
+        const previousAngle = transform.angle;
         const dx = target.state.x - source.state.x;
         const dy = target.state.y - source.state.y;
         const distance = Math.hypot(dx, dy);
@@ -341,13 +432,101 @@ export const InterpolationSystem: System<ClientServices> = {
           lerpAlpha = 1;
         }
 
-        transform.x = lerp(source.state.x, target.state.x, lerpAlpha);
-        transform.y = lerp(source.state.y, target.state.y, lerpAlpha);
-        transform.angle = angleLerp(
+        let authoritativeX = lerp(source.state.x, target.state.x, lerpAlpha);
+        let authoritativeY = lerp(source.state.y, target.state.y, lerpAlpha);
+        let authoritativeAngle = angleLerp(
           source.state.angle,
           target.state.angle,
           lerpAlpha
         );
+
+        const tailDurationMs = getTailDurationMs(
+          target.state,
+          services.network.streamHealth,
+          isPlayer
+        );
+
+        if (
+          presentationState &&
+          usingTail &&
+          !teleported &&
+          tailDurationMs > 0
+        ) {
+          const extrapolationMs = clamp(
+            targetTime - source.serverTime,
+            0,
+            tailDurationMs
+          );
+          const extrapolationSeconds = extrapolationMs / 1000;
+          authoritativeX =
+            source.state.x + (source.state.vx ?? 0) * extrapolationSeconds;
+          authoritativeY =
+            source.state.y + (source.state.vy ?? 0) * extrapolationSeconds;
+          authoritativeAngle = normalizeAngle(
+            source.state.angle + (source.state.va ?? 0) * extrapolationSeconds
+          );
+          presentationState.wasUsingTail = true;
+          presentationState.visualOffsetX = 0;
+          presentationState.visualOffsetY = 0;
+          presentationState.visualOffsetAngle = 0;
+        } else if (presentationState) {
+          if (presentationState.wasUsingTail) {
+            const correctionDistance = Math.hypot(
+              previousX - authoritativeX,
+              previousY - authoritativeY
+            );
+            if (
+              shouldSnapCorrection(
+                target.state,
+                correctionDistance,
+                services.world.radius
+              )
+            ) {
+              presentationState.visualOffsetX = 0;
+              presentationState.visualOffsetY = 0;
+              presentationState.visualOffsetAngle = 0;
+            } else {
+              presentationState.visualOffsetX = previousX - authoritativeX;
+              presentationState.visualOffsetY = previousY - authoritativeY;
+              presentationState.visualOffsetAngle = normalizeAngle(
+                previousAngle - authoritativeAngle
+              );
+            }
+          }
+
+          presentationState.wasUsingTail = false;
+
+          const correctionDurationMs = getCorrectionDurationMs(
+            target.state,
+            services.network.streamHealth
+          );
+          const correctionAlpha = clamp01((dt * 1000) / correctionDurationMs);
+          presentationState.visualOffsetX = lerp(
+            presentationState.visualOffsetX,
+            0,
+            correctionAlpha
+          );
+          presentationState.visualOffsetY = lerp(
+            presentationState.visualOffsetY,
+            0,
+            correctionAlpha
+          );
+          presentationState.visualOffsetAngle = angleLerp(
+            presentationState.visualOffsetAngle,
+            0,
+            correctionAlpha
+          );
+
+          authoritativeX += presentationState.visualOffsetX;
+          authoritativeY += presentationState.visualOffsetY;
+          authoritativeAngle = normalizeAngle(
+            authoritativeAngle + presentationState.visualOffsetAngle
+          );
+        }
+
+        transform.x = authoritativeX;
+        transform.y = authoritativeY;
+        transform.angle = authoritativeAngle;
       }
 
       const velocity = services.stores.velocity.get(entityId);
@@ -365,8 +544,7 @@ export const InterpolationSystem: System<ClientServices> = {
       if (networkState) {
         networkState.lastServerTime = target.serverTime;
         networkState.lastSimTick = toSnapshot.simTick;
-        networkState.predictedServerTime =
-          services.network.predictedServerTime();
+        networkState.predictedServerTime = predictedServerTime;
         networkState.renderDelay = services.network.renderDelayMs;
         networkState.lastAcknowledgedInput =
           target.state.lastInputSequence ?? networkState.lastAcknowledgedInput;

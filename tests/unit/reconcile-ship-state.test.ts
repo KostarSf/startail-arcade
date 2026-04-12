@@ -62,6 +62,7 @@ describe("reconcileShipState", () => {
       snapshotServerTime: 1_100,
       predictedServerTime: 1_300,
       simulationTickMs: 50,
+      streamHealth: "normal",
     });
 
     expect(reconciled.x).toBeCloseTo(1.35, 5);
@@ -113,6 +114,7 @@ describe("reconcileShipState", () => {
       snapshotServerTime: 1_100,
       predictedServerTime: 1_149,
       simulationTickMs: 50,
+      streamHealth: "normal",
     });
 
     expect(reconciled.vx).toBe(0);
@@ -164,10 +166,55 @@ describe("reconcileShipState", () => {
       snapshotServerTime: 1_100,
       predictedServerTime: 1_300,
       simulationTickMs: 50,
+      streamHealth: "normal",
     });
 
     expect(reconciled.x).toBe(0);
     expect(reconciled.vx).toBeCloseTo(27, 5);
     expect(reconciled.angle).toBe(0);
+  });
+
+  test("does not clamp local angle across the wrap boundary", () => {
+    const reconciled = reconcileShipState({
+      latestServerState: {
+        id: "ship-1",
+        type: "ship",
+        name: "pilot",
+        x: 0,
+        y: 0,
+        angle: -Math.PI / 2,
+        vx: 0,
+        vy: 0,
+        va: 0,
+        thrust: false,
+        lastInputSequence: 10,
+      } satisfies Partial<GenericNetEntityState>,
+      fallbackState: {
+        x: 0,
+        y: 0,
+        angle: -Math.PI / 2,
+        vx: 0,
+        vy: 0,
+        va: 0,
+      },
+      acknowledgedInput: createCommand({
+        sequence: 10,
+        thrust: false,
+        angle: -Math.PI / 2,
+        timestamp: 1_000,
+      }),
+      pendingInputs: [],
+      localControl: {
+        thrust: false,
+        angle: Math.PI,
+      },
+      snapshotSimTick: 20,
+      snapshotServerTime: 1_000,
+      predictedServerTime: 1_050,
+      simulationTickMs: 50,
+      streamHealth: "degraded",
+    });
+
+    expect(reconciled.angle).toBeCloseTo(Math.PI, 5);
   });
 });

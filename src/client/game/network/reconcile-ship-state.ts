@@ -1,6 +1,7 @@
 import type { ShipControlComponent, ShipInputCommand } from "@/shared/ecs/components";
 import { integrateMotion } from "@/shared/game/entities/base";
 import { updateShipPhysics, type ShipState } from "@/shared/game/entities/ship";
+import type { SnapshotStreamHealth } from "@/shared/network/events";
 
 const cloneShipState = (state: Partial<ShipState>): ShipState => ({
   name: state.name ?? "unknown",
@@ -51,6 +52,32 @@ export type ReconcileShipStateArgs = {
   snapshotServerTime: number;
   predictedServerTime: number;
   simulationTickMs: number;
+  streamHealth: SnapshotStreamHealth;
+};
+
+const getReplayHorizonMs = (
+  streamHealth: SnapshotStreamHealth,
+  simulationTickMs: number
+) => {
+  switch (streamHealth) {
+    case "degraded":
+      return Math.max(simulationTickMs * 2, 80);
+    case "stressed":
+      return Math.max(simulationTickMs * 3, 120);
+    default:
+      return Math.max(simulationTickMs * 4, 170);
+  }
+};
+
+const getDivergenceCap = (streamHealth: SnapshotStreamHealth) => {
+  switch (streamHealth) {
+    case "degraded":
+      return 90;
+    case "stressed":
+      return 140;
+    default:
+      return 220;
+  }
 };
 
 /**
@@ -71,6 +98,7 @@ export const reconcileShipState = ({
   snapshotServerTime,
   predictedServerTime,
   simulationTickMs,
+  streamHealth,
 }: ReconcileShipStateArgs) => {
   const authoritative = cloneShipState({
     ...latestServerState,
@@ -125,7 +153,11 @@ export const reconcileShipState = ({
     }
   };
 
-  const simulatedAheadMs = Math.max(0, predictedServerTime - snapshotServerTime);
+  const replayHorizonMs = getReplayHorizonMs(streamHealth, simulationTickMs);
+  const simulatedAheadMs = Math.min(
+    Math.max(0, predictedServerTime - snapshotServerTime),
+    replayHorizonMs
+  );
   const fullTicksAhead = Math.floor(simulatedAheadMs / simulationTickMs);
   const remainingMs = simulatedAheadMs - fullTicksAhead * simulationTickMs;
   let simulatedTime = snapshotServerTime;
@@ -158,6 +190,16 @@ export const reconcileShipState = ({
 
   void simulatedTick;
   authoritative.angle = localControl.angle;
+
+  const divergenceCap = getDivergenceCap(streamHealth);
+  const divergenceX = authoritative.x - fallbackState.x;
+  const divergenceY = authoritative.y - fallbackState.y;
+  const divergenceDistance = Math.hypot(divergenceX, divergenceY);
+  if (divergenceDistance > divergenceCap) {
+    const scale = divergenceCap / divergenceDistance;
+    authoritative.x = fallbackState.x + divergenceX * scale;
+    authoritative.y = fallbackState.y + divergenceY * scale;
+  }
 
   return authoritative;
 };

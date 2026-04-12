@@ -65,6 +65,7 @@ export const ReconciliationSystem: System<ClientServices> = {
       snapshotServerTime: networkState.lastServerTime,
       predictedServerTime: network.predictedServerTime(),
       simulationTickMs: network.simulationTickMs,
+      streamHealth: network.streamHealth,
     });
 
     transform.x = authoritative.x;

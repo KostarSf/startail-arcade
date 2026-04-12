@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { serve } from "bun";
 
 import index from "../client/index.html";
@@ -12,6 +15,7 @@ export type GameServerOptions = {
   debugPerformance?: boolean;
   testMode?: boolean;
   seed?: number | null;
+  staticDistDir?: string | null;
 };
 
 export type ResolvedGameServerOptions = {
@@ -20,6 +24,7 @@ export type ResolvedGameServerOptions = {
   debugPerformance: boolean;
   testMode: boolean;
   seed: number | null;
+  staticDistDir: string | null;
 };
 
 type CliOptions = Record<string, string | boolean>;
@@ -87,6 +92,34 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
+function normalizeStaticDistDir(
+  value: string | undefined
+): string | null {
+  if (!value) return null;
+
+  const resolved = path.resolve(value);
+  return existsSync(resolved) ? resolved : null;
+}
+
+function getStaticAssetPath(
+  distDir: string,
+  requestPath: string
+): string | null {
+  const trimmedPath = requestPath === "/" ? "/index.html" : requestPath;
+  const relativePath = trimmedPath.replace(/^\/+/, "");
+  const resolved = path.resolve(distDir, relativePath);
+
+  if (!resolved.startsWith(distDir)) {
+    return null;
+  }
+
+  if (!existsSync(resolved)) {
+    return null;
+  }
+
+  return resolved;
+}
+
 function installSeededMathRandom(seed: number) {
   if (installedMathRandomSeed === seed) {
     return;
@@ -121,6 +154,7 @@ export function resolveGameServerOptions(
       cli["test-mode"] === true ||
       (parseBooleanEnv(env.STARTAIL_TEST_MODE) ?? false),
     seed: cliSeed ?? parseOptionalNumber(env.STARTAIL_TEST_SEED) ?? null,
+    staticDistDir: normalizeStaticDistDir(env.STARTAIL_STATIC_DIST_DIR),
   };
 }
 
@@ -131,7 +165,12 @@ export function createGameServer(options: GameServerOptions = {}) {
     debugPerformance: options.debugPerformance ?? false,
     testMode: options.testMode ?? false,
     seed: options.seed ?? null,
+    staticDistDir: options.staticDistDir ?? null,
   };
+
+  if (resolved.staticDistDir !== null) {
+    resolved.staticDistDir = normalizeStaticDistDir(resolved.staticDistDir);
+  }
 
   if (resolved.seed !== null) {
     // The server still contains a fair amount of Math.random()-based gameplay
@@ -140,80 +179,116 @@ export function createGameServer(options: GameServerOptions = {}) {
   }
 
   const engine = new Engine();
+  const serveBundledClient = resolved.staticDistDir !== null;
+
+  const serveBundledAsset = (requestPath: string) => {
+    if (!serveBundledClient || !resolved.staticDistDir) {
+      return null;
+    }
+
+    const assetPath = getStaticAssetPath(resolved.staticDistDir, requestPath);
+    if (!assetPath) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    return new Response(Bun.file(assetPath));
+  };
 
   if (resolved.debugPerformance) {
     engine.debug.performanceBreakdown = true;
   }
 
+  const routes = {
+    ...(serveBundledClient
+      ? {
+          "/not-supported": () =>
+            serveBundledAsset("/not-supported.html") ??
+            new Response("Not found", { status: 404 }),
+        }
+      : {
+          "/not-supported": notSupported,
+        }),
+    "/check-support": (req: Request) => {
+      const userAgent = req.headers.get("user-agent") || "";
+      return Response.json({
+        supported: !isMobileUserAgent(userAgent),
+      });
+    },
+    "/__test/health": () => {
+      if (!resolved.testMode) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return Response.json({
+        ok: true,
+        running: engine.running,
+        tick: engine.tick,
+        playerCount: engine.network.playerCount,
+        serverTimeMs: Math.round(engine.serverTime),
+      });
+    },
+    "/__test/metrics": () => {
+      if (!resolved.testMode) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return Response.json({
+        running: engine.running,
+        tick: engine.tick,
+        serverTimeMs: Math.round(engine.serverTime),
+        lastTickDurationMs: Math.round(engine.lastTickDuration * 100) / 100,
+        playerCount: engine.network.playerCount,
+        entityCount: engine.world.entities.length,
+        entityCounts: engine.world.getEntityCountsByType(),
+        activity: engine.world.getActivityStats(),
+        performance: engine.lastPerformanceSummary,
+        networkScheduler: engine.network.getSchedulerStats(),
+        debug: {
+          ...engine.debug,
+        },
+        seed: resolved.seed,
+      });
+    },
+    "/__test/snapshot": () => {
+      if (!resolved.testMode) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return Response.json({
+        running: engine.running,
+        tick: engine.tick,
+        serverTimeMs: Math.round(engine.serverTime),
+        players: engine.network.getPlayerSnapshots(),
+        entityCounts: engine.world.getEntityCountsByType(),
+        activity: engine.world.getActivityStats(),
+        seed: resolved.seed,
+      });
+    },
+    "/ws": (req: Request, activeServer: Bun.Server<undefined>) => {
+      if (activeServer.upgrade(req)) {
+        return new Response(null, { status: 101 });
+      }
+      return new Response("Upgrade failed", { status: 500 });
+    },
+    ...(serveBundledClient
+      ? {
+          "/*": (req: Request) => {
+            const url = new URL(req.url);
+            return (
+              serveBundledAsset(url.pathname) ??
+              new Response("Not found", { status: 404 })
+            );
+          },
+        }
+      : {
+          "/*": index,
+        }),
+  };
+
   const server = serve({
     port: resolved.port,
     hostname: resolved.hostname,
-    routes: {
-      "/not-supported": notSupported,
-      "/check-support": (req) => {
-        const userAgent = req.headers.get("user-agent") || "";
-        return Response.json({
-          supported: !isMobileUserAgent(userAgent),
-        });
-      },
-      "/__test/health": () => {
-        if (!resolved.testMode) {
-          return new Response("Not found", { status: 404 });
-        }
-
-        return Response.json({
-          ok: true,
-          running: engine.running,
-          tick: engine.tick,
-          playerCount: engine.network.playerCount,
-          serverTimeMs: Math.round(engine.serverTime),
-        });
-      },
-      "/__test/metrics": () => {
-        if (!resolved.testMode) {
-          return new Response("Not found", { status: 404 });
-        }
-
-        return Response.json({
-          running: engine.running,
-          tick: engine.tick,
-          serverTimeMs: Math.round(engine.serverTime),
-          lastTickDurationMs: Math.round(engine.lastTickDuration * 100) / 100,
-          playerCount: engine.network.playerCount,
-          entityCount: engine.world.entities.length,
-          entityCounts: engine.world.getEntityCountsByType(),
-          activity: engine.world.getActivityStats(),
-          performance: engine.lastPerformanceSummary,
-          networkScheduler: engine.network.getSchedulerStats(),
-          debug: {
-            ...engine.debug,
-          },
-          seed: resolved.seed,
-        });
-      },
-      "/__test/snapshot": () => {
-        if (!resolved.testMode) {
-          return new Response("Not found", { status: 404 });
-        }
-
-        return Response.json({
-          running: engine.running,
-          tick: engine.tick,
-          serverTimeMs: Math.round(engine.serverTime),
-          players: engine.network.getPlayerSnapshots(),
-          entityCounts: engine.world.getEntityCountsByType(),
-          activity: engine.world.getActivityStats(),
-          seed: resolved.seed,
-        });
-      },
-      "/ws": (req, activeServer) => {
-        if (activeServer.upgrade(req)) {
-          return new Response(null, { status: 101 });
-        }
-        return new Response("Upgrade failed", { status: 500 });
-      },
-      "/*": index,
-    },
+    routes,
     websocket: {
       open: (ws) => {
         engine.network.connectPlayer(ws);

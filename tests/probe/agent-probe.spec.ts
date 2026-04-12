@@ -185,7 +185,12 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...(clientMode === "rendered" && process.env.STARTAIL_STATIC_DIST_DIR
+          ? { STARTAIL_STATIC_DIST_DIR: process.env.STARTAIL_STATIC_DIST_DIR }
+          : {}),
+      },
     }
   );
 

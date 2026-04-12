@@ -38,8 +38,35 @@ function applyEnvOverride(env, key, value) {
   }
 }
 
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: "inherit",
+      windowsHide: true,
+      ...options,
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`${command} exited with signal ${signal}`));
+        return;
+      }
+
+      if (code !== 0) {
+        reject(new Error(`${command} exited with code ${code ?? "unknown"}`));
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
 const options = parseCliOptions(process.argv.slice(2));
 const env = { ...process.env };
+const bunPath = process.env.BUN_PATH || "bun";
+const clientMode = options["client-mode"] ?? env.PROBE_CLIENT_MODE ?? "lightweight";
 
 applyEnvOverride(env, "PROBE_DURATION_MS", options.duration);
 applyEnvOverride(env, "PROBE_SEED", options.seed);
@@ -70,6 +97,10 @@ if (options.headed === true) {
   env.PROBE_HEADED = "1";
 }
 
+if (clientMode === "rendered") {
+  env.STARTAIL_STATIC_DIST_DIR = path.resolve(process.cwd(), "dist");
+}
+
 const playwrightCli = path.resolve(
   process.cwd(),
   "node_modules",
@@ -78,21 +109,36 @@ const playwrightCli = path.resolve(
   "cli.js"
 );
 
-const child = spawn(
-  process.execPath,
-  [playwrightCli, "test", "--config=playwright.probe.config.ts"],
-  {
-    stdio: "inherit",
-    windowsHide: true,
-    env,
-  }
-);
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
+async function main() {
+  if (clientMode === "rendered") {
+    console.log("[probe] building bundled frontend for rendered probe");
+    await runCommand(bunPath, ["run", "build.ts"], {
+      cwd: process.cwd(),
+      env,
+    });
   }
 
-  process.exit(code ?? 1);
+  const child = spawn(
+    process.execPath,
+    [playwrightCli, "test", "--config=playwright.probe.config.ts"],
+    {
+      stdio: "inherit",
+      windowsHide: true,
+      env,
+    }
+  );
+
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 1);
+  });
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  process.exit(1);
 });

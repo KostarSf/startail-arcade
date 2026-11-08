@@ -167,3 +167,16 @@ Use them to fetch authoritative server-side state after a run. This is especiall
 - `rendered` probe mode automatically runs a frontend build before launching Playwright. You do not need to build manually before using `bun run probe:agent --client-mode=rendered`.
 - The rendered harness uses a probe-compatible direct-stage graphics path. That makes it suitable for automation and visual debugging, but if you need to validate the exact production retro post-processing path, also sanity-check with a manual `bun dev` run.
 - If a probe fails, check `summary.json` first; it is the fastest way to see whether the failure was in boot, connection, spawn, or runtime.
+
+## Network stress diagnostics
+
+`--server-stall-ms=180` injects one bounded event-loop stall after five seconds
+of a probe run via the test-only POST `/__test/stall` endpoint. Combine it with
+`--capture-debug-trace` and `--sim-latency=40` to exercise buffer starvation and
+catch-up. Set `PLAYWRIGHT_CHANNEL=msedge` to use installed Edge when Playwright's
+bundled Chromium is unavailable. See `OPTIMIZATION_CHECKLIST.md` for results.
+
+`--retro-rendering` with `--client-mode=rendered` verifies the normal retro render
+texture/filter path. The probe now requires a running Pixi application ticker;
+boot flags alone are insufficient evidence of rendered gameplay. Startup allows
+60 seconds for large world generation alongside software WebGL.

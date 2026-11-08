@@ -27,20 +27,22 @@ export const ReconciliationSystem: System<ClientServices> = {
 
     if (!transform || !velocity || !networkState || !shipControl) return;
 
-    inputBuffer.acknowledge(shipControl.lastServerSequence);
-
-    const latestServerState = networkState.state as
+    const latestSnapshot = services.snapshotBuffer.getLatest();
+    const latestServerState = (player.id ? latestSnapshot?.entities.get(player.id) : undefined) as
       | (Partial<ShipState> & { lastInputSequence?: number })
       | undefined;
+    if (!latestSnapshot || !latestServerState) return;
+    const acknowledged = latestServerState.lastInputSequence ?? -1;
+    inputBuffer.acknowledge(acknowledged);
 
     let baseline = inputBuffer.baseline;
     if (!baseline) {
       baseline = {
-        sequence: shipControl.lastServerSequence,
+        sequence: acknowledged,
         thrust: latestServerState?.thrust ?? shipControl.thrust,
         angle: latestServerState?.angle ?? shipControl.angle,
         fire: false,
-        timestamp: networkState.lastServerTime,
+        timestamp: latestSnapshot.serverTime,
       };
       inputBuffer.setBaseline(baseline);
     }
@@ -61,8 +63,8 @@ export const ReconciliationSystem: System<ClientServices> = {
         thrust: shipControl.thrust,
         angle: shipControl.angle,
       },
-      snapshotSimTick: networkState.lastSimTick,
-      snapshotServerTime: networkState.lastServerTime,
+      snapshotSimTick: latestSnapshot.simTick,
+      snapshotServerTime: latestSnapshot.serverTime,
       predictedServerTime: network.predictedServerTime(),
       simulationTickMs: network.simulationTickMs,
       streamHealth: network.streamHealth,

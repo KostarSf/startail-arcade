@@ -1,24 +1,10 @@
-import type {
-  ServerStateEvent,
-  SnapshotStreamHealth,
-} from "@/shared/network/events";
+import type { ServerStateEvent, SnapshotStreamHealth } from "@/shared/network/events";
 
-const STREAM_HEALTH_ORDER: Record<SnapshotStreamHealth, number> = {
-  normal: 0,
-  stressed: 1,
-  degraded: 2,
-};
-
-const clamp = (value: number, min: number, max: number) =>
-  Math.max(min, Math.min(max, value));
-
-const average = (values: number[]) => {
-  if (values.length === 0) {
-    return null;
-  }
-
-  const total = values.reduce((sum, value) => sum + value, 0);
-  return total / values.length;
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+const percentile = (values: number[], fraction: number, fallback: number) => {
+  if (!values.length) return fallback;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]!;
 };
 
 export type PresentationWindowObservation = {
@@ -28,187 +14,108 @@ export type PresentationWindowObservation = {
   dtMs: number;
 };
 
-/**
- * Tracks snapshot arrival quality and produces adaptive presentation timing.
- *
- * This controller intentionally keeps simulation and presentation separate:
- * reconciliation stays tick-based, while render delay reacts to the effective
- * authoritative stream cadence and starvation.
- */
+/** Playback clock advances continuously; packet arrival never assigns its position. */
 export class PresentationTimingController {
+  #renderTime: number | null = null;
   #renderDelayMs = 100;
-  #arrivalIntervalsMs: number[] = [];
-  #serverFrameIntervalsMs: number[] = [];
-  #maxSamples = 30;
-  #lastArrivalAtMs: number | null = null;
-  #lastServerFrameTimeMs: number | null = null;
+  #targetDelayMs = 100;
+  #cadenceMs = 50;
+  #jitter: number[] = [];
+  #intervals: number[] = [];
+  #lastArrival: number | null = null;
+  #lastServerTime: number | null = null;
+  #serverHealth: SnapshotStreamHealth = "normal";
   #localHealth: SnapshotStreamHealth = "normal";
-  #serverEscalation: SnapshotStreamHealth = "normal";
   #starvationDurationMs = 0;
   #latestSnapshotAgeMs: number | null = null;
   #bufferLeadMs: number | null = null;
 
+  get renderTime() {
+    return this.#renderTime;
+  }
   get renderDelayMs() {
     return this.#renderDelayMs;
   }
-
   get localHealth() {
     return this.#localHealth;
   }
-
   get effectiveHealth(): SnapshotStreamHealth {
-    return STREAM_HEALTH_ORDER[this.#serverEscalation] >
-      STREAM_HEALTH_ORDER[this.#localHealth]
-      ? this.#serverEscalation
-      : this.#localHealth;
+    const order = { normal: 0, stressed: 1, degraded: 2 };
+    return order[this.#localHealth] >= order[this.#serverHealth]
+      ? this.#localHealth
+      : this.#serverHealth;
   }
-
   get starvationDurationMs() {
     return this.#starvationDurationMs;
   }
-
   get latestSnapshotAgeMs() {
     return this.#latestSnapshotAgeMs;
   }
-
   get bufferLeadMs() {
     return this.#bufferLeadMs;
   }
 
-  observeSnapshot(serverState: ServerStateEvent, receivedAtMs: number) {
-    if (this.#lastArrivalAtMs !== null) {
-      this.#pushSample(
-        this.#arrivalIntervalsMs,
-        Math.max(0, receivedAtMs - this.#lastArrivalAtMs)
+  observeSnapshot(state: ServerStateEvent, receivedAtMs: number) {
+    if (this.#lastServerTime !== null && state.serverTime <= this.#lastServerTime) return;
+    if (this.#lastArrival !== null && this.#lastServerTime !== null) {
+      const elapsed = state.serverTime - this.#lastServerTime;
+      this.#intervals.push(elapsed);
+      this.#jitter.push(Math.max(0, receivedAtMs - this.#lastArrival - elapsed));
+      if (this.#intervals.length > 60) this.#intervals.shift();
+      if (this.#jitter.length > 60) this.#jitter.shift();
+      this.#cadenceMs = percentile(this.#intervals, 0.5, 50);
+      this.#targetDelayMs = clamp(
+        2 * this.#cadenceMs + percentile(this.#jitter, 0.95, 0),
+        100,
+        400,
       );
     }
-    this.#lastArrivalAtMs = receivedAtMs;
-
-    if (this.#lastServerFrameTimeMs !== null) {
-      this.#pushSample(
-        this.#serverFrameIntervalsMs,
-        Math.max(0, serverState.serverTime - this.#lastServerFrameTimeMs)
-      );
-    }
-    this.#lastServerFrameTimeMs = serverState.serverTime;
-
-    if (serverState.stream?.health) {
-      this.#serverEscalation = serverState.stream.health;
-    }
+    this.#lastArrival = receivedAtMs;
+    this.#lastServerTime = state.serverTime;
+    this.#serverHealth = state.stream?.health ?? "normal";
   }
 
   updateWindow({
     predictedServerTime,
-    latestSnapshotServerTime,
-    hasNextSnapshot,
+    latestSnapshotServerTime: latest,
     dtMs,
   }: PresentationWindowObservation) {
-    if (latestSnapshotServerTime === null) {
-      this.#latestSnapshotAgeMs = null;
-      this.#bufferLeadMs = null;
-      this.#starvationDurationMs = 0;
-      this.#localHealth = "normal";
-      return;
+    if (latest === null) return this.#renderTime;
+    const dt = clamp(dtMs, 0, 100);
+    if (this.#renderTime === null) {
+      this.#renderTime = latest - this.#targetDelayMs;
+    } else if (latest - this.#renderTime > Math.max(1000, this.#targetDelayMs * 4)) {
+      // Returning from a suspended tab is a discontinuity, not ordinary jitter.
+      // Re-anchor once instead of spending minutes replaying obsolete history.
+      this.#renderTime = Math.max(this.#renderTime, latest - this.#targetDelayMs);
+    } else {
+      // Restore buffer occupancy gradually instead of replaying packet bursts.
+      const desired = latest - this.#targetDelayMs + this.#cadenceMs / 2;
+      const speed = clamp(1 + (desired - this.#renderTime) / 1000, 0.9, 1.1);
+      const next = Math.min(this.#renderTime + dt * speed, latest + 60);
+      this.#renderTime = Math.max(this.#renderTime, next);
     }
-
-    const latestAgeMs = Math.max(
-      0,
-      predictedServerTime - latestSnapshotServerTime
-    );
-    const currentLeadMs = this.#renderDelayMs - latestAgeMs;
-
-    this.#latestSnapshotAgeMs = latestAgeMs;
-    this.#bufferLeadMs = currentLeadMs;
-
-    const isStarved = !hasNextSnapshot && currentLeadMs < 0;
-    this.#starvationDurationMs = isStarved
-      ? this.#starvationDurationMs + dtMs
-      : 0;
-
-    const averageArrivalIntervalMs = average(this.#arrivalIntervalsMs) ?? 50;
-    const averageServerFrameIntervalMs =
-      average(this.#serverFrameIntervalsMs) ?? 50;
-    const baseCadenceMs = Math.max(
-      averageArrivalIntervalMs,
-      averageServerFrameIntervalMs
-    );
-    const healthMarginMs = this.#getHealthMarginMs(this.effectiveHealth);
-    const starvationTargetMs = isStarved ? latestAgeMs + healthMarginMs : 0;
-    const cadenceTargetMs = baseCadenceMs + healthMarginMs;
-    const targetDelayMs = clamp(
-      Math.max(100, cadenceTargetMs, starvationTargetMs),
-      100,
-      450
-    );
-
-    const riseStrength = clamp(dtMs / 140, 0.08, 0.45);
-    const fallStrength = clamp(dtMs / 550, 0.02, 0.12);
-    const blendStrength =
-      targetDelayMs > this.#renderDelayMs ? riseStrength : fallStrength;
-    this.#renderDelayMs +=
-      (targetDelayMs - this.#renderDelayMs) * blendStrength;
-
-    this.#localHealth = this.#resolveLocalHealth({
-      latestAgeMs,
-      baseCadenceMs,
-      isStarved,
-    });
+    this.#bufferLeadMs = latest - this.#renderTime;
+    this.#latestSnapshotAgeMs = Math.max(0, predictedServerTime - latest);
+    this.#renderDelayMs = Math.max(0, predictedServerTime - this.#renderTime);
+    this.#starvationDurationMs = this.#bufferLeadMs < 0 ? this.#starvationDurationMs + dt : 0;
+    this.#localHealth =
+      this.#starvationDurationMs >= 250
+        ? "degraded"
+        : this.#bufferLeadMs < 25
+          ? "stressed"
+          : "normal";
+    return this.#renderTime;
   }
 
   reset() {
-    this.#renderDelayMs = 100;
-    this.#arrivalIntervalsMs.length = 0;
-    this.#serverFrameIntervalsMs.length = 0;
-    this.#lastArrivalAtMs = null;
-    this.#lastServerFrameTimeMs = null;
-    this.#localHealth = "normal";
-    this.#serverEscalation = "normal";
+    this.#renderTime = null;
+    this.#renderDelayMs = this.#targetDelayMs = 100;
+    this.#cadenceMs = 50;
+    this.#jitter.length = this.#intervals.length = 0;
+    this.#lastArrival = this.#lastServerTime = null;
+    this.#serverHealth = this.#localHealth = "normal";
     this.#starvationDurationMs = 0;
-    this.#latestSnapshotAgeMs = null;
-    this.#bufferLeadMs = null;
-  }
-
-  #resolveLocalHealth(args: {
-    latestAgeMs: number;
-    baseCadenceMs: number;
-    isStarved: boolean;
-  }): SnapshotStreamHealth {
-    const { latestAgeMs, baseCadenceMs, isStarved } = args;
-
-    if (
-      this.#starvationDurationMs >= 300 ||
-      latestAgeMs >= baseCadenceMs * 3.5 ||
-      (isStarved && latestAgeMs >= 250)
-    ) {
-      return "degraded";
-    }
-
-    if (
-      this.#starvationDurationMs > 0 ||
-      latestAgeMs >= baseCadenceMs * 2.25 ||
-      this.#bufferLeadMs !== null && this.#bufferLeadMs < 25
-    ) {
-      return "stressed";
-    }
-
-    return "normal";
-  }
-
-  #getHealthMarginMs(health: SnapshotStreamHealth) {
-    switch (health) {
-      case "degraded":
-        return 70;
-      case "stressed":
-        return 45;
-      default:
-        return 30;
-    }
-  }
-
-  #pushSample(samples: number[], value: number) {
-    samples.push(value);
-    if (samples.length > this.#maxSamples) {
-      samples.shift();
-    }
+    this.#latestSnapshotAgeMs = this.#bufferLeadMs = null;
   }
 }

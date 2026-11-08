@@ -126,7 +126,7 @@ export interface ClientServices extends Record<string, unknown> {
       height: number;
     }) => void;
     predictedServerTime: () => number;
-    updatePresentationWindow: (observation: PresentationWindowObservation) => void;
+    updatePresentationWindow: (observation: PresentationWindowObservation) => number | null;
     renderDelayMs: number;
     simulationTickMs: number;
     streamHealth: SnapshotStreamHealth;

@@ -104,6 +104,8 @@ export interface ServerStateEvent {
   type: "server:state";
   serverTime: number;
   simTick: number;
+  /** Tick of the previously accepted delta baseline; null for full snapshots. */
+  baseSimTick: number | null;
   tickDuration: number;
   stream?: SnapshotStreamMetadata;
   state: FullServerState | PartialServerState;

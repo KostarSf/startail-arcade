@@ -6,6 +6,7 @@ export default defineConfig({
   fullyParallel: true,
   use: {
     baseURL: "http://127.0.0.1:3100",
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     headless: true,
     launchOptions: {
       args: [

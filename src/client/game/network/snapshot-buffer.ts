@@ -4,10 +4,7 @@ import {
   type GenericNetEntityState,
 } from "@/shared/game/entities/base";
 import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
-import type {
-  PartialServerState,
-  ServerStateEvent,
-} from "@/shared/network/events";
+import type { PartialServerState, ServerStateEvent } from "@/shared/network/events";
 
 export type LocalEntityState = GenericNetEntityState & {
   extrapolated?: boolean;
@@ -29,29 +26,22 @@ export class SnapshotBuffer {
   }
 
   add(serverState: ServerStateEvent) {
-    const snapshot = this.#generateSnapshot(serverState);
-
-    if (!snapshot) return;
-
-    if (this.#snapshots.length > 0) {
-      const last = this.#snapshots[this.#snapshots.length - 1]!;
-      if (snapshot.serverTime <= last.serverTime) {
-        console.error(
-          "Snapshot is out of order",
-          snapshot.serverTime,
-          "last:",
-          last.serverTime
-        );
-        // Replace duplicates or out-of-order packets
-        this.#snapshots[this.#snapshots.length - 1] = snapshot;
-        return;
-      }
+    const latest = this.getLatest();
+    if (latest && serverState.simTick <= latest.simTick) return false;
+    if (
+      serverState.state.type === "partial" &&
+      (!latest || serverState.baseSimTick !== latest.simTick)
+    ) {
+      throw new Error("Snapshot delta baseline mismatch; reconnect required");
     }
+    const snapshot = this.#generateSnapshot(serverState);
+    if (!snapshot) return false;
 
     this.#snapshots.push(snapshot);
     if (this.#snapshots.length > this.#maxLength) {
       this.#snapshots.shift();
     }
+    return true;
   }
 
   #generateSnapshot(serverState: ServerStateEvent): WorldState | null {
@@ -59,23 +49,21 @@ export class SnapshotBuffer {
       return this.#generatePartialSnapshot(
         serverState.state,
         serverState.serverTime,
-        serverState.simTick
+        serverState.simTick,
       );
     }
 
     return {
       serverTime: serverState.serverTime,
       simTick: serverState.simTick,
-      entities: new Map(
-        serverState.state.entities.map((entity) => [entity.id, entity])
-      ),
+      entities: new Map(serverState.state.entities.map((entity) => [entity.id, entity])),
     };
   }
 
   #generatePartialSnapshot(
     state: PartialServerState,
     serverTime: number,
-    simTick: number
+    simTick: number,
   ): WorldState | null {
     const latestSnapshot = this.getLatest();
     if (!latestSnapshot) return null;
@@ -85,7 +73,7 @@ export class SnapshotBuffer {
         "Partial snapshot is out of order",
         serverTime,
         "latest:",
-        latestSnapshot.serverTime
+        latestSnapshot.serverTime,
       );
       // TODO: Handle out of order partial snapshots
       return null;
@@ -104,7 +92,7 @@ export class SnapshotBuffer {
       const interpolatedEntity = this.#interpolateEntity(
         oldEntity,
         latestSnapshot.serverTime,
-        serverTime
+        serverTime,
       );
       updated.set(interpolatedEntity.id, interpolatedEntity);
     }
@@ -117,7 +105,7 @@ export class SnapshotBuffer {
     oldSnapshot: WorldState,
     updated: Map<string, LocalEntityState>,
     removed: Set<string>,
-    deltaTime: number
+    deltaTime: number,
   ) {
     const expEntities = new Map<string, GenericNetEntityState>();
     const shipEntities = new Map<string, GenericNetEntityState>();
@@ -135,7 +123,7 @@ export class SnapshotBuffer {
       }
 
       if (old.type === "exp") {
-        expEntities.set(old.id, old);
+        expEntities.set(old.id, { ...old });
       } else if (old.type === "ship") {
         shipEntities.set(old.id, old);
       }
@@ -147,12 +135,17 @@ export class SnapshotBuffer {
         integrateExpMagnetism(exp, ship, magnetRadius, deltaTime);
       }
     }
+    for (const exp of expEntities.values()) {
+      const next = { ...exp, interpolated: true };
+      integrateMotion(next, deltaTime);
+      updated.set(exp.id, next);
+    }
   }
 
   #interpolateEntity(
     oldEntity: GenericNetEntityState,
     oldTime: number,
-    newTime: number
+    newTime: number,
   ): LocalEntityState {
     const deltaTime = (newTime - oldTime) / 1000;
 

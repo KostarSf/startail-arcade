@@ -1,4 +1,3 @@
-import type { GenericNetEntityState } from "@/shared/game/entities/base";
 import { level as levelUtils } from "@/shared/game/entities/player";
 import { Vector2 } from "@/shared/math/vector";
 import type {
@@ -11,7 +10,7 @@ import type {
   SnapshotStreamMetadata,
 } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
-import { TPS } from "./constants";
+import { DT_MS, TPS } from "./constants";
 import type { Engine } from "./engine";
 import type { BaseEntity } from "./entities/base-entity";
 import { Bullet } from "./entities/bullet";
@@ -21,9 +20,8 @@ import type { World } from "./world/world";
 export const MAX_CAMERA_QUERY_RADIUS = 1300;
 export const DEFAULT_CAMERA_QUERY_RADIUS = 900;
 
-const MAX_CATCH_UP_FRAMES_PER_SCHEDULER_TICK = 3;
-const STRESSED_QUEUE_DEPTH = 2;
-const DEGRADED_QUEUE_DEPTH = 5;
+const MAX_BUFFERED_BYTES = 64 * 1024;
+const MAX_UNSENT_TICKS = TPS * 10;
 const MAX_KEYFRAME_RATE_MULTIPLIER = 2;
 const MAX_RADAR_RATE_MULTIPLIER = 3;
 
@@ -45,14 +43,8 @@ export function getPlayerCameraQueryBounds(player: {
     const expandedHeight = player.cameraViewBounds.height * 1.25;
 
     return {
-      queryRadius: Math.min(
-        Math.max(expandedWidth, expandedHeight) / 2,
-        MAX_CAMERA_QUERY_RADIUS
-      ),
-      queryPos: new Vector2(
-        player.cameraViewBounds.centerX,
-        player.cameraViewBounds.centerY
-      ),
+      queryRadius: Math.min(Math.max(expandedWidth, expandedHeight) / 2, MAX_CAMERA_QUERY_RADIUS),
+      queryPos: new Vector2(player.cameraViewBounds.centerX, player.cameraViewBounds.centerY),
     };
   }
 
@@ -61,11 +53,6 @@ export function getPlayerCameraQueryBounds(player: {
     queryRadius: DEFAULT_CAMERA_QUERY_RADIUS,
   };
 }
-
-type QueuedServerFrame = {
-  simTick: number;
-  serialized: string | Uint8Array;
-};
 
 export class ServerPlayer {
   id: string;
@@ -76,8 +63,8 @@ export class ServerPlayer {
   score: number = 0;
   level = levelUtils.levelFromXp(this.score);
   totalScoreToNextLevel = levelUtils.xpTotalForLevel(this.level + 1);
-  lastQueuedTick = 0;
-  lastDeliveredTick = 0;
+  lastSentTick = 0;
+  lastAcceptedTick = 0;
   networkFrameIndex = 0;
 
   needFullState = true;
@@ -91,7 +78,6 @@ export class ServerPlayer {
 
   lastSeenEntityIds = new Set<string>();
   pendingInputs: Extract<NetworkEvent, { type: "player:input" }>[] = [];
-  outboundFrames: QueuedServerFrame[] = [];
 
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
@@ -138,7 +124,7 @@ export class ServerPlayer {
         this.ship.maxHealth,
         this.ship.maxEnergy,
         this.ship.energyRechargeRate,
-        this.ship.baseDamage
+        this.ship.baseDamage,
       );
 
       this.ship.world.emit({
@@ -167,9 +153,10 @@ export class ServerNetwork {
   #playerById = new Map<string, ServerPlayer>();
   #playerByShipId = new Map<string, ServerPlayer>();
   #engine: Engine;
-  #bunServer: Bun.Server<undefined> | null = null;
   #lastCommittedTick = 0;
   #lastCommittedServerTimeMs = 0;
+
+  #lastFlushAt = -Infinity;
 
   #keyframesRate = TPS;
   #radarStatesRate = TPS;
@@ -179,6 +166,9 @@ export class ServerNetwork {
     sentFrames: 0,
     lastSentCommittedTick: 0,
     maxObservedQueueDepth: 0,
+    coalescedTicks: 0,
+    backpressureSkips: 0,
+    droppedFrames: 0,
   };
 
   get engine() {
@@ -207,9 +197,10 @@ export class ServerNetwork {
             y: Math.round(player.ship.position.y * 10) / 10,
           }
         : null,
-      outboundQueueDepth: player.outboundFrames.length,
-      lastQueuedTick: player.lastQueuedTick,
-      lastDeliveredTick: player.lastDeliveredTick,
+      outboundQueueDepth: 0,
+      bufferedBytes: player.ws.getBufferedAmount(),
+      lastSentTick: player.lastSentTick,
+      lastAcceptedTick: player.lastAcceptedTick,
     }));
   }
 
@@ -225,10 +216,7 @@ export class ServerNetwork {
     return this.#playerByShipId.get(shipId);
   }
 
-  validatePlayerName(
-    name: string,
-    currentPlayerId?: string
-  ): { valid: boolean; reason?: string } {
+  validatePlayerName(name: string, currentPlayerId?: string): { valid: boolean; reason?: string } {
     const trimmedName = name.trim();
     if (trimmedName.length === 0) {
       return { valid: false, reason: "Name cannot be empty" };
@@ -249,10 +237,7 @@ export class ServerNetwork {
     }
 
     for (const player of this.#players.values()) {
-      if (
-        player.id !== currentPlayerId &&
-        player.name.toLowerCase() === lowerName
-      ) {
+      if (player.id !== currentPlayerId && player.name.toLowerCase() === lowerName) {
         return { valid: false, reason: "Name already taken" };
       }
     }
@@ -293,6 +278,7 @@ export class ServerNetwork {
 
   connectPlayer(ws: Bun.ServerWebSocket) {
     const player = new ServerPlayer(ws);
+    this.#resetPlayerReplicationState(player, this.#lastCommittedTick);
     this.#players.set(ws, player);
     this.#playerById.set(player.id, player);
 
@@ -306,7 +292,7 @@ export class ServerNetwork {
         playerId: player.id,
         tps: TPS,
         worldRadius: this.engine.world.borderRadius,
-      }).serialize()
+      }).serialize(),
     );
   }
 
@@ -346,7 +332,7 @@ export class ServerNetwork {
             sequence: message.sequence,
             clientTime: message.clientTime,
             serverTime: this.engine.serverTime,
-          }).serialize()
+          }).serialize(),
         );
 
         break;
@@ -364,7 +350,7 @@ export class ServerNetwork {
             event({
               type: "server:respawn-denied",
               reason: validation.reason || "Invalid name",
-            }).serialize()
+            }).serialize(),
           );
           break;
         }
@@ -377,10 +363,8 @@ export class ServerNetwork {
 
         const newShip = new Ship({ id: player.id, name: player.name });
         newShip.position = new Vector2(
-          Math.random() * this.engine.world.borderRadius * 2 -
-            this.engine.world.borderRadius,
-          Math.random() * this.engine.world.borderRadius * 2 -
-            this.engine.world.borderRadius
+          Math.random() * this.engine.world.borderRadius * 2 - this.engine.world.borderRadius,
+          Math.random() * this.engine.world.borderRadius * 2 - this.engine.world.borderRadius,
         );
         newShip.player = player;
         this.engine.world.spawn(newShip);
@@ -390,10 +374,6 @@ export class ServerNetwork {
 
         break;
     }
-  }
-
-  initialize(bunServer: Bun.Server<undefined>) {
-    this.#bunServer = bunServer;
   }
 
   beginSimulationTick(_simTick: number) {
@@ -424,60 +404,68 @@ export class ServerNetwork {
 
   markTickCommitted(simTick: number) {
     this.#lastCommittedTick = simTick;
-    this.#lastCommittedServerTimeMs = this.engine.serverTime;
+    this.#lastCommittedServerTimeMs = simTick * DT_MS;
+  }
 
+  /** At most one current snapshot per transport slot, after all catch-up ticks. */
+  flushCommittedState(now = performance.now()) {
+    const simTick = this.#lastCommittedTick;
+    if (simTick === 0 || now - this.#lastFlushAt < DT_MS) return;
+    this.#lastFlushAt = now;
+    this.#schedulerStats.schedulerTicks++;
     const playersData = this.players.map((player) => ({
       id: player.id,
       name: player.name,
       score: player.score,
       alive: player.isAlive,
     }));
-
     let radarData: Map<string, RadarData[]> | undefined;
-
+    let sent = 0;
     for (const player of this.#players.values()) {
-      if (player.ship?.wasWarped) {
-        player.needFullState = true;
+      if (player.lastSentTick === simTick) continue;
+      // Bound event retention for a peer that cannot consume the stream.
+      if (simTick - player.lastAcceptedTick > MAX_UNSENT_TICKS) {
+        this.disconnectPlayer(player.ws);
+        continue;
       }
-
+      const bufferedBytes = player.ws.getBufferedAmount();
+      if (bufferedBytes > 0) {
+        this.#schedulerStats.backpressureSkips++;
+        continue;
+      }
       this.#engine.measurePerformance("networkBuildPerPlayerMs", () => {
         const stream = this.#getStreamMetadata(player);
         const includeRadar = this.#shouldIncludeRadar(player, stream);
-        if (includeRadar && !radarData) {
-          radarData = this.#getRadarData();
-        }
-
+        if (includeRadar && !radarData) radarData = this.#getRadarData();
         const needFullState = this.#needFullState(player, stream);
-
-        let state: FullServerState | PartialServerState;
-        if (needFullState) {
-          state = this.#engine.measurePerformance(
-            "networkBuildFullStateMs",
-            () => this.#getFullState(player)
-          );
-          player.lastSeenEntityIds = new Set(
-            state.entities.map((entity) => entity.id)
-          );
-        } else {
-          state = this.#engine.measurePerformance(
-            "networkBuildPartialStateMs",
-            () => this.#getPartialState(player)
-          );
-          player.lastSeenEntityIds = this.#engine.measurePerformance(
-            "networkVisibleIdsMs",
-            () => this.#getVisibleEntityIds(player)
-          );
+        // A single visibility query supplies the payload and its next baseline.
+        const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
+        const visible = this.engine.world.query(queryPos, queryRadius).array();
+        if (player.ship && !player.ship.removed && !visible.includes(player.ship)) {
+          visible.push(player.ship);
         }
-
-        const replicatedEvents = this.#engine.measurePerformance(
-          "networkBuildEventsMs",
-          () => this.#getReplicatedEvents(player, simTick)
+        const visibleIds = new Set(visible.map((entity) => entity.id));
+        const state: FullServerState | PartialServerState = needFullState
+          ? { type: "full", entities: visible.map((entity) => entity.toJSON()) }
+          : {
+              type: "partial",
+              updated: visible
+                .filter(
+                  (entity) =>
+                    !player.lastSeenEntityIds.has(entity.id) ||
+                    entity.lastChangedTick > player.lastSentTick,
+                )
+                .map((entity) => entity.toJSON()),
+              removed: [...player.lastSeenEntityIds].filter((id) => !visibleIds.has(id)),
+            };
+        const replicatedEvents = this.#engine.measurePerformance("networkBuildEventsMs", () =>
+          this.#getReplicatedEvents(player, simTick),
         );
-
         const payload = event({
           type: "server:state",
           serverTime: this.#lastCommittedServerTimeMs,
           simTick,
+          baseSimTick: needFullState ? null : player.lastSentTick,
           tickDuration: this.engine.lastTickDuration,
           stream,
           state,
@@ -485,126 +473,75 @@ export class ServerNetwork {
           radar: includeRadar ? radarData?.get(player.id) : undefined,
           players: playersData,
         });
-        const serialized = this.#engine.measurePerformance(
-          "networkSerializeMs",
-          () =>
-            payload.serialize({
-              compress: !this.#engine.debug.disableCompression,
-            })
+        const serialized = this.#engine.measurePerformance("networkSerializeMs", () =>
+          payload.serialize({ compress: !this.#engine.debug.disableCompression }),
         );
-
-        player.outboundFrames.push({
-          simTick,
-          serialized,
-        });
-        player.lastQueuedTick = simTick;
+        const result = this.#engine.measurePerformance("wsSendMs", () =>
+          player.ws.send(serialized),
+        );
+        if (result === 0) {
+          // A dropped frame must not advance the delta or event baseline.
+          player.needFullState = true;
+          this.#schedulerStats.droppedFrames++;
+          return;
+        }
+        // -1 means accepted into Bun's ordered transport buffer, not dropped.
+        this.#schedulerStats.coalescedTicks += Math.max(0, simTick - player.lastSentTick - 1);
+        player.lastSeenEntityIds = visibleIds;
+        player.lastSentTick = simTick;
+        player.lastAcceptedTick = simTick;
         player.networkFrameIndex++;
-        this.#schedulerStats.maxObservedQueueDepth = Math.max(
-          this.#schedulerStats.maxObservedQueueDepth,
-          player.outboundFrames.length
-        );
+        sent++;
       });
     }
-
-    this.#flushOutboundFrames();
+    this.#schedulerStats.sentFrames += sent;
+    if (sent > 0) this.#schedulerStats.lastSentCommittedTick = simTick;
+    else this.#schedulerStats.skippedSlots++;
+    const oldest = this.#getSlowestPlayerLastDeliveredTick();
+    if (oldest !== null) this.engine.world.pruneReplicatedEventsThrough(oldest);
+    else this.engine.world.clearReplicatedEvents();
   }
 
   resetReplicationState() {
     this.#lastCommittedTick = 0;
     this.#lastCommittedServerTimeMs = 0;
-    this.#schedulerStats.lastSentCommittedTick = 0;
-    this.#schedulerStats.maxObservedQueueDepth = 0;
-
+    this.#lastFlushAt = -Infinity;
+    Object.assign(this.#schedulerStats, {
+      schedulerTicks: 0,
+      skippedSlots: 0,
+      sentFrames: 0,
+      lastSentCommittedTick: 0,
+      maxObservedQueueDepth: 0,
+      coalescedTicks: 0,
+      backpressureSkips: 0,
+      droppedFrames: 0,
+    });
     for (const player of this.#players.values()) {
       this.#resetPlayerReplicationState(player, 0);
       player.pendingInputs.length = 0;
     }
-
     this.engine.world.clearReplicatedEvents();
   }
 
   getSchedulerStats() {
-    const queueDepths = this.players.map((player) => player.outboundFrames.length);
-    const pendingQueueDepth =
-      queueDepths.length > 0 ? Math.max(...queueDepths) : 0;
-
     return {
       ...this.#schedulerStats,
       lastCommittedTick: this.#lastCommittedTick,
-      lastCommittedServerTimeMs:
-        Math.round(this.#lastCommittedServerTimeMs * 100) / 100,
-      pendingQueueDepth,
+      lastCommittedServerTimeMs: this.#lastCommittedServerTimeMs,
+      pendingQueueDepth: 0,
+      bufferedBytes: Math.max(0, ...this.players.map((p) => p.ws.getBufferedAmount())),
     };
   }
 
-  #flushOutboundFrames() {
-    this.#engine.measurePerformance("networkSchedulerTickMs", () => {
-      if (!this.#bunServer) {
-        throw new Error("Bun server not set");
-      }
-
-      this.#schedulerStats.schedulerTicks++;
-
-      if (this.#players.size === 0) {
-        this.engine.world.clearReplicatedEvents();
-        this.#schedulerStats.skippedSlots++;
-        return;
-      }
-
-      let sentFramesThisTick = 0;
-      let lastSentCommittedTick = this.#schedulerStats.lastSentCommittedTick;
-
-      for (const player of this.#players.values()) {
-        let catchUpFrames = 0;
-
-        while (
-          player.outboundFrames.length > 0 &&
-          catchUpFrames < MAX_CATCH_UP_FRAMES_PER_SCHEDULER_TICK
-        ) {
-          const frame = player.outboundFrames.shift();
-          if (!frame) {
-            break;
-          }
-
-          this.#engine.measurePerformance("wsSendMs", () => {
-            player.ws.send(frame.serialized);
-          });
-
-          player.lastDeliveredTick = frame.simTick;
-          catchUpFrames++;
-          sentFramesThisTick++;
-          lastSentCommittedTick = Math.max(lastSentCommittedTick, frame.simTick);
-        }
-      }
-
-      if (sentFramesThisTick === 0) {
-        this.#schedulerStats.skippedSlots++;
-        return;
-      }
-
-      this.#schedulerStats.sentFrames += sentFramesThisTick;
-      this.#schedulerStats.lastSentCommittedTick = lastSentCommittedTick;
-
-      const slowestDeliveredTick = this.#getSlowestPlayerLastDeliveredTick();
-      if (slowestDeliveredTick !== null) {
-        this.engine.world.pruneReplicatedEventsThrough(slowestDeliveredTick);
-      }
-    });
-  }
-
   #resetPlayerReplicationState(player: ServerPlayer, baseTick: number) {
-    player.lastQueuedTick = baseTick;
-    player.lastDeliveredTick = baseTick;
+    player.lastSentTick = baseTick;
+    player.lastAcceptedTick = baseTick;
     player.networkFrameIndex = 0;
     player.needFullState = true;
     player.lastSeenEntityIds.clear();
-    player.outboundFrames.length = 0;
   }
 
-  #needFullState(
-    player: ServerPlayer,
-    stream: SnapshotStreamMetadata
-  ): boolean {
+  #needFullState(player: ServerPlayer, stream: SnapshotStreamMetadata): boolean {
     const fullStateRequested = player.needFullState;
     player.needFullState = false;
 
@@ -620,130 +557,14 @@ export class ServerNetwork {
     return player.networkFrameIndex % keyframeRate === 0;
   }
 
-  #getFullState(player: ServerPlayer): FullServerState {
-    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
-
-    const visibleEntities = this.engine.world.query(queryPos, queryRadius).array();
-
-    if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
-      const playerShip = this.#engine.world.find(player.ship.id);
-      if (playerShip && !playerShip.removed) {
-        visibleEntities.push(playerShip);
-      }
-    }
-
-    return {
-      type: "full",
-      entities: visibleEntities.map((entity) => entity.toJSON()),
-    };
-  }
-
   #calculateCameraViewBounds(player: ServerPlayer) {
     return getPlayerCameraQueryBounds(player);
   }
 
-  #getPartialState(player: ServerPlayer): PartialServerState {
-    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
-
-    const allEntities = this.engine.world
-      .query(queryPos, queryRadius, true)
-      .array();
-
-    const currentVisibleIds = new Set<string>();
-    for (const entity of allEntities) {
-      if (!entity.removed) {
-        currentVisibleIds.add(entity.id);
-      }
-    }
-
-    if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
-      const playerShip = this.#engine.world.find(player.ship.id);
-      if (playerShip && !playerShip.removed) {
-        currentVisibleIds.add(playerShip.id);
-      }
-    }
-
-    const updated: GenericNetEntityState[] = [];
-    const removedSet = new Set<string>();
-
-    for (const entityId of player.lastSeenEntityIds) {
-      if (!currentVisibleIds.has(entityId)) {
-        removedSet.add(entityId);
-      }
-    }
-
-    for (const entity of allEntities) {
-      if (entity.removed) {
-        if (player.lastSeenEntityIds.has(entity.id)) {
-          removedSet.add(entity.id);
-        }
-      } else {
-        const wasPreviouslyVisible = player.lastSeenEntityIds.has(entity.id);
-        const isNewlyVisible = !wasPreviouslyVisible;
-        const hasChanged = entity.lastChangedTick > player.lastQueuedTick;
-
-        if (isNewlyVisible || hasChanged) {
-          updated.push(entity.toJSON());
-        }
-      }
-    }
-
-    if (player.ship && !this.#playerInView(player, queryPos, queryRadius)) {
-      const playerShip = this.#engine.world.find(player.ship.id);
-      if (playerShip) {
-        if (playerShip.removed) {
-          removedSet.add(playerShip.id);
-        } else {
-          const wasPreviouslyVisible = player.lastSeenEntityIds.has(
-            playerShip.id
-          );
-          const hasChanged = playerShip.lastChangedTick > player.lastQueuedTick;
-          if (!wasPreviouslyVisible || hasChanged) {
-            updated.push(playerShip.toJSON());
-          }
-        }
-      }
-    }
-
-    return {
-      type: "partial",
-      updated,
-      removed: Array.from(removedSet),
-    };
-  }
-
-  #playerInView(player: ServerPlayer, queryPos: Vector2, queryRadius: number) {
-    if (!player.ship) return false;
-    return player.ship.position.distance(queryPos) < queryRadius;
-  }
-
-  #getVisibleEntityIds(player: ServerPlayer): Set<string> {
-    const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
-
-    const visibleEntities = this.engine.world.query(queryPos, queryRadius).array();
-
-    const visibleIds = new Set<string>();
-    for (const entity of visibleEntities) {
-      visibleIds.add(entity.id);
-    }
-
-    if (player.ship) {
-      const playerShip = this.#engine.world.find(player.ship.id);
-      if (playerShip && !playerShip.removed) {
-        visibleIds.add(playerShip.id);
-      }
-    }
-
-    return visibleIds;
-  }
-
-  #getReplicatedEvents(
-    player: ServerPlayer,
-    committedTick: number
-  ): ReplicatedWorldEvent[] {
+  #getReplicatedEvents(player: ServerPlayer, committedTick: number): ReplicatedWorldEvent[] {
     const tickEvents = this.engine.world.getReplicatedEventsInRange(
-      player.lastQueuedTick,
-      committedTick
+      player.lastSentTick,
+      committedTick,
     );
 
     const replicatedEvents: ReplicatedWorldEvent[] = [];
@@ -771,7 +592,7 @@ export class ServerNetwork {
       x?: number;
       y?: number;
       entityId?: string;
-    }
+    },
   ) {
     if (event.targetPlayerId && event.targetPlayerId !== player.id) {
       return false;
@@ -805,20 +626,21 @@ export class ServerNetwork {
     for (const player of this.#players.values()) {
       slowestTick =
         slowestTick === null
-          ? player.lastDeliveredTick
-          : Math.min(slowestTick, player.lastDeliveredTick);
+          ? player.lastAcceptedTick
+          : Math.min(slowestTick, player.lastAcceptedTick);
     }
 
     return slowestTick;
   }
 
   #getStreamMetadata(player: ServerPlayer): SnapshotStreamMetadata {
-    const queueDepth = player.outboundFrames.length;
+    const bufferedBytes = player.ws.getBufferedAmount();
+    const lagTicks = this.#lastCommittedTick - player.lastSentTick;
     let health: SnapshotStreamHealth = "normal";
 
-    if (queueDepth >= DEGRADED_QUEUE_DEPTH) {
+    if (bufferedBytes >= MAX_BUFFERED_BYTES || lagTicks >= 5) {
       health = "degraded";
-    } else if (queueDepth >= STRESSED_QUEUE_DEPTH) {
+    } else if (bufferedBytes > 0 || lagTicks >= 3) {
       health = "stressed";
     }
 
@@ -832,23 +654,17 @@ export class ServerNetwork {
 
     return {
       health,
-      degradedFeatures:
-        Object.keys(degradedFeatures).length > 0 ? degradedFeatures : undefined,
+      degradedFeatures: Object.keys(degradedFeatures).length > 0 ? degradedFeatures : undefined,
     };
   }
 
   #getKeyframeRate(stream: SnapshotStreamMetadata) {
     const relaxedMultiplier =
-      stream.degradedFeatures?.keyframesRelaxed === true
-        ? MAX_KEYFRAME_RATE_MULTIPLIER
-        : 1;
+      stream.degradedFeatures?.keyframesRelaxed === true ? MAX_KEYFRAME_RATE_MULTIPLIER : 1;
     return Math.max(1, this.#keyframesRate * relaxedMultiplier);
   }
 
-  #shouldIncludeRadar(
-    player: ServerPlayer,
-    stream: SnapshotStreamMetadata
-  ): boolean {
+  #shouldIncludeRadar(player: ServerPlayer, stream: SnapshotStreamMetadata): boolean {
     const radarMultiplier =
       stream.health === "degraded"
         ? MAX_RADAR_RATE_MULTIPLIER
@@ -864,7 +680,7 @@ export class ServerNetwork {
 
     const includeAllAsteroids = false;
 
-    const allEntities = this.engine.world.entities;
+    const allEntities = this.engine.world.nonAsteroidEntities;
     const asteroidRadarData: RadarData[] = [];
 
     for (const entity of allEntities) {

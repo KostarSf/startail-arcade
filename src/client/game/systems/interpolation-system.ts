@@ -287,26 +287,16 @@ const angleLerp = (start: number, end: number, alpha: number) => {
   return normalizeAngle(start + delta * alpha);
 };
 
-const getTailDurationMs = (
-  entity: GenericNetEntityState,
-  health: SnapshotStreamHealth,
-  isPlayer: boolean
-) => {
-  if (isPlayer) {
-    return 0;
-  }
-
+const getTailDurationMs = (entity: GenericNetEntityState, isPlayer: boolean) => {
+  if (isPlayer) return 0;
+  // Do not shorten an already displayed extrapolation when stream health changes.
+  // The shared playback clock limits the tail to 60ms and then holds in place.
   switch (entity.type) {
     case "ship":
-      return health === "degraded" ? 40 : health === "stressed" ? 60 : 90;
-    case "asteroid":
-      return health === "degraded" ? 60 : health === "stressed" ? 90 : 130;
-    case "bullet":
-      return health === "normal" ? 16 : 0;
-    case "exp":
-      return health === "normal" ? 12 : 0;
-    default:
-      return 0;
+    case "asteroid": return 60;
+    case "bullet": return 16;
+    case "exp": return 12;
+    default: return 0;
   }
 };
 
@@ -361,25 +351,25 @@ export const InterpolationSystem: System<ClientServices> = {
     const disableInterpolation = services.debug.disableInterpolation;
     const latestSnapshot = services.snapshotBuffer.getLatest();
     const predictedServerTime = services.network.predictedServerTime();
+    const playbackTime = services.network.updatePresentationWindow({
+      predictedServerTime,
+      latestSnapshotServerTime: latestSnapshot?.serverTime ?? null,
+      hasNextSnapshot: false,
+      dtMs: dt * 1000,
+    });
     const targetTime = disableInterpolation
-      ? latestSnapshot?.serverTime ?? 0
-      : predictedServerTime - services.network.renderDelayMs;
+      ? (latestSnapshot?.serverTime ?? 0)
+      : (playbackTime ?? 0);
     const { previous, next } = disableInterpolation
       ? { previous: latestSnapshot, next: latestSnapshot }
       : services.snapshotBuffer.getWindow(targetTime);
-
-    services.network.updatePresentationWindow({
-      predictedServerTime,
-      latestSnapshotServerTime: latestSnapshot?.serverTime ?? null,
-      hasNextSnapshot: next !== null,
-      dtMs: dt * 1000,
-    });
 
     if (!previous && !next) return;
 
     const fromSnapshot = previous ?? next!;
     const toSnapshot = next ?? previous!;
-    services.world.renderedSimTick = previous?.simTick ?? toSnapshot.simTick;
+    services.world.renderedSimTick = Math.min(latestSnapshot?.simTick ?? 0,
+      Math.max(0, Math.floor(targetTime / services.network.simulationTickMs)));
     const fromTime = fromSnapshot.serverTime;
     const toTime = toSnapshot.serverTime;
     const total = Math.max(toTime - fromTime, 1);
@@ -399,6 +389,7 @@ export const InterpolationSystem: System<ClientServices> = {
     indexSnapshot(next, "to");
 
     for (const [serverId, pair] of pairMap.entries()) {
+      if (!pair.from && previous && next && targetTime < next.serverTime) continue;
       const source = pair.from ?? pair.to!;
       const target = pair.to ?? pair.from!;
       let lerpAlpha = pair.from && pair.to ? alpha : pair.to ? 1 : 0;
@@ -420,7 +411,9 @@ export const InterpolationSystem: System<ClientServices> = {
 
       const transform = services.stores.transform.get(entityId);
       const presentationState = services.stores.presentationState.get(entityId);
-      if (transform) {
+      const predictPlayer = isPlayer && !services.debug.disableReconciliation &&
+        services.player.entityId === entityId;
+      if (transform && !predictPlayer) {
         const previousX = transform.x;
         const previousY = transform.y;
         const previousAngle = transform.angle;
@@ -442,7 +435,6 @@ export const InterpolationSystem: System<ClientServices> = {
 
         const tailDurationMs = getTailDurationMs(
           target.state,
-          services.network.streamHealth,
           isPlayer
         );
 
@@ -530,7 +522,7 @@ export const InterpolationSystem: System<ClientServices> = {
       }
 
       const velocity = services.stores.velocity.get(entityId);
-      if (velocity) {
+      if (velocity && !predictPlayer) {
         velocity.vx = lerp(source.state.vx, target.state.vx, lerpAlpha);
         velocity.vy = lerp(source.state.vy, target.state.vy, lerpAlpha);
         velocity.va = lerp(
@@ -577,7 +569,7 @@ export const InterpolationSystem: System<ClientServices> = {
       }
     }
 
-    removeMissingEntities(next ?? fromSnapshot, services, entities);
+    removeMissingEntities(previous ?? toSnapshot, services, entities);
     services.stats().setObjectsCount(services.entityIndex.size);
   },
 };

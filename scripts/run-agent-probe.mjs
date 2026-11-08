@@ -76,6 +76,7 @@ applyEnvOverride(env, "PROBE_PORT", options.port);
 applyEnvOverride(env, "PROBE_CLIENT_MODE", options["client-mode"]);
 applyEnvOverride(env, "PROBE_SIMULATED_LATENCY_MS", options["sim-latency"]);
 applyEnvOverride(env, "PROBE_TRACE_INTERVAL_MS", options["trace-interval"]);
+applyEnvOverride(env, "PROBE_SERVER_STALL_MS", options["server-stall-ms"]);
 
 if (options["debug-performance"] === true) {
   env.PROBE_DEBUG_PERFORMANCE = "1";
@@ -92,6 +93,8 @@ if (options["disable-interpolation"] === true) {
 if (options["capture-debug-trace"] === true) {
   env.PROBE_CAPTURE_DEBUG_TRACE = "1";
 }
+
+if (options["retro-rendering"] === true) env.PROBE_RETRO_RENDERING = "1";
 
 if (options.headed === true) {
   env.PROBE_HEADED = "1";

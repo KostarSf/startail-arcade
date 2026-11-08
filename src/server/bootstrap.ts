@@ -227,6 +227,19 @@ export function createGameServer(options: GameServerOptions = {}) {
         serverTimeMs: Math.round(engine.serverTime),
       });
     },
+    "/__test/stall": (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const requested = Number(new URL(req.url).searchParams.get("ms"));
+      if (!Number.isFinite(requested) || requested < 0 || requested > 250) {
+        return new Response("Expected 0..250ms", { status: 400 });
+      }
+      const until = performance.now() + requested;
+      while (performance.now() < until) {
+        /* Intentional test-only event-loop stall. */
+      }
+      return Response.json({ stalledMs: requested });
+    },
     "/__test/metrics": () => {
       if (!resolved.testMode) {
         return new Response("Not found", { status: 404 });
@@ -310,8 +323,6 @@ export function createGameServer(options: GameServerOptions = {}) {
       console: true,
     },
   });
-
-  engine.network.initialize(server);
 
   return {
     engine,

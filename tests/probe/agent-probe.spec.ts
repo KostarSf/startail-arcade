@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 function parseEnvNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -150,6 +150,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   );
   const captureDebugTrace = parseEnvBoolean("PROBE_CAPTURE_DEBUG_TRACE");
   const traceIntervalMs = parseEnvNumber("PROBE_TRACE_INTERVAL_MS", 50);
+  const serverStallMs = parseEnvNumber("PROBE_SERVER_STALL_MS", 0);
   const baseUrl = `http://127.0.0.1:${port}`;
 
   await mkdir(artifactsDir, { recursive: true });
@@ -168,6 +169,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     disableInterpolation,
     disableReconciliation,
     captureDebugTrace,
+    serverStallMs,
     startedAt: new Date().toISOString(),
   };
   const debugTrace: Array<Record<string, unknown>> = [];
@@ -221,6 +223,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     searchParams.set("audio", "off");
     if (clientMode === "rendered") {
       searchParams.set("agent-rendered", "true");
+      if (process.env.PROBE_RETRO_RENDERING === "1") searchParams.set("agent-retro", "true");
     } else {
       searchParams.set("agent-mode", "true");
     }
@@ -241,7 +244,8 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
         return Boolean(
           snapshot?.boot.appInitialized &&
             snapshot.boot.servicesReady &&
-            snapshot.boot.pipelineReady
+            snapshot.boot.pipelineReady &&
+            window.__STARTAIL_TEST_API__?.getDebugNetworkSnapshot()?.rendering?.tickerStarted
         );
       }, {
         timeoutMs: 20_000,
@@ -282,7 +286,8 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
           snapshot.stats.hasTimeSync
       );
     }, {
-      timeoutMs: 20_000,
+      // Generating 500k entities can exceed 20s alongside software WebGL.
+      timeoutMs: 60_000,
       description: "spawned player with time sync",
       getPageErrors: () => pageErrors,
     });
@@ -298,9 +303,15 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     const traceStartedAt = Date.now();
     let fireSent = false;
     let stopSent = false;
+    let stallSent = false;
 
     while (Date.now() - traceStartedAt < durationMs) {
       const elapsedMs = Date.now() - traceStartedAt;
+      if (!stallSent && serverStallMs > 0 && elapsedMs >= 5_000) {
+        stallSent = true;
+        const response = await fetch(`${baseUrl}/__test/stall?ms=${serverStallMs}`, { method: "POST" });
+        expect(response.ok).toBe(true);
+      }
 
       if (!fireSent && elapsedMs >= 1_000) {
         fireSent = true;
@@ -355,6 +366,17 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       path: path.join(artifactsDir, "screenshot.png"),
       fullPage: true,
     });
+
+    expect(pageErrors).toEqual([]);
+    if (clientMode === "rendered" && captureDebugTrace) {
+      let previousRenderTime = -Infinity;
+      for (const sample of debugTrace) {
+        const debug = sample.debug as { renderTargetTime: number } | null;
+        if (!debug) continue;
+        expect(debug.renderTargetTime).toBeGreaterThanOrEqual(previousRenderTime);
+        previousRenderTime = debug.renderTargetTime;
+      }
+    }
 
     Object.assign(summary, {
       ok: true,

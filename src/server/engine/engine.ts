@@ -58,6 +58,7 @@ export class Engine {
   #lastTime = 0;
   #accumulatedTime = 0;
   #lastTickDuration = 0;
+  #lastTickCommittedAt = 0;
   #performanceWindowStartedAt = 0;
   #performanceWindow: PerformanceWindow = this.#createEmptyPerformanceWindow();
   #lastPerformanceSummary: PerformanceSummary | null = null;
@@ -75,7 +76,10 @@ export class Engine {
   }
 
   get serverTime() {
-    return performance.now() - this.#startTime;
+    // Share the simulation timeline with snapshots; exclude startup and stalls.
+    return this.#tick * DT_MS + (this.#running
+      ? Math.min(DT_MS, Math.max(0, performance.now() - this.#lastTickCommittedAt))
+      : 0);
   }
 
   get lastTickDuration() {
@@ -101,6 +105,8 @@ export class Engine {
     this.#resetPerformanceWindow();
 
     this.#world.initialize(this);
+    this.#lastTime = performance.now();
+    this.#lastTickCommittedAt = this.#lastTime;
 
     const loop = () => {
       if (!this.#running) return;
@@ -114,10 +120,13 @@ export class Engine {
 
       this.#accumulatedTime += frameTime;
 
-      while (this.#accumulatedTime >= DT_MS) {
+      while (this.#running && this.#accumulatedTime >= DT_MS) {
         this.#update(1 / TPS);
         this.#accumulatedTime -= DT_MS;
       }
+
+      // Replicate once after catch-up, never once per intermediate tick.
+      if (this.#running) this.network.flushCommittedState();
 
       setImmediate(loop);
     };
@@ -159,6 +168,7 @@ export class Engine {
     this.#world.update(dt);
 
     this.#world.postUpdate(dt);
+    this.#lastTickCommittedAt = performance.now();
     this.network.markTickCommitted(this.#tick);
 
     if (this.network.playerCount === 0) {

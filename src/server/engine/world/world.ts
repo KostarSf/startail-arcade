@@ -50,6 +50,10 @@ export class World {
     return Array.from(this.#entities.values());
   }
 
+  get nonAsteroidEntities() {
+    return this.#nonAsteroidEntities.values();
+  }
+
   /** Exposes chunk activity state for systems that need sleep/awake decisions. */
   get chunkActivity() {
     return this.#chunkActivity;

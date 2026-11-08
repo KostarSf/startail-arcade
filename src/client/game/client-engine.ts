@@ -1,5 +1,15 @@
 import {
   Application,
+  extensions,
+  ResizePlugin,
+  TickerPlugin,
+  GraphicsPipe,
+  GraphicsContextSystem,
+  CanvasTextPipe,
+  CanvasTextSystem,
+  EventSystem,
+  FilterPipe,
+  FilterSystem,
   Assets,
   Container,
   RenderTexture,
@@ -212,6 +222,8 @@ export class ClientEngine {
   #servicesReady = false;
   #pipelineReady = false;
   #presentationTiming = new PresentationTimingController();
+  #timeSyncReadyAt = Infinity;
+  #rttSamples: number[] = [];
 
   #networkDecoder: NetworkDecoder;
 
@@ -220,6 +232,9 @@ export class ClientEngine {
   }
 
   constructor() {
+    // Explicit registration survives bundlers omitting Pixi's side-effect imports.
+    extensions.add(ResizePlugin, TickerPlugin, GraphicsPipe, GraphicsContextSystem,
+      CanvasTextPipe, CanvasTextSystem, EventSystem, FilterPipe, FilterSystem);
     this.#app = new Application();
     this.#simulatedLatencyMs = this.#resolveSimulatedLatency();
     if (this.#simulatedLatencyMs > 0) {
@@ -235,7 +250,8 @@ export class ClientEngine {
     this.#disableReconciliation = this.#resolveDisableReconciliationFromURL();
     this.#snapshotTimingDebugEnabled =
       this.#resolveSnapshotTimingDebugFromURL();
-    this.#useRetroRendering = !this.#resolveRenderedProbeModeFromURL();
+    this.#useRetroRendering = !this.#resolveRenderedProbeModeFromURL() ||
+      this.#resolveBooleanFlagFromURL("agent-retro");
     if (!this.#useRetroRendering) {
       this.#renderScale = 1;
     }
@@ -535,7 +551,7 @@ export class ClientEngine {
     const services = this.#services;
     const predictedServerTime = this.#predictedServerTime();
     const renderDelayMs = this.#presentationTiming.renderDelayMs;
-    const renderTargetTime = predictedServerTime - renderDelayMs;
+    const renderTargetTime = this.#presentationTiming.renderTime ?? predictedServerTime - renderDelayMs;
     const latestSnapshot = this.#snapshotBuffer.getLatest();
     const { previous, next } = this.#snapshotBuffer.getWindow(renderTargetTime);
     const latestSnapshotAgeMs =
@@ -584,6 +600,11 @@ export class ClientEngine {
         : null;
 
     return {
+      rendering: this.#appInitialized ? {
+        tickerStarted: this.#app.ticker?.started ?? false,
+        cameraChildren: this.#camera.children.length,
+        screen: { width: this.#app.screen.width, height: this.#app.screen.height },
+      } : null,
       predictedServerTime: round(predictedServerTime),
       renderDelayMs: round(renderDelayMs),
       renderTargetTime: round(renderTargetTime),
@@ -867,8 +888,9 @@ export class ClientEngine {
       this.#checkAndUpdateRenderTexture();
 
       if (this.#renderTexture && this.#gameContainer) {
-        this.#app.renderer.render(this.#gameContainer, {
-          renderTexture: this.#renderTexture,
+        this.#app.renderer.render({
+          container: this.#gameContainer,
+          target: this.#renderTexture,
         });
       }
     });
@@ -1514,9 +1536,13 @@ export class ClientEngine {
       this.#lastRawWsMessageTimeMs = now;
 
       this.#trackInboundBytes(eventMessage.data);
-      await this.#networkDecoder.process(eventMessage, (message) =>
-        this.#handleMessage(message)
-      );
+      const socket = this.#ws;
+      try {
+        await this.#networkDecoder.process(eventMessage, (message) => this.#handleMessage(message));
+      } catch (error) {
+        console.error("[net] invalid stream; reconnecting", error);
+        if (socket === this.#ws) socket?.close();
+      }
     };
   }
 
@@ -1537,6 +1563,7 @@ export class ClientEngine {
         this.#handlePong(message);
         break;
       case "server:player-initialize":
+        this.#timeSyncReadyAt = performance.now();
         this.#serverTps = message.tps > 0 ? message.tps : this.#serverTps;
         if (this.#services) {
           this.#services.player.id = message.playerId;
@@ -1546,9 +1573,9 @@ export class ClientEngine {
         this.#statsGetter().setWorldRadius(message.worldRadius);
         break;
       case "server:state":
+        if (!this.#snapshotBuffer.add(message)) break;
         this.#presentationTiming.observeSnapshot(message, performance.now());
         this.#trackSnapshotArrivalTiming(message);
-        this.#snapshotBuffer.add(message);
         this.#eventBuffer.add(message.events);
         this.#statsGetter().setPlayers(message.players);
         this.#statsGetter().setTickDuration(message.tickDuration);
@@ -1578,8 +1605,13 @@ export class ClientEngine {
   #handlePong(message: Extract<NetworkEvent, { type: "server:pong" }>) {
     const clientReceive = performance.now();
     const clientSend = message.clientTime;
+    if (clientSend < this.#timeSyncReadyAt) return;
     const serverSend = message.serverTime;
     const rttSample = clientReceive - clientSend;
+    this.#rttSamples.push(rttSample);
+    if (this.#rttSamples.length > 30) this.#rttSamples.shift();
+    const minRtt = Math.min(...this.#rttSamples);
+    if (rttSample > minRtt + Math.max(20, minRtt * 0.5)) return;
     const oneWay = rttSample / 2;
     const serverAtReceiveApprox = serverSend + oneWay;
     const offsetSample = serverAtReceiveApprox - clientReceive;
@@ -1663,6 +1695,9 @@ export class ClientEngine {
   }
 
   #handleDisconnect() {
+    this.#networkDecoder.reset();
+    this.#timeSyncReadyAt = Infinity;
+    this.#rttSamples.length = 0;
     this.#pingTicker.stop();
     this.#networkStatsTicker.stop();
     this.#ws = null;

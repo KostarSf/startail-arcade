@@ -5,6 +5,7 @@ export default defineConfig({
   timeout: 120_000,
   fullyParallel: false,
   use: {
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     headless: process.env.PROBE_HEADED !== "1",
     launchOptions: {
       args: [

@@ -9,6 +9,7 @@ export class WakeSpatialGrid {
   constructor(
     asteroids: Iterable<Asteroid>,
     private readonly cellSize = 64,
+    private readonly worldRadius = 0,
   ) {
     for (const asteroid of asteroids) {
       if (asteroid.removed) continue;
@@ -33,10 +34,28 @@ export class WakeSpatialGrid {
 
   query(asteroid: Asteroid) {
     const radius = asteroid.radius + this.maxRadius;
-    const minX = Math.floor((asteroid.x - radius) / this.cellSize);
-    const maxX = Math.floor((asteroid.x + radius) / this.cellSize);
-    const minY = Math.floor((asteroid.y - radius) / this.cellSize);
-    const maxY = Math.floor((asteroid.y + radius) / this.cellSize);
+    if (this.worldRadius > 0) {
+      const r = this.worldRadius,
+        xs = [asteroid.x],
+        ys = [asteroid.y];
+      if (asteroid.x - radius < -r) xs.push(asteroid.x + r * 2);
+      if (asteroid.x + radius >= r) xs.push(asteroid.x - r * 2);
+      if (asteroid.y - radius < -r) ys.push(asteroid.y + r * 2);
+      if (asteroid.y + radius >= r) ys.push(asteroid.y - r * 2);
+      if (xs.length > 1 || ys.length > 1) {
+        const result = new Set<Asteroid>();
+        for (const x of xs)
+          for (const y of ys) for (const a of this.#queryAt(x, y, radius)) result.add(a);
+        return [...result];
+      }
+    }
+    return this.#queryAt(asteroid.x, asteroid.y, radius);
+  }
+  #queryAt(x: number, y: number, radius: number) {
+    const minX = Math.floor((x - radius) / this.cellSize);
+    const maxX = Math.floor((x + radius) / this.cellSize);
+    const minY = Math.floor((y - radius) / this.cellSize);
+    const maxY = Math.floor((y + radius) / this.cellSize);
     const result: Asteroid[] = [];
     for (let x = minX; x <= maxX; x++) {
       const column = this.#columns.get(x);

@@ -1,3 +1,4 @@
+import { wrapCoordinate } from "@/shared/math/world-wrap";
 import {
   integrateMotion,
   normalizeAngle,
@@ -6,10 +7,7 @@ import {
 } from "@/shared/game/entities/base";
 import { Vector2 } from "@/shared/math/vector";
 import type { World } from "../world/world";
-import type {
-  ChunkSleepBehavior,
-  ChunkWakeSource,
-} from "../world/chunk-activity-manager";
+import type { ChunkSleepBehavior, ChunkWakeSource } from "../world/chunk-activity-manager";
 
 const EMPTY_CHUNK_WAKE_SOURCES: readonly ChunkWakeSource[] = [];
 
@@ -157,10 +155,7 @@ export abstract class BaseEntity {
    * Implementations should return world-space points or circles. The chunk
    * activity manager handles wrap-aware mirroring and chunk conversion.
    */
-  getChunkWakeSources(
-    _world: World,
-    _delta: number
-  ): readonly ChunkWakeSource[] {
+  getChunkWakeSources(_world: World, _delta: number): readonly ChunkWakeSource[] {
     return EMPTY_CHUNK_WAKE_SOURCES;
   }
 
@@ -181,57 +176,13 @@ export abstract class BaseEntity {
 
     integrateMotion(this, delta);
 
-    const borderRadius = world.borderRadius;
-    const wrapThreshold = 500; // Wrap if more than 500 units beyond border
-
-    // Check X-axis wrapping
-    const beyondLeftBorder = this.x < -borderRadius;
-    const beyondRightBorder = this.x > borderRadius;
-    const isBeyondBorderX = beyondLeftBorder || beyondRightBorder;
-
-    if (isBeyondBorderX) {
-      const distanceBeyondBorder = beyondLeftBorder
-        ? -borderRadius - this.x
-        : this.x - borderRadius;
-
-      const isMovingTowardsEdge =
-        (beyondLeftBorder && this.vx < 0) || (beyondRightBorder && this.vx > 0);
-
-      // Wrap if more than threshold away OR if moving towards edge
-      if (distanceBeyondBorder > wrapThreshold || isMovingTowardsEdge) {
-        if (beyondLeftBorder) {
-          this.x = borderRadius; // Wrap to right edge
-        } else {
-          this.x = -borderRadius; // Wrap to left edge
-        }
-        this.markChanged();
-        this.#wasWarped = true;
-      }
-    }
-
-    // Check Y-axis wrapping
-    const beyondTopBorder = this.y < -borderRadius;
-    const beyondBottomBorder = this.y > borderRadius;
-    const isBeyondBorderY = beyondTopBorder || beyondBottomBorder;
-
-    if (isBeyondBorderY) {
-      const distanceBeyondBorder = beyondTopBorder
-        ? -borderRadius - this.y
-        : this.y - borderRadius;
-
-      const isMovingTowardsEdge =
-        (beyondTopBorder && this.vy < 0) || (beyondBottomBorder && this.vy > 0);
-
-      // Wrap if more than threshold away OR if moving towards edge
-      if (distanceBeyondBorder > wrapThreshold || isMovingTowardsEdge) {
-        if (beyondTopBorder) {
-          this.y = borderRadius; // Wrap to bottom edge
-        } else {
-          this.y = -borderRadius; // Wrap to top edge
-        }
-        this.markChanged();
-        this.#wasWarped = true;
-      }
+    const x = wrapCoordinate(this.x, world.borderRadius),
+      y = wrapCoordinate(this.y, world.borderRadius);
+    if (x !== this.x || y !== this.y) {
+      this.x = x;
+      this.y = y;
+      this.markChanged();
+      this.#wasWarped = true;
     }
   }
 

@@ -297,8 +297,6 @@ export class ServerNetwork {
   }
 
   disconnectPlayer(ws: Bun.ServerWebSocket) {
-    ws.close();
-
     const player = this.#players.get(ws);
     if (!player) return;
 
@@ -308,6 +306,9 @@ export class ServerNetwork {
     }
     this.#players.delete(ws);
     this.#playerById.delete(player.id);
+    // Remove registry entries before close: transports may invoke close callbacks synchronously.
+    ws.close();
+    if (this.#players.size === 0) this.engine.stop();
 
     console.log(`player disconnected: ${player.id}`);
   }
@@ -338,7 +339,13 @@ export class ServerNetwork {
         break;
 
       case "player:camera-bounds":
-        player.cameraViewBounds = message.viewBounds;
+        if (
+          message.viewBounds &&
+          Object.values(message.viewBounds).every(Number.isFinite) &&
+          message.viewBounds.width > 0 &&
+          message.viewBounds.height > 0
+        )
+          player.cameraViewBounds = message.viewBounds;
         break;
 
       case "player:respawn":
@@ -440,8 +447,16 @@ export class ServerNetwork {
         const needFullState = this.#needFullState(player, stream);
         // A single visibility query supplies the payload and its next baseline.
         const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
-        const visible = this.engine.world.query(queryPos, queryRadius).array();
-        if (player.ship && !player.ship.removed && !visible.includes(player.ship)) {
+        const visible = this.engine.world
+          .query(queryPos, queryRadius)
+          .array()
+          .filter((entity) => !(entity instanceof Ship) || entity.initialized);
+        if (
+          player.ship &&
+          player.ship.initialized &&
+          !player.ship.removed &&
+          !visible.includes(player.ship)
+        ) {
           visible.push(player.ship);
         }
         const visibleIds = new Set(visible.map((entity) => entity.id));

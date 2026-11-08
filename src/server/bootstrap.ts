@@ -8,6 +8,9 @@ import notSupported from "../client/not-supported.html";
 import { Random } from "../shared/math/random";
 import type { NetworkEvent } from "../shared/network/events";
 import { Engine } from "./engine/engine";
+import { Bullet } from "./engine/entities/bullet";
+import { PirateAI } from "./engine/entities/ai/pirate-ai";
+import { Ship } from "./engine/entities/ship";
 
 export type GameServerOptions = {
   port?: number;
@@ -92,19 +95,14 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
-function normalizeStaticDistDir(
-  value: string | undefined
-): string | null {
+function normalizeStaticDistDir(value: string | undefined): string | null {
   if (!value) return null;
 
   const resolved = path.resolve(value);
   return existsSync(resolved) ? resolved : null;
 }
 
-function getStaticAssetPath(
-  distDir: string,
-  requestPath: string
-): string | null {
+function getStaticAssetPath(distDir: string, requestPath: string): string | null {
   const trimmedPath = requestPath === "/" ? "/index.html" : requestPath;
   const relativePath = trimmedPath.replace(/^\/+/, "");
   const resolved = path.resolve(distDir, relativePath);
@@ -131,18 +129,13 @@ function installSeededMathRandom(seed: number) {
 }
 
 export function resolveGameServerOptions(
-  argv: string[] = typeof Bun !== "undefined"
-    ? Bun.argv.slice(2)
-    : process.argv.slice(2),
-  env: Record<string, string | undefined> = process.env
+  argv: string[] = typeof Bun !== "undefined" ? Bun.argv.slice(2) : process.argv.slice(2),
+  env: Record<string, string | undefined> = process.env,
 ): ResolvedGameServerOptions {
   const cli = parseCliOptions(argv);
-  const cliPort =
-    typeof cli.port === "string" ? parseOptionalNumber(cli.port) : undefined;
-  const cliSeed =
-    typeof cli.seed === "string" ? parseOptionalNumber(cli.seed) : undefined;
-  const hostname =
-    typeof cli.hostname === "string" ? cli.hostname : env.HOST;
+  const cliPort = typeof cli.port === "string" ? parseOptionalNumber(cli.port) : undefined;
+  const cliSeed = typeof cli.seed === "string" ? parseOptionalNumber(cli.seed) : undefined;
+  const hostname = typeof cli.hostname === "string" ? cli.hostname : env.HOST;
 
   return {
     port: cliPort ?? parseOptionalNumber(env.PORT) ?? DEFAULT_PORT,
@@ -150,9 +143,7 @@ export function resolveGameServerOptions(
     debugPerformance:
       cli["debug-performance"] === true ||
       (parseBooleanEnv(env.STARTAIL_DEBUG_PERFORMANCE) ?? false),
-    testMode:
-      cli["test-mode"] === true ||
-      (parseBooleanEnv(env.STARTAIL_TEST_MODE) ?? false),
+    testMode: cli["test-mode"] === true || (parseBooleanEnv(env.STARTAIL_TEST_MODE) ?? false),
     seed: cliSeed ?? parseOptionalNumber(env.STARTAIL_TEST_SEED) ?? null,
     staticDistDir: normalizeStaticDistDir(env.STARTAIL_STATIC_DIST_DIR),
   };
@@ -202,8 +193,7 @@ export function createGameServer(options: GameServerOptions = {}) {
     ...(serveBundledClient
       ? {
           "/not-supported": () =>
-            serveBundledAsset("/not-supported.html") ??
-            new Response("Not found", { status: 404 }),
+            serveBundledAsset("/not-supported.html") ?? new Response("Not found", { status: 404 }),
         }
       : {
           "/not-supported": notSupported,
@@ -252,6 +242,7 @@ export function createGameServer(options: GameServerOptions = {}) {
         lastTickDurationMs: Math.round(engine.lastTickDuration * 100) / 100,
         playerCount: engine.network.playerCount,
         entityCount: engine.world.entities.length,
+        memory: process.memoryUsage(),
         entityCounts: engine.world.getEntityCountsByType(),
         activity: engine.world.getActivityStats(),
         performance: engine.lastPerformanceSummary,
@@ -261,6 +252,35 @@ export function createGameServer(options: GameServerOptions = {}) {
         },
         seed: resolved.seed,
       });
+    },
+    "/__test/teleport": async (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const data = (await req.json().catch(() => null)) as {
+        id?: string;
+        x?: number;
+        y?: number;
+        targetId?: string;
+        health?: number;
+      } | null;
+      if (!data?.id || !Number.isFinite(data.x) || !Number.isFinite(data.y))
+        return new Response("Invalid position", { status: 400 });
+      const entity = engine.world.find(data.id);
+      if (!entity) return new Response("Entity not resident", { status: 404 });
+      entity.x = data.x!;
+      entity.y = data.y!;
+      entity.vx = entity.vy = 0;
+      if (entity instanceof Ship && Number.isFinite(data.health) && data.health! > 0) {
+        entity.maxHealth = entity.health = data.health!;
+      }
+      entity.markChanged();
+      engine.world.updateSpatialIndex(entity);
+      if (entity instanceof Ship && entity.ai instanceof PirateAI && data.targetId) {
+        const shot = new Bullet({ ownerId: data.targetId });
+        shot.initialize(engine.world);
+        entity.ai.onShipDamage(engine.world, 1, shot);
+      }
+      return Response.json({ ok: true });
     },
     "/__test/snapshot": () => {
       if (!resolved.testMode) {
@@ -272,6 +292,7 @@ export function createGameServer(options: GameServerOptions = {}) {
         tick: engine.tick,
         serverTimeMs: Math.round(engine.serverTime),
         players: engine.network.getPlayerSnapshots(),
+        pirates: engine.world.pirates.getSnapshots(),
         entityCounts: engine.world.getEntityCountsByType(),
         activity: engine.world.getActivityStats(),
         seed: resolved.seed,
@@ -287,10 +308,7 @@ export function createGameServer(options: GameServerOptions = {}) {
       ? {
           "/*": (req: Request) => {
             const url = new URL(req.url);
-            return (
-              serveBundledAsset(url.pathname) ??
-              new Response("Not found", { status: 404 })
-            );
+            return serveBundledAsset(url.pathname) ?? new Response("Not found", { status: 404 });
           },
         }
       : {
@@ -309,9 +327,7 @@ export function createGameServer(options: GameServerOptions = {}) {
       message: (ws, data) => {
         engine.network.onMessage(
           ws,
-          JSON.parse(
-            Buffer.isBuffer(data) ? data.toString("utf-8") : data
-          ) as NetworkEvent
+          JSON.parse(Buffer.isBuffer(data) ? data.toString("utf-8") : data) as NetworkEvent,
         );
       },
       close: (ws) => {

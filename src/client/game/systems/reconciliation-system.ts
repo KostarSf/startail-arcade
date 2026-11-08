@@ -1,5 +1,6 @@
 import type { System } from "@/shared/ecs";
 import type { ShipState } from "@/shared/game/entities/ship";
+import { wrapCoordinate } from "@/shared/math/world-wrap";
 
 import { reconcileShipState } from "../network/reconcile-ship-state";
 import type { ClientServices } from "../types";
@@ -68,10 +69,11 @@ export const ReconciliationSystem: System<ClientServices> = {
       predictedServerTime: network.predictedServerTime(),
       simulationTickMs: network.simulationTickMs,
       streamHealth: network.streamHealth,
+      worldRadius: services.world.radius,
     });
 
-    transform.x = authoritative.x;
-    transform.y = authoritative.y;
+    transform.x = wrapCoordinate(authoritative.x, services.world.radius);
+    transform.y = wrapCoordinate(authoritative.y, services.world.radius);
     transform.angle = authoritative.angle;
 
     velocity.vx = authoritative.vx;

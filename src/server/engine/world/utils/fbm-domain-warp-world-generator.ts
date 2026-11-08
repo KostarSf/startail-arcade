@@ -4,28 +4,28 @@ type GenerateWorldNoiseOpts = {
   seed?: number;
 
   // --- уровни масштаба ---
-  macroScale?: number;       // крупные биомы (в юнитах мира)
-  midScale?: number;         // "уровень ~1000" для заметной смены плотности
-  octavesMacro?: number;     // октавы для макро
-  octavesMid?: number;       // октавы для мид
+  macroScale?: number; // крупные биомы (в юнитах мира)
+  midScale?: number; // "уровень ~1000" для заметной смены плотности
+  octavesMacro?: number; // октавы для макро
+  octavesMid?: number; // октавы для мид
 
-  warpStrength?: number;     // domain warp
-  contrast?: number;         // контраст кластеров
-  fill?: number;             // общий уровень заполнения
+  warpStrength?: number; // domain warp
+  contrast?: number; // контраст кластеров
+  fill?: number; // общий уровень заполнения
 
-  edgeFalloff?: number;      // 0..1, если хочешь чуть реже у краев квадрата
+  edgeFalloff?: number; // 0..1, если хочешь чуть реже у краев квадрата
 };
 
 export function generateWorld(
   radius: number,
   asteroidsCount: number,
-  opts: GenerateWorldNoiseOpts = {}
+  opts: GenerateWorldNoiseOpts = {},
 ): Vector2[] {
-  const seed = opts.seed ?? ((Math.random() * 1e9) | 0);
+  const seed = opts.seed ?? (Math.random() * 1e9) | 0;
   const rng = mulberry32(seed);
 
   const macroScale = opts.macroScale ?? radius * 0.42; // ~2100 при r=5000
-  const midScale = opts.midScale ?? 1000;             // как ты просил
+  const midScale = opts.midScale ?? 1000; // как ты просил
   const octMacro = opts.octavesMacro ?? 4;
   const octMid = opts.octavesMid ?? 3;
 
@@ -53,7 +53,7 @@ export function generateWorld(
       octMid,
       warpStrength,
       edgeFalloff,
-      seed
+      seed,
     );
 
     // усиливаем кластеры и подгоняем общий fill
@@ -70,6 +70,13 @@ export function generateWorld(
   return out;
 }
 
+/** The same global biome field, sampled in world coordinates by lazy chunks. */
+export function worldDensity(x: number, y: number, radius: number, seed: number) {
+  return clamp01(
+    Math.pow(densityAtSquare(x, y, radius, radius * 0.42, 1000, 4, 3, 0.9, 0.08, seed), 2.1),
+  );
+}
+
 /* ================= density field (square) ================= */
 
 function densityAtSquare(
@@ -82,7 +89,7 @@ function densityAtSquare(
   octMid: number,
   warpStrength: number,
   edgeFalloff: number,
-  seed: number
+  seed: number,
 ): number {
   // координаты для макро/мид шума
   let mx = x / macroScale;
@@ -91,8 +98,8 @@ function densityAtSquare(
   let sy = y / midScale;
 
   // domain warp на макро уровне (чтобы пятна были "живее")
-  const wx = fbm(mx * 1.6 + 11.3, my * 1.6 - 4.7, octMacro, seed ^ 0xA1B2C3);
-  const wy = fbm(mx * 1.6 - 7.9, my * 1.6 + 19.1, octMacro, seed ^ 0xC3B2A1);
+  const wx = fbm(mx * 1.6 + 11.3, my * 1.6 - 4.7, octMacro, seed ^ 0xa1b2c3);
+  const wy = fbm(mx * 1.6 - 7.9, my * 1.6 + 19.1, octMacro, seed ^ 0xc3b2a1);
   mx += (wx - 0.5) * warpStrength * 2.0;
   my += (wy - 0.5) * warpStrength * 2.0;
 
@@ -101,8 +108,8 @@ function densityAtSquare(
 
   // 2) средний уровень (~1000 единиц) 0..1
   // тоже слегка варпнем, но слабее
-  const swx = fbm(sx * 1.4 + 3.3, sy * 1.4 + 8.8, octMid, seed ^ 0x51ED);
-  const swy = fbm(sx * 1.4 - 6.6, sy * 1.4 - 2.2, octMid, seed ^ 0xBEEF);
+  const swx = fbm(sx * 1.4 + 3.3, sy * 1.4 + 8.8, octMid, seed ^ 0x51ed);
+  const swy = fbm(sx * 1.4 - 6.6, sy * 1.4 - 2.2, octMid, seed ^ 0xbeef);
   sx += (swx - 0.5) * warpStrength * 0.8;
   sy += (swy - 0.5) * warpStrength * 0.8;
 
@@ -174,22 +181,29 @@ function hash2(x: number, y: number, seed: number): number {
   let n = x * 374761393 + y * 668265263 + seed * 1442695040888963407;
   n = (n ^ (n >> 13)) * 1274126177;
   n = n ^ (n >> 16);
-  return ((n >>> 0) / 0xffffffff);
+  return (n >>> 0) / 0xffffffff;
 }
 
 function mulberry32(seed: number) {
   let a = seed | 0;
   return () => {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-function fade(t: number) { return t * t * (3 - 2 * t); }
-function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
-function clamp01(v: number) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+function fade(t: number) {
+  return t * t * (3 - 2 * t);
+}
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+function clamp01(v: number) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
 function smoothstep(a: number, b: number, t: number) {
   t = clamp01((t - a) / (b - a));
   return t * t * (3 - 2 * t);

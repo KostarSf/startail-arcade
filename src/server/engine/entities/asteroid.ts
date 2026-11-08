@@ -8,9 +8,12 @@ import { Ship } from "./ship";
 export interface IAsteroid extends IBaseEntity {
   health: number;
   maxHealth: number;
+  earnablePoints: number;
 }
 
 export class Asteroid extends LivingEntity {
+  /** Session-local numeric key for compact RAM storage, independent of residency. */
+  streamingId?: number;
   override type = "asteroid" as const;
 
   static #nextId = 1;
@@ -32,15 +35,11 @@ export class Asteroid extends LivingEntity {
     this.health = asteroid.health ?? this.maxHealth;
     this.radius = asteroid.radius ?? 10;
 
-    const expFactor = 1 + Math.random() * 0.5 - 0.2;
-    this.earnablePoints = Math.floor(this.radius * 1.25 * expFactor);
+    this.earnablePoints =
+      asteroid.earnablePoints ?? Math.floor(this.radius * 1.25 * (0.8 + Math.random() * 0.5));
   }
 
-  protected override onDamage(
-    world: World,
-    amount: number,
-    source?: BaseEntity
-  ): number {
+  protected override onDamage(world: World, amount: number, source?: BaseEntity): number {
     if (source && source instanceof Bullet) {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.04));
@@ -59,21 +58,16 @@ export class Asteroid extends LivingEntity {
         this.position,
         relativeVelocity,
         Math.ceil(this.earnablePoints),
-        (this.radius ?? 0) * 0.5
+        (this.radius ?? 0) * 0.5,
       );
     }
   }
 
   override onCollision(world: World, other: BaseEntity): void {
     if (other instanceof Ship || other instanceof Asteroid) {
-      const direction = other.position.sub(this.position).normalize();
-      const relativeSpeed = Math.max(
-        Math.abs(other.velocity.sub(this.velocity).dot(direction)),
-        2
-      );
-      this.velocity = this.velocity.add(
-        direction.mul(relativeSpeed * 0.2).neg()
-      );
+      const direction = world.displacement(this, other).normalize();
+      const relativeSpeed = Math.max(Math.abs(other.velocity.sub(this.velocity).dot(direction)), 2);
+      this.velocity = this.velocity.add(direction.mul(relativeSpeed * 0.2).neg());
       this.markChanged();
       return;
     }
@@ -86,7 +80,7 @@ export class Asteroid extends LivingEntity {
       const m2 = other.radius * other.radius;
 
       // Relative position and velocity
-      const normal = other.position.sub(this.position).normalize();
+      const normal = world.displacement(this, other).normalize();
       const relativeVelocity = this.velocity.sub(other.velocity);
       const velAlongNormal = relativeVelocity.dot(normal);
 

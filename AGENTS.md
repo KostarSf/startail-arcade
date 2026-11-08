@@ -186,3 +186,17 @@ by an additional 0–120ms using a seeded sequence every 50ms. This exercises
 irregular application-level delivery, not packet loss or bandwidth limits.
 Optimization comparisons and their reproducible scripts are documented in
 `OPTIMIZATION_RESULTS.md`; run CPU benchmarks sequentially to avoid contention.
+
+## Lazy world diagnostics
+
+See `LAZY_WORLD_IMPLEMENTATION.md` for RAM-only chunk storage, 50-pirate activity,
+last-player reset, measurements, and limitations. Run
+`bun scripts/benchmark-lazy-world.ts normal` and then `near-50` for isolated
+simulation scenarios. They write ignored artifacts under `.artifacts/lazy-world-review/`.
+The historical broad-phase benchmark extracts its pre-streaming fixture from git.
+
+`/__test/teleport` is a test-mode-only POST hook accepting `{id,x,y,targetId?,health?}`;
+`targetId` simulates player damage to establish pirate pursuit. Snapshot diagnostics
+include background pirate records and loading state. The E2E suite shares one world
+and runs serially to verify the final disconnect reset. Set `BUN_PATH` to the desired
+Bun executable for both E2E and probe servers; local node_modules may contain an older Bun.

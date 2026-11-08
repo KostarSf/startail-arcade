@@ -28,6 +28,30 @@ export class Ship extends LivingEntity {
   #firing = false;
   #compensatedFire = false;
 
+  captureRuntimeState() {
+    return {
+      body: this.toJSON(),
+      energy: this.#energy,
+      maxEnergy: this.maxEnergy,
+      energyRechargeRate: this.energyRechargeRate,
+      baseDamage: this.baseDamage,
+      earnablePoints: this.earnablePoints,
+      firing: this.#firing,
+      compensatedFire: this.#compensatedFire,
+    };
+  }
+
+  restoreRuntimeState(state: ReturnType<Ship["captureRuntimeState"]>) {
+    this.#energy = state.energy;
+    this.maxEnergy = state.maxEnergy;
+    this.energyRechargeRate = state.energyRechargeRate;
+    this.baseDamage = state.baseDamage;
+    this.earnablePoints = state.earnablePoints;
+    this.level = state.body.level;
+    this.#firing = state.firing;
+    this.#compensatedFire = state.compensatedFire;
+  }
+
   #energy = 100;
   maxEnergy = 100;
   /** per second */
@@ -43,6 +67,13 @@ export class Ship extends LivingEntity {
   override earnablePoints = 1;
   override radius = SHIP_CONSTANTS.radius;
 
+  override canWakeChunks() {
+    return true;
+  }
+  override getChunkWakeSources() {
+    return [{ shape: "circle" as const, x: this.x, y: this.y, radius: 1000 }];
+  }
+
   constructor(ship: Partial<IShip>) {
     if (!ship.name) {
       ship.name = `ship-${Ship.#nextId++}`;
@@ -55,11 +86,7 @@ export class Ship extends LivingEntity {
     this.health = ship.health ?? this.maxHealth;
   }
 
-  protected override onDamage(
-    world: World,
-    amount: number,
-    source?: BaseEntity
-  ): number {
+  protected override onDamage(world: World, amount: number, source?: BaseEntity): number {
     if (source && source instanceof Bullet) {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.15));
@@ -76,16 +103,14 @@ export class Ship extends LivingEntity {
   protected override onDeath(world: World, source?: BaseEntity) {
     if (this.earnablePoints <= 0) return;
 
-    const relativeVelocity = source
-      ? source.velocity.mul(0.3).sub(this.velocity)
-      : this.velocity;
+    const relativeVelocity = source ? source.velocity.mul(0.3).sub(this.velocity) : this.velocity;
 
     Exp.spawn(
       world,
       this.position,
       relativeVelocity,
       Math.ceil(this.earnablePoints),
-      (this.radius ?? 0) * 0.7
+      (this.radius ?? 0) * 0.7,
     );
   }
 
@@ -147,10 +172,7 @@ export class Ship extends LivingEntity {
     const earnablePoints = value / 25;
     this.earnablePoints += earnablePoints;
     this.heal(Math.ceil(earnablePoints));
-    this.#energy = Math.min(
-      this.#energy + Math.ceil(value * 0.25),
-      this.maxEnergy
-    );
+    this.#energy = Math.min(this.#energy + Math.ceil(value * 0.25), this.maxEnergy);
     this.player?.addScore(value);
   }
 
@@ -212,19 +234,13 @@ export class Ship extends LivingEntity {
     // Preserve health percentage when maxHealth increases
     if (oldMaxHealth > 0) {
       const healthPercentage = this.health / oldMaxHealth;
-      this.health = Math.min(
-        Math.round(this.maxHealth * healthPercentage),
-        this.maxHealth
-      );
+      this.health = Math.min(Math.round(this.maxHealth * healthPercentage), this.maxHealth);
     }
 
     // Preserve energy percentage when maxEnergy increases
     if (oldMaxEnergy > 0) {
       const energyPercentage = this.#energy / oldMaxEnergy;
-      this.#energy = Math.min(
-        Math.round(this.maxEnergy * energyPercentage),
-        this.maxEnergy
-      );
+      this.#energy = Math.min(Math.round(this.maxEnergy * energyPercentage), this.maxEnergy);
     }
 
     this.markChanged();
@@ -262,14 +278,12 @@ export class Ship extends LivingEntity {
   override onCollision(world: World, other: BaseEntity): void {
     if (other instanceof Asteroid || other instanceof Ship) {
       this.markChanged();
-      const direction = other.position.sub(this.position).normalize();
+      const direction = world.displacement(this, other).normalize();
       const relativeSpeed = Math.max(
         Math.abs(other.velocity.sub(this.velocity).dot(direction)),
-        10
+        10,
       );
-      this.velocity = this.velocity.add(
-        direction.mul(relativeSpeed * 0.5).neg()
-      );
+      this.velocity = this.velocity.add(direction.mul(relativeSpeed * 0.5).neg());
     }
   }
 

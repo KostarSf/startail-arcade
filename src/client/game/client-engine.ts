@@ -18,12 +18,7 @@ import {
   Ticker,
 } from "pixi.js";
 
-import {
-  ComponentStore,
-  EntityManager,
-  Pipeline,
-  type EntityId,
-} from "@/shared/ecs";
+import { ComponentStore, EntityManager, Pipeline, type EntityId } from "@/shared/ecs";
 import type {
   NetworkStateComponent,
   PresentationStateComponent,
@@ -84,12 +79,7 @@ import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
 import { AudioSystem } from "./systems/audio-system";
 import { WorldEventSystem } from "./systems/world-event-system";
-import type {
-  ClientServices,
-  ControlState,
-  DamageTextRequest,
-  ExplosionRequest,
-} from "./types";
+import type { ClientServices, ControlState, DamageTextRequest, ExplosionRequest } from "./types";
 
 const SNAPSHOT_TIMING_SAMPLE_SIZE = 30;
 const SNAPSHOT_TIMING_MIN_SAMPLES = 5;
@@ -116,18 +106,12 @@ export class ClientEngine {
 
   #transformStore = new ComponentStore<TransformComponent>(this.#entityManager);
   #velocityStore = new ComponentStore<VelocityComponent>(this.#entityManager);
-  #renderableStore = new ComponentStore<RenderableComponent<Container>>(
-    this.#entityManager
+  #renderableStore = new ComponentStore<RenderableComponent<Container>>(this.#entityManager);
+  #shipControlStore = new ComponentStore<ShipControlComponent>(this.#entityManager);
+  #networkStateStore = new ComponentStore<NetworkStateComponent<BaseEntityState>>(
+    this.#entityManager,
   );
-  #shipControlStore = new ComponentStore<ShipControlComponent>(
-    this.#entityManager
-  );
-  #networkStateStore = new ComponentStore<
-    NetworkStateComponent<BaseEntityState>
-  >(this.#entityManager);
-  #presentationStateStore = new ComponentStore<PresentationStateComponent>(
-    this.#entityManager
-  );
+  #presentationStateStore = new ComponentStore<PresentationStateComponent>(this.#entityManager);
 
   #snapshotBuffer = new SnapshotBuffer();
   #eventBuffer = new EventBuffer();
@@ -233,14 +217,21 @@ export class ClientEngine {
 
   constructor() {
     // Explicit registration survives bundlers omitting Pixi's side-effect imports.
-    extensions.add(ResizePlugin, TickerPlugin, GraphicsPipe, GraphicsContextSystem,
-      CanvasTextPipe, CanvasTextSystem, EventSystem, FilterPipe, FilterSystem);
+    extensions.add(
+      ResizePlugin,
+      TickerPlugin,
+      GraphicsPipe,
+      GraphicsContextSystem,
+      CanvasTextPipe,
+      CanvasTextSystem,
+      EventSystem,
+      FilterPipe,
+      FilterSystem,
+    );
     this.#app = new Application();
     this.#simulatedLatencyMs = this.#resolveSimulatedLatency();
     if (this.#simulatedLatencyMs > 0) {
-      console.info(
-        `[net] Using simulated latency: ${this.#simulatedLatencyMs}ms`
-      );
+      console.info(`[net] Using simulated latency: ${this.#simulatedLatencyMs}ms`);
     }
     // Initialize debug settings from URL params
     this.#drawWorldBorder = this.#resolveWorldBorderFromURL();
@@ -248,10 +239,9 @@ export class ClientEngine {
     this.#drawColliders = this.#resolveDrawCollidersFromURL();
     this.#disableInterpolation = this.#resolveDisableInterpolationFromURL();
     this.#disableReconciliation = this.#resolveDisableReconciliationFromURL();
-    this.#snapshotTimingDebugEnabled =
-      this.#resolveSnapshotTimingDebugFromURL();
-    this.#useRetroRendering = !this.#resolveRenderedProbeModeFromURL() ||
-      this.#resolveBooleanFlagFromURL("agent-retro");
+    this.#snapshotTimingDebugEnabled = this.#resolveSnapshotTimingDebugFromURL();
+    this.#useRetroRendering =
+      !this.#resolveRenderedProbeModeFromURL() || this.#resolveBooleanFlagFromURL("agent-retro");
     if (!this.#useRetroRendering) {
       this.#renderScale = 1;
     }
@@ -295,9 +285,7 @@ export class ClientEngine {
       return true;
     }
 
-    return (
-      this.#resolveAgentModeFromURL() || this.#resolveRenderedProbeModeFromURL()
-    );
+    return this.#resolveAgentModeFromURL() || this.#resolveRenderedProbeModeFromURL();
   }
 
   #resolveDrawGridFromURL(): boolean {
@@ -492,8 +480,7 @@ export class ClientEngine {
       network: {
         streamHealth: this.#presentationTiming.effectiveHealth,
         renderDelayMs: Math.round(this.#presentationTiming.renderDelayMs * 100) / 100,
-        starvationDurationMs:
-          Math.round(this.#presentationTiming.starvationDurationMs * 100) / 100,
+        starvationDurationMs: Math.round(this.#presentationTiming.starvationDurationMs * 100) / 100,
         latestSnapshotAgeMs:
           this.#presentationTiming.latestSnapshotAgeMs !== null
             ? Math.round(this.#presentationTiming.latestSnapshotAgeMs * 100) / 100
@@ -530,10 +517,8 @@ export class ClientEngine {
         fps: Math.round(currentStats.fps * 10) / 10,
         tickDuration: Math.round(currentStats.tickDuration * 100) / 100,
         connectionError: currentStats.connectionError,
-        inboundBytesPerSecond:
-          Math.round(currentStats.inboundBytesPerSecond * 100) / 100,
-        outboundBytesPerSecond:
-          Math.round(currentStats.outboundBytesPerSecond * 100) / 100,
+        inboundBytesPerSecond: Math.round(currentStats.inboundBytesPerSecond * 100) / 100,
+        outboundBytesPerSecond: Math.round(currentStats.outboundBytesPerSecond * 100) / 100,
         leaderboard: currentStats.players.map((player) => ({
           id: player.id,
           name: player.name,
@@ -551,17 +536,14 @@ export class ClientEngine {
     const services = this.#services;
     const predictedServerTime = this.#predictedServerTime();
     const renderDelayMs = this.#presentationTiming.renderDelayMs;
-    const renderTargetTime = this.#presentationTiming.renderTime ?? predictedServerTime - renderDelayMs;
+    const renderTargetTime =
+      this.#presentationTiming.renderTime ?? predictedServerTime - renderDelayMs;
     const latestSnapshot = this.#snapshotBuffer.getLatest();
     const { previous, next } = this.#snapshotBuffer.getWindow(renderTargetTime);
     const latestSnapshotAgeMs =
-      latestSnapshot !== null
-        ? predictedServerTime - latestSnapshot.serverTime
-        : null;
+      latestSnapshot !== null ? predictedServerTime - latestSnapshot.serverTime : null;
     const interpolationBufferLeadMs =
-      latestSnapshot !== null
-        ? latestSnapshot.serverTime - renderTargetTime
-        : null;
+      latestSnapshot !== null ? latestSnapshot.serverTime - renderTargetTime : null;
 
     const round = (value: number | null | undefined, precision = 2) => {
       if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -572,9 +554,7 @@ export class ClientEngine {
       return Math.round(value * factor) / factor;
     };
 
-    const summarizeSnapshot = (
-      snapshot: { serverTime: number; simTick: number } | null
-    ) =>
+    const summarizeSnapshot = (snapshot: { serverTime: number; simTick: number } | null) =>
       snapshot
         ? {
             serverTime: round(snapshot.serverTime),
@@ -585,26 +565,23 @@ export class ClientEngine {
     const playerEntityId = services?.player.entityId ?? null;
     const transform =
       playerEntityId !== null ? services?.stores.transform.get(playerEntityId) : null;
-    const velocity =
-      playerEntityId !== null ? services?.stores.velocity.get(playerEntityId) : null;
+    const velocity = playerEntityId !== null ? services?.stores.velocity.get(playerEntityId) : null;
     const shipControl =
       playerEntityId !== null ? services?.stores.shipControl.get(playerEntityId) : null;
     const networkState =
-      playerEntityId !== null
-        ? services?.stores.networkState.get(playerEntityId)
-        : null;
+      playerEntityId !== null ? services?.stores.networkState.get(playerEntityId) : null;
 
     const latestServerState =
-      networkState?.state?.type === "ship"
-        ? (networkState.state as GenericNetEntityState)
-        : null;
+      networkState?.state?.type === "ship" ? (networkState.state as GenericNetEntityState) : null;
 
     return {
-      rendering: this.#appInitialized ? {
-        tickerStarted: this.#app.ticker?.started ?? false,
-        cameraChildren: this.#camera.children.length,
-        screen: { width: this.#app.screen.width, height: this.#app.screen.height },
-      } : null,
+      rendering: this.#appInitialized
+        ? {
+            tickerStarted: this.#app.ticker?.started ?? false,
+            cameraChildren: this.#camera.children.length,
+            screen: { width: this.#app.screen.width, height: this.#app.screen.height },
+          }
+        : null,
       predictedServerTime: round(predictedServerTime),
       renderDelayMs: round(renderDelayMs),
       renderTargetTime: round(renderTargetTime),
@@ -621,6 +598,18 @@ export class ClientEngine {
       world: {
         renderedSimTick: services?.world.renderedSimTick ?? 0,
       },
+      ships: [...(latestSnapshot?.entities.values() ?? [])]
+        .filter((s) => s.type === "ship")
+        .map((s) => {
+          const id = services?.entityIndex.get(s.id);
+          const ref = id !== undefined ? services?.stores.renderable.get(id)?.ref : undefined;
+          return {
+            id: s.id,
+            rendered: !!ref,
+            screenX: ref ? round(ref.x * this.#camera.scale.x + this.#camera.x) : null,
+            screenY: ref ? round(ref.y * this.#camera.scale.y + this.#camera.y) : null,
+          };
+        }),
       snapshots: {
         latest: summarizeSnapshot(latestSnapshot),
         previous: summarizeSnapshot(previous),
@@ -728,11 +717,7 @@ export class ClientEngine {
     // Disable CSS-level antialiasing for pixelated retro look
     const canvas = this.#app.canvas;
     canvas.style.imageRendering = "pixelated";
-    canvas.style.setProperty(
-      "image-rendering",
-      "-moz-crisp-edges",
-      "important"
-    );
+    canvas.style.setProperty("image-rendering", "-moz-crisp-edges", "important");
     canvas.style.setProperty("image-rendering", "crisp-edges", "important");
 
     // Disable right-click context menu
@@ -862,9 +847,7 @@ export class ClientEngine {
     // Create and apply edge of world filter
     this.#edgeOfWorldFilter = new EdgeOfWorldFilter();
     const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
-    const renderHeight = Math.floor(
-      this.#app.screen.height * this.#renderScale
-    );
+    const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
     this.#edgeOfWorldFilter.setResolution(renderWidth, renderHeight);
     this.#renderSprite.filters = [this.#edgeOfWorldFilter];
 
@@ -917,10 +900,7 @@ export class ClientEngine {
     const screenHeight = this.#app.screen.height;
 
     // Only update if dimensions actually changed
-    if (
-      screenWidth === this.#lastScreenWidth &&
-      screenHeight === this.#lastScreenHeight
-    ) {
+    if (screenWidth === this.#lastScreenWidth && screenHeight === this.#lastScreenHeight) {
       return;
     }
 
@@ -1149,12 +1129,8 @@ export class ClientEngine {
         const cameraScale = this.#camera.scale.x;
 
         // Convert camera position from screen space to world space
-        const renderWidth = Math.floor(
-          this.#app.screen.width * this.#renderScale
-        );
-        const renderHeight = Math.floor(
-          this.#app.screen.height * this.#renderScale
-        );
+        const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
+        const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
         const screenCenterX = renderWidth / 2;
         const screenCenterY = renderHeight / 2;
         const worldCameraX = (screenCenterX - cameraX) / cameraScale;
@@ -1215,7 +1191,7 @@ export class ClientEngine {
       if (leftTriggerAxis4 >= 0) {
         leftTriggerActive = leftTriggerAxis4 > TRIGGER_THRESHOLD;
       } else {
-        leftTriggerActive = leftTriggerAxis4 > (-1 + TRIGGER_THRESHOLD * 2);
+        leftTriggerActive = leftTriggerAxis4 > -1 + TRIGGER_THRESHOLD * 2;
       }
     }
     // Fallback to button 6 if axis 4 not available
@@ -1231,7 +1207,7 @@ export class ClientEngine {
       if (rightTriggerAxis5 >= 0) {
         rightTriggerActive = rightTriggerAxis5 > TRIGGER_THRESHOLD;
       } else {
-        rightTriggerActive = rightTriggerAxis5 > (-1 + TRIGGER_THRESHOLD * 2);
+        rightTriggerActive = rightTriggerAxis5 > -1 + TRIGGER_THRESHOLD * 2;
       }
     }
     // Fallback to button 7 if axis 5 not available
@@ -1269,9 +1245,9 @@ export class ClientEngine {
 
     // Initialize previous button states array if needed
     if (this.#controls.previousGamepadButtons.length < gamepad.buttons.length) {
-      this.#controls.previousGamepadButtons = new Array(
-        Math.max(gamepad.buttons.length, 10)
-      ).fill(false);
+      this.#controls.previousGamepadButtons = new Array(Math.max(gamepad.buttons.length, 10)).fill(
+        false,
+      );
     }
 
     // Only apply gamepad inputs when in gamepad mode
@@ -1284,9 +1260,7 @@ export class ClientEngine {
       } else {
         // Stick is centered, keep last angle or use current ship angle
         if (this.#controls.gamepadAngle === null && this.#services?.player.entityId) {
-          const transform = this.#services.stores.transform.get(
-            this.#services.player.entityId
-          );
+          const transform = this.#services.stores.transform.get(this.#services.player.entityId);
           if (transform) {
             this.#controls.gamepadAngle = transform.angle;
           }
@@ -1327,7 +1301,7 @@ export class ClientEngine {
         // Try to get player name from input field, or use default
         let playerName = "Player";
         const nameInput = document.querySelector(
-          'input[name="playerName"], .name-input'
+          'input[name="playerName"], .name-input',
         ) as HTMLInputElement;
         if (nameInput && nameInput.value.trim()) {
           playerName = nameInput.value.trim();
@@ -1384,7 +1358,8 @@ export class ClientEngine {
       }
 
       // Apply keyboard inputs when in keyboard mode or null (initial state)
-      const isKeyboardMode = this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
+      const isKeyboardMode =
+        this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
       if (isKeyboardMode) {
         if (e.code === "KeyW" || e.code === "ArrowUp") {
           this.#controls.thrust = true;
@@ -1408,7 +1383,8 @@ export class ClientEngine {
     });
     window.addEventListener("keyup", (e) => {
       // Apply keyboard inputs when in keyboard mode or null (initial state)
-      const isKeyboardMode = this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
+      const isKeyboardMode =
+        this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
       if (isKeyboardMode) {
         if (e.code === "KeyW" || e.code === "ArrowUp") {
           this.#controls.thrust = false;
@@ -1433,7 +1409,10 @@ export class ClientEngine {
       }
 
       // Apply mouse inputs when in keyboard mode or null (initial state)
-      if ((this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null) && e.button === 0) {
+      if (
+        (this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null) &&
+        e.button === 0
+      ) {
         this.#controls.fire = true;
       }
     });
@@ -1496,9 +1475,7 @@ export class ClientEngine {
     const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
       window.location.host
     }/ws`;
-    console.log(
-      `[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`
-    );
+    console.log(`[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`);
 
     this.#ws = new WebSocket(wsUrl);
 
@@ -1525,14 +1502,14 @@ export class ClientEngine {
 
     this.#ws.onmessage = async (eventMessage) => {
       const now = performance.now();
-      
+
       if (this.#lastRawWsMessageTimeMs !== null) {
         const intervalMs = now - this.#lastRawWsMessageTimeMs;
         if (intervalMs > 80) {
           console.warn(`[net] raw ws gap ${Math.round(intervalMs)}ms`);
         }
       }
-    
+
       this.#lastRawWsMessageTimeMs = now;
 
       this.#trackInboundBytes(eventMessage.data);
@@ -1586,10 +1563,8 @@ export class ClientEngine {
           this.#statsGetter().setObjectsCount(
             Math.max(
               0,
-              currentObjects +
-                message.state.updated.length -
-                message.state.removed.length
-            )
+              currentObjects + message.state.updated.length - message.state.removed.length,
+            ),
           );
         }
         if (message.radar) {
@@ -1630,9 +1605,7 @@ export class ClientEngine {
     }
   }
 
-  #trackSnapshotArrivalTiming(
-    message: Extract<NetworkEvent, { type: "server:state" }>
-  ) {
+  #trackSnapshotArrivalTiming(message: Extract<NetworkEvent, { type: "server:state" }>) {
     if (!this.#snapshotTimingDebugEnabled) {
       return;
     }
@@ -1655,30 +1628,23 @@ export class ClientEngine {
       const snapshotKind = message.state.type === "full" ? "full" : "delta";
       console.warn(
         `[net] слишком долгий ${snapshotKind} кадр - ${Math.round(
-          intervalMs
-        )}мс (в среднем ${Math.round(averageIntervalMs)}мс)`
+          intervalMs,
+        )}мс (в среднем ${Math.round(averageIntervalMs)}мс)`,
       );
     }
 
     this.#snapshotArrivalIntervalsMs.push(intervalMs);
-    if (
-      this.#snapshotArrivalIntervalsMs.length > SNAPSHOT_TIMING_SAMPLE_SIZE
-    ) {
+    if (this.#snapshotArrivalIntervalsMs.length > SNAPSHOT_TIMING_SAMPLE_SIZE) {
       this.#snapshotArrivalIntervalsMs.shift();
     }
   }
 
   #getAverageSnapshotArrivalIntervalMs() {
-    if (
-      this.#snapshotArrivalIntervalsMs.length < SNAPSHOT_TIMING_MIN_SAMPLES
-    ) {
+    if (this.#snapshotArrivalIntervalsMs.length < SNAPSHOT_TIMING_MIN_SAMPLES) {
       return null;
     }
 
-    const total = this.#snapshotArrivalIntervalsMs.reduce(
-      (sum, intervalMs) => sum + intervalMs,
-      0
-    );
+    const total = this.#snapshotArrivalIntervalsMs.reduce((sum, intervalMs) => sum + intervalMs, 0);
     return total / this.#snapshotArrivalIntervalsMs.length;
   }
 
@@ -1769,7 +1735,7 @@ export class ClientEngine {
     },
     options?: {
       fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds">;
-    }
+    },
   ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
     const command: ShipInputCommand = {
@@ -1790,10 +1756,7 @@ export class ClientEngine {
     if (includeFields.includes("fire") && command.fire) {
       payloadInput.fire = command.fire;
 
-      if (
-        includeFields.includes("firingCompensation") &&
-        input.firingCompensation !== undefined
-      ) {
+      if (includeFields.includes("firingCompensation") && input.firingCompensation !== undefined) {
         payloadInput.firingCompensation = input.firingCompensation;
       }
     }

@@ -1,4 +1,5 @@
 import { Vector2 } from "@/shared/math/vector";
+import { wrappedDelta, wrappedDistance, wrapCoordinate } from "@/shared/math/world-wrap";
 import type { SerializableEvent } from "@/shared/network/utils";
 import { TPS } from "../constants";
 import type { Engine } from "../engine";
@@ -9,7 +10,9 @@ import { Ship } from "../entities/ship";
 import { ChunkActivityManager } from "./chunk-activity-manager";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
-import { generateWorld } from "./utils/fbm-domain-warp-world-generator";
+import { WorldStreaming, type StreamingInterest } from "./world-streaming";
+import { PirateRoster } from "./pirate-roster";
+import { getPlayerCameraQueryBounds } from "../server-network";
 import type { CommittedWorldEvent, WorldEvent, WorldEventListener } from "./world-events";
 
 export class World {
@@ -18,18 +21,22 @@ export class World {
   #grid = new UniformGrid();
   #chunkActivity = new ChunkActivityManager();
   #collisionResolver = new CollisionResolver();
+  readonly streaming = new WorldStreaming(this);
+  readonly pirates = new PirateRoster(this);
+  #simulated = new Set<BaseEntity>();
+  #maxColliderRadius = 0;
+  get maxColliderRadius() {
+    return this.#maxColliderRadius;
+  }
 
   #borderRadius = 50000;
 
-  #maxAsteroids = 50000;
+  #maxAsteroids = 500000;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;
   #asteroidsMaxBatchCount = 50;
 
-  #maxPirates = 5;
-  #currentPirates = 0;
-  #piratesRefillInterval = TPS * 20;
   #eventsByTick = new Map<number, CommittedWorldEvent[]>();
   #eventListeners = new Set<WorldEventListener>();
   #nextTickEventIndex = 0;
@@ -72,6 +79,8 @@ export class World {
     if (entity.initialized) {
       throw new Error("Entity already initialized");
     }
+    if (entity instanceof Asteroid && !this.streaming.track(entity)) return;
+    this.#maxColliderRadius = Math.max(this.#maxColliderRadius, entity.radius ?? 0);
     this.#entities.set(entity.id, entity);
     if (!(entity instanceof Asteroid)) {
       this.#nonAsteroidEntities.add(entity);
@@ -90,13 +99,101 @@ export class World {
    * This is the single place that keeps both indexes in sync.
    */
   updateSpatialIndex(entity: BaseEntity) {
+    this.#maxColliderRadius = Math.max(this.#maxColliderRadius, entity.radius ?? 0);
+    entity.x = wrapCoordinate(entity.x, this.#borderRadius);
+    entity.y = wrapCoordinate(entity.y, this.#borderRadius);
     this.#grid.update(entity);
     this.#chunkActivity.onEntityMoved(entity);
+    if (entity instanceof Asteroid) this.streaming.moved(entity);
   }
 
   /** Returns chunk activity counters for debugging, tests, and perf snapshots. */
   getActivityStats() {
-    return this.#chunkActivity.getStats();
+    return {
+      ...this.#chunkActivity.getStats(),
+      logicalAsteroids: this.#currentAsteroids,
+      streaming: this.streaming.getStats(),
+      pirates: this.pirates.getStats(),
+    };
+  }
+
+  distance(a: { x: number; y: number }, b: { x: number; y: number }) {
+    return wrappedDistance(a, b, this.#borderRadius);
+  }
+  displacement(a: { x: number; y: number }, b: { x: number; y: number }) {
+    return new Vector2(
+      wrappedDelta(a.x, b.x, this.#borderRadius),
+      wrappedDelta(a.y, b.y, this.#borderRadius),
+    );
+  }
+
+  /** Residency change, not gameplay death. Never modifies the logical population. */
+  detach(entity: BaseEntity) {
+    this.#collisionResolver.removeEntity(this, entity);
+    this.#chunkActivity.onRemove(entity);
+    this.#entities.delete(entity.id);
+    this.#nonAsteroidEntities.delete(entity);
+    this.#grid.remove(entity);
+    this.#simulated.delete(entity);
+  }
+
+  prepareStreaming(budgetMs = 2) {
+    this.streaming.pump(budgetMs);
+  }
+
+  #streamingInterests(): StreamingInterest[] {
+    const areas: StreamingInterest[] = [];
+    for (const player of this.engine.network.players) {
+      const ship = player.ship;
+      if (ship && !ship.removed)
+        areas.push(
+          { x: ship.x, y: ship.y, radius: 1900 },
+          { x: ship.x + ship.vx, y: ship.y + ship.vy, radius: 1900 },
+        );
+      if (player.cameraViewBounds) {
+        const { queryPos, queryRadius } = getPlayerCameraQueryBounds(player);
+        areas.push({ x: queryPos.x, y: queryPos.y, radius: queryRadius + 1000 });
+      }
+    }
+    for (const ship of this.pirates.active)
+      areas.push(
+        { x: ship.x, y: ship.y, radius: 1000 },
+        { x: ship.x + ship.vx, y: ship.y + ship.vy, radius: 1000 },
+      );
+    for (const entity of this.#nonAsteroidEntities)
+      if (entity.type === "bullet" && !entity.removed) {
+        // Cover the entire next-second corridor, including intermediate chunks.
+        const distance = Math.hypot(entity.vx, entity.vy),
+          steps = Math.max(1, Math.ceil(distance / 500));
+        for (let i = 0; i <= steps; i++)
+          areas.push({
+            x: entity.x + (entity.vx * i) / steps,
+            y: entity.y + (entity.vy * i) / steps,
+            radius: 100,
+          });
+      }
+    return areas;
+  }
+
+  #canSimulate(entity: BaseEntity) {
+    if (entity.removed) return true;
+    if (entity instanceof Ship)
+      return this.streaming.isReady({
+        x: entity.x,
+        y: entity.y,
+        radius: entity.initialized
+          ? Math.max(100, Math.hypot(entity.vx, entity.vy) * 0.1)
+          : entity.player
+            ? 1900
+            : 1000,
+      });
+    if (entity.type === "bullet")
+      return this.streaming.isReady({
+        x: entity.x + entity.vx * 0.025,
+        y: entity.y + entity.vy * 0.025,
+        radius: Math.hypot(entity.vx, entity.vy) * 0.025 + 40,
+      });
+    return true;
   }
 
   onEvent(listener: WorldEventListener) {
@@ -163,17 +260,7 @@ export class World {
    * activation chunk is currently awake.
    */
   forEachCollisionEntity(fn: (entity: BaseEntity) => void) {
-    for (const entity of this.#nonAsteroidEntities) {
-      if (!entity.removed) {
-        fn(entity);
-      }
-    }
-
-    for (const asteroid of this.#chunkActivity.getActiveAsteroids()) {
-      if (!asteroid.removed) {
-        fn(asteroid);
-      }
-    }
+    for (const entity of this.#simulated) if (!entity.removed) fn(entity);
   }
 
   #asteroidVelocityFactor = Math.max(Math.random() * 140 - 40, 0);
@@ -191,45 +278,11 @@ export class World {
     this.#engine = engine;
     this.#chunkActivity.initialize(this);
 
-    const asteroidPositions = generateWorld(this.#borderRadius, this.#maxAsteroids);
-
-    for (const position of asteroidPositions) {
-      this.#spawnAsteroid({
-        position,
-        velocity: this.#getAsteroidSpawnVelocity(),
-      });
-    }
-  }
-
-  #spawnPirate() {
-    const position = new Vector2(
-      Math.random() * this.#borderRadius * 2 - this.#borderRadius,
-      Math.random() * this.#borderRadius * 2 - this.#borderRadius,
-    );
-
-    const allPlayers = this.engine.network.players;
-    for (const player of allPlayers) {
-      if (!player.ship || player.ship.removed) continue;
-
-      const distance = player.ship.position.distance(position);
-      if (distance < 1000) {
-        if (this.engine.debug.pirates) {
-          console.log("pirate spawn denied, player too close at distance", distance);
-        }
-
-        return;
-      }
-    }
-
-    const pirate = new Ship({
-      x: position.x,
-      y: position.y,
-      angle: Math.random() * 2 * Math.PI - Math.PI,
-      name: "???",
-    });
-    pirate.ai = new PirateAI();
-    this.spawn(pirate);
-    this.#currentPirates++;
+    this.streaming.initialize(this.#maxAsteroids, Math.floor(Math.random() * 0x100000000));
+    this.#currentAsteroids = this.#maxAsteroids;
+    this.#asteroidVelocityFactor = Math.max(Math.random() * 140 - 40, 0);
+    this.#asteroidAngleFactor = Math.random() * Math.PI * 2 - Math.PI;
+    this.pirates.initialize();
   }
 
   #spawnAsteroid(args?: {
@@ -303,7 +356,9 @@ export class World {
   update(delta: number) {
     this.#nextTickEventIndex = 0;
     this.#refillAsteroids();
-    this.#refillPirates();
+    this.pirates.update();
+    this.streaming.request(this.#streamingInterests(), this.engine.tick);
+    this.streaming.commit(this.engine.tick);
 
     this.engine.measurePerformance("chunkActivityUpdateMs", () => {
       this.#chunkActivity.beginTick(this, delta);
@@ -311,6 +366,11 @@ export class World {
     this.engine.measurePerformance("wakeStabilizationMs", () => {
       this.#chunkActivity.applyWakeStabilization(this);
     });
+
+    this.#simulated.clear();
+    for (const entity of this.#nonAsteroidEntities)
+      if (this.#canSimulate(entity)) this.#simulated.add(entity);
+    for (const entity of this.#chunkActivity.getActiveAsteroids()) this.#simulated.add(entity);
 
     this.engine.measurePerformance("entityUpdateMs", () => {
       this.#forEachSimulatedEntity((entity) => {
@@ -358,10 +418,11 @@ export class World {
 
       if (entity.type === "asteroid") {
         this.#currentAsteroids--;
+        this.streaming.remove(entity as Asteroid);
       }
 
       if (entity instanceof Ship && entity.ai instanceof PirateAI) {
-        this.#currentPirates--;
+        this.pirates.remove(entity);
       }
     }
 
@@ -370,6 +431,7 @@ export class World {
     this.#forEachSimulatedEntity((entity) => {
       entity.postUpdate(this, delta);
     });
+    this.streaming.finishTick(this.engine.tick);
   }
 
   #getEntityUpdateMetric(entity: BaseEntity) {
@@ -384,26 +446,6 @@ export class World {
         return "entityUpdateExpMs" as const;
       default:
         return "entityUpdateOtherMs" as const;
-    }
-  }
-
-  #refillPirates() {
-    if (!this.#engine || this.#engine.tick % this.#piratesRefillInterval !== 0) {
-      return;
-    }
-
-    if (this.#currentPirates >= this.#maxPirates) {
-      if (this.engine.debug.pirates) {
-        console.log("max pirates reached, current: ", this.#currentPirates);
-      }
-      return;
-    }
-
-    this.#spawnPirate();
-
-    if (this.engine.debug.pirates) {
-      console.log("refilled pirates");
-      console.log(`current pirates: ${this.#currentPirates}`);
     }
   }
 
@@ -423,7 +465,8 @@ export class World {
       Math.floor(
         Math.random() * (this.#asteroidsMaxBatchCount - this.#asteroidsMinBatchCount + 1),
       ) + this.#asteroidsMinBatchCount;
-    for (let i = 0; i < batchCount; i++) {
+    const refillCount = Math.min(batchCount, this.#maxAsteroids - this.#currentAsteroids);
+    for (let i = 0; i < refillCount; i++) {
       this.#spawnAsteroid({
         beyondBorder: true,
         velocity: this.#getAsteroidSpawnVelocity(),
@@ -442,7 +485,7 @@ export class World {
    * This will return all entities in area wchich are not marked as removed.
    * */
   query(pos: Vector2, radius: number, includeRemoved: boolean = false) {
-    const entitiesArray = this.#grid.query(pos, radius, false, includeRemoved);
+    const entitiesArray = this.#queryWrapped(pos, radius, false, includeRemoved);
     return this.#createAccessor(entitiesArray, pos, radius);
   }
 
@@ -453,7 +496,7 @@ export class World {
    * including removed entities.
    * */
   queryChanged(pos: Vector2, radius: number) {
-    const entitiesArray = this.#grid.query(pos, radius, true);
+    const entitiesArray = this.#queryWrapped(pos, radius, true);
     return this.#createAccessor(entitiesArray, pos, radius);
   }
 
@@ -471,14 +514,40 @@ export class World {
       precise: () => {
         return createAccessor(
           entities.filter((entity) => {
-            const dx = entity.x - pos.x;
-            const dy = entity.y - pos.y;
+            const dx = wrappedDelta(pos.x, entity.x, this.#borderRadius);
+            const dy = wrappedDelta(pos.y, entity.y, this.#borderRadius);
             return dx ** 2 + dy ** 2 <= radius ** 2;
           }),
         );
       },
       ...createAccessor(entities),
     };
+  }
+
+  #queryWrapped(pos: Vector2, radius: number, changedOnly = false, includeRemoved = false) {
+    const r = this.#borderRadius,
+      size = r * 2,
+      x = wrapCoordinate(pos.x, r),
+      y = wrapCoordinate(pos.y, r);
+    const xs = [x],
+      ys = [y];
+    if (x - radius < -r) xs.push(x + size);
+    if (x + radius >= r) xs.push(x - size);
+    if (y - radius < -r) ys.push(y + size);
+    if (y + radius >= r) ys.push(y - size);
+    if (xs.length === 1 && ys.length === 1)
+      return this.#grid.query(new Vector2(x, y), radius, changedOnly, includeRemoved);
+    const result = new Set<BaseEntity>();
+    for (const xx of xs)
+      for (const yy of ys)
+        for (const entity of this.#grid.query(
+          new Vector2(xx, yy),
+          radius,
+          changedOnly,
+          includeRemoved,
+        ))
+          result.add(entity);
+    return [...result];
   }
 
   broadcast(event: SerializableEvent) {
@@ -505,16 +574,16 @@ export class World {
     this.#eventsByTick.clear();
     this.#nextTickEventIndex = 0;
     this.#currentAsteroids = 0;
-    this.#currentPirates = 0;
+    this.streaming.clear();
+    this.pirates.clear();
+    this.#simulated.clear();
+    this.#removedEntities.clear();
+    this.#maxColliderRadius = 0;
+    this.#collisionResolver.clear();
+    this.#eventListeners.clear();
   }
 
   #forEachSimulatedEntity(fn: (entity: BaseEntity) => void) {
-    for (const entity of this.#nonAsteroidEntities) {
-      fn(entity);
-    }
-
-    for (const asteroid of this.#chunkActivity.getActiveAsteroids()) {
-      fn(asteroid);
-    }
+    for (const entity of this.#simulated) fn(entity);
   }
 }

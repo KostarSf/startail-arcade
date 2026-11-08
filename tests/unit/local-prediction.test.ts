@@ -21,6 +21,7 @@ test("local prediction uses newest authoritative snapshot rather than delayed re
   const services: any = {
     debug: { disableReconciliation: false },
     player: { id: "player", entityId: 1 },
+    world: { radius: 50000 },
     stores: {
       transform: { get: () => transform },
       velocity: { get: () => velocity },

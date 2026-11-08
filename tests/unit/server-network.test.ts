@@ -29,6 +29,9 @@ function harness() {
     lastTickDuration: 2,
     world,
     debug: { disableCompression: true },
+    stop() {
+      this.running = false;
+    },
     measurePerformance: (_: string, fn: () => unknown) => fn(),
   };
   const network = new ServerNetwork(engine);

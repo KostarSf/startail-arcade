@@ -4,9 +4,7 @@ import type { ShipInputCommand } from "../../src/shared/ecs/components";
 import type { GenericNetEntityState } from "../../src/shared/game/entities/base";
 import { reconcileShipState } from "../../src/client/game/network/reconcile-ship-state";
 
-function createCommand(
-  overrides: Partial<ShipInputCommand>
-): ShipInputCommand {
+function createCommand(overrides: Partial<ShipInputCommand>): ShipInputCommand {
   return {
     sequence: overrides.sequence ?? 0,
     thrust: overrides.thrust ?? false,
@@ -17,6 +15,42 @@ function createCommand(
 }
 
 describe("reconcileShipState", () => {
+  test("position correction takes the short path across both world seams", () => {
+    const reconciled = reconcileShipState({
+      latestServerState: { x: -49990, y: -49990, vx: 0, vy: 0 },
+      fallbackState: { x: 49990, y: 49990, angle: 0, vx: 0, vy: 0, va: 0 },
+      acknowledgedInput: null,
+      pendingInputs: [],
+      localControl: { thrust: false, angle: 0 },
+      snapshotSimTick: 1,
+      snapshotServerTime: 50,
+      predictedServerTime: 50,
+      simulationTickMs: 50,
+      streamHealth: "degraded",
+      worldRadius: 50000,
+    });
+    expect(reconciled.x).toBe(-49990);
+    expect(reconciled.y).toBe(-49990);
+  });
+
+  test("a distant authoritative teleport does not replay a journey across the world", () => {
+    const reconciled = reconcileShipState({
+      latestServerState: { x: -49900, y: -49900, vx: 0, vy: 0 },
+      fallbackState: { x: 0, y: 0, angle: 0, vx: 0, vy: 0, va: 0 },
+      acknowledgedInput: null,
+      pendingInputs: [],
+      localControl: { thrust: false, angle: 0 },
+      snapshotSimTick: 1,
+      snapshotServerTime: 50,
+      predictedServerTime: 50,
+      simulationTickMs: 50,
+      streamHealth: "normal",
+      worldRadius: 50000,
+    });
+    expect(reconciled.x).toBe(-49900);
+    expect(reconciled.y).toBe(-49900);
+  });
+
   test("replays pending inputs on simulation tick boundaries", () => {
     const reconciled = reconcileShipState({
       latestServerState: {

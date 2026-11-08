@@ -1,10 +1,10 @@
 // Run with bun. Frozen baseline is extracted from git; all output is ignored.
 import { mkdir } from "node:fs/promises";
 import { resolve, relative } from "node:path";
-import { Engine } from "../src/server/engine/engine";
 import { Asteroid } from "../src/server/engine/entities/asteroid";
 import { Random } from "../src/shared/math/random";
 import { WakeSpatialGrid } from "../src/server/engine/world/wake-spatial-grid";
+import type { World } from "../src/server/engine/world/world";
 
 const out = resolve(".artifacts/optimization-lab");
 await mkdir(out, { recursive: true });
@@ -79,13 +79,30 @@ variants.set(
 );
 const random = new Random(42);
 Math.random = () => random.next();
-console.log("Generating the actual 500,000 asteroid world, seed=42");
-const engine = new Engine();
-engine.world.initialize(engine);
-const all = engine.world.entities
+console.log("Generating the frozen pre-streaming 500,000 asteroid fixture, seed=42");
+// Residency is now lazy. Keep this historical broad-phase comparison on its
+// original fixture instead of accidentally benchmarking an empty live world.
+const fixtureSource = Bun.spawnSync(["git", "show", "49ab5aa:src/server/engine/world/world.ts"]);
+if (fixtureSource.exitCode) throw new Error(fixtureSource.stderr.toString());
+await Bun.write(
+  `${out}/fixture-world.ts`,
+  fixtureSource.stdout
+    .toString()
+    .replace("#maxAsteroids = 50000;", "#maxAsteroids = 500000;")
+    .replace(
+      /from "(\.[^"]+)"/g,
+      (_, path) =>
+        `from ${JSON.stringify(relative(out, resolve("src/server/engine/world", path)).replaceAll("\\", "/"))}`,
+    ),
+);
+const fixtureModule = "../.artifacts/optimization-lab/fixture-world.ts";
+const FixtureWorld: new () => World = (await import(fixtureModule)).World;
+const fixtureWorld = new FixtureWorld();
+fixtureWorld.initialize({ tick: 0, debug: {}, network: { players: [] } } as any);
+const all = fixtureWorld.entities
   .filter((a) => a.type === "asteroid")
   .map((a) => ({ x: a.x, y: a.y, radius: a.radius }));
-engine.world.clear();
+fixtureWorld.clear();
 const density = new Map<string, { x: number; y: number; n: number }>();
 for (const a of all) {
   const x = Math.floor(a.x / 4000) * 4000 + 2000,

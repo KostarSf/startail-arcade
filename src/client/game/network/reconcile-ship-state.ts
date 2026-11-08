@@ -2,6 +2,7 @@ import type { ShipControlComponent, ShipInputCommand } from "@/shared/ecs/compon
 import { integrateMotion } from "@/shared/game/entities/base";
 import { updateShipPhysics, type ShipState } from "@/shared/game/entities/ship";
 import type { SnapshotStreamHealth } from "@/shared/network/events";
+import { wrappedDelta, wrapCoordinate } from "@/shared/math/world-wrap";
 
 const cloneShipState = (state: Partial<ShipState>): ShipState => ({
   name: state.name ?? "unknown",
@@ -20,7 +21,7 @@ const simulateUntil = (
   shipState: ShipState,
   currentInput: Pick<ShipInputCommand, "thrust" | "angle">,
   fromTime: number,
-  toTime: number
+  toTime: number,
 ) => {
   const deltaMs = Math.max(0, toTime - fromTime);
   if (deltaMs <= 0) {
@@ -41,9 +42,7 @@ const simulateUntil = (
 };
 
 export type ReconcileShipStateArgs = {
-  latestServerState:
-    | (Partial<ShipState> & { lastInputSequence?: number })
-    | undefined;
+  latestServerState: (Partial<ShipState> & { lastInputSequence?: number }) | undefined;
   fallbackState: Pick<ShipState, "x" | "y" | "angle" | "vx" | "vy" | "va">;
   acknowledgedInput: ShipInputCommand | null;
   pendingInputs: ShipInputCommand[];
@@ -53,12 +52,10 @@ export type ReconcileShipStateArgs = {
   predictedServerTime: number;
   simulationTickMs: number;
   streamHealth: SnapshotStreamHealth;
+  worldRadius?: number;
 };
 
-const getReplayHorizonMs = (
-  streamHealth: SnapshotStreamHealth,
-  simulationTickMs: number
-) => {
+const getReplayHorizonMs = (streamHealth: SnapshotStreamHealth, simulationTickMs: number) => {
   switch (streamHealth) {
     case "degraded":
       return Math.max(simulationTickMs * 2, 80);
@@ -99,6 +96,7 @@ export const reconcileShipState = ({
   predictedServerTime,
   simulationTickMs,
   streamHealth,
+  worldRadius = 0,
 }: ReconcileShipStateArgs) => {
   const authoritative = cloneShipState({
     ...latestServerState,
@@ -156,7 +154,7 @@ export const reconcileShipState = ({
   const replayHorizonMs = getReplayHorizonMs(streamHealth, simulationTickMs);
   const simulatedAheadMs = Math.min(
     Math.max(0, predictedServerTime - snapshotServerTime),
-    replayHorizonMs
+    replayHorizonMs,
   );
   const fullTicksAhead = Math.floor(simulatedAheadMs / simulationTickMs);
   const remainingMs = simulatedAheadMs - fullTicksAhead * simulationTickMs;
@@ -164,12 +162,7 @@ export const reconcileShipState = ({
 
   for (let tickOffset = 0; tickOffset < fullTicksAhead; tickOffset++) {
     applyPendingInputsAtTickBoundary(simulatedTime);
-    simulateUntil(
-      authoritative,
-      currentInput,
-      simulatedTime,
-      simulatedTime + simulationTickMs
-    );
+    simulateUntil(authoritative, currentInput, simulatedTime, simulatedTime + simulationTickMs);
     simulatedTime += simulationTickMs;
     simulatedTick++;
   }
@@ -184,7 +177,7 @@ export const reconcileShipState = ({
         angle: currentInput.angle,
       },
       simulatedTime,
-      simulatedTime + remainingMs
+      simulatedTime + remainingMs,
     );
   }
 
@@ -192,14 +185,19 @@ export const reconcileShipState = ({
   authoritative.angle = localControl.angle;
 
   const divergenceCap = getDivergenceCap(streamHealth);
-  const divergenceX = authoritative.x - fallbackState.x;
-  const divergenceY = authoritative.y - fallbackState.y;
+  const divergenceX = wrappedDelta(fallbackState.x, authoritative.x, worldRadius);
+  const divergenceY = wrappedDelta(fallbackState.y, authoritative.y, worldRadius);
   const divergenceDistance = Math.hypot(divergenceX, divergenceY);
-  if (divergenceDistance > divergenceCap) {
+  // A real teleport/resync must not drag the camera and its streaming interest
+  // through kilometres of unrelated chunks. Ordinary corrections remain capped.
+  if (divergenceDistance > divergenceCap && divergenceDistance < 1000) {
     const scale = divergenceCap / divergenceDistance;
     authoritative.x = fallbackState.x + divergenceX * scale;
     authoritative.y = fallbackState.y + divergenceY * scale;
   }
+
+  authoritative.x = wrapCoordinate(authoritative.x, worldRadius);
+  authoritative.y = wrapCoordinate(authoritative.y, worldRadius);
 
   return authoritative;
 };

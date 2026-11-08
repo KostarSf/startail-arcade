@@ -13,14 +13,22 @@ export abstract class ShipAI {
 
   initialize(ship: Ship, world: World): void {}
 
+  ensureInitialized(ship: Ship, world: World) {
+    if (!this.#initialized) {
+      this.initialize(ship, world);
+      this.#initialized = true;
+    }
+  }
+
+  protected restoreInitialization() {
+    this.#initialized = true;
+  }
+
   onShipDamage(world: World, amount: number, source?: BaseEntity): void {}
 
   update(ship: Ship, world: World, delta: number): void {
     if (world.engine.tick % this.tickRate === 0) {
-      if (!this.#initialized) {
-        this.initialize(ship, world);
-        this.#initialized = true;
-      }
+      this.ensureInitialized(ship, world);
 
       this.tick(ship, world, delta);
     }

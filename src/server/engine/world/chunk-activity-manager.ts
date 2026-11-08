@@ -1,4 +1,5 @@
 import { TPS } from "../constants";
+import { wrappedDelta } from "@/shared/math/world-wrap";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import { getPlayerCameraQueryBounds } from "../server-network";
@@ -119,6 +120,7 @@ export class ChunkActivityManager {
     // redundant first-tick scan of the entire generated world.
     if (this.#awakeChunks.has(chunkIndex)) {
       this.#pendingAsteroidReconciliation.add(entity);
+      this.#getOrCreateChunkState(chunkIndex).stabilizationPending = true;
     }
   }
 
@@ -193,6 +195,9 @@ export class ChunkActivityManager {
     const tick = world.engine.tick;
     const touchedChunks = new Set<number>();
     this.#justWokeChunks.clear();
+
+    for (const index of this.#awakeChunks)
+      if (this.#chunkStates.get(index)?.stabilizationPending) this.#justWokeChunks.add(index);
 
     this.#touchPlayerViewChunks(world, touchedChunks);
     this.#touchWakeEntityChunks(world, delta, touchedChunks);
@@ -272,13 +277,13 @@ export class ChunkActivityManager {
           !asteroid.removed && pendingChunks.has(this.getChunkIndexAt(asteroid.x, asteroid.y)),
       ),
     );
-    const grid = new WakeSpatialGrid(this.#activeAsteroids);
+    const grid = new WakeSpatialGrid(this.#activeAsteroids, 64, world.borderRadius);
     const processedPairs = new Set<string>();
     for (const asteroid of waking) {
       for (const other of grid.query(asteroid)) {
         if (asteroid === other || other.removed) continue;
-        const dx = other.x - asteroid.x,
-          dy = other.y - asteroid.y;
+        const dx = wrappedDelta(asteroid.x, other.x, world.borderRadius),
+          dy = wrappedDelta(asteroid.y, other.y, world.borderRadius);
         const radius = asteroid.radius + other.radius;
         if (dx * dx + dy * dy >= radius * radius) continue;
         const pairKey = this.#getPairKey(asteroid, other);
@@ -435,8 +440,8 @@ export class ChunkActivityManager {
   }
 
   #separateAsteroidPair(world: World, asteroid: Asteroid, other: Asteroid, otherJustWoke: boolean) {
-    const dx = other.x - asteroid.x;
-    const dy = other.y - asteroid.y;
+    const dx = wrappedDelta(asteroid.x, other.x, world.borderRadius);
+    const dy = wrappedDelta(asteroid.y, other.y, world.borderRadius);
     const radiusSum = asteroid.radius + other.radius;
     const distanceSquared = dx * dx + dy * dy;
     if (distanceSquared >= radiusSum * radiusSum) {

@@ -1,11 +1,16 @@
 import { Vector2 } from "@/shared/math/vector";
 import { Asteroid } from "../entities/asteroid";
+import { Bullet } from "../entities/bullet";
 import type { BaseEntity } from "../entities/base-entity";
 import type { World } from "./world";
 
 export class CollisionResolver {
   #lastPairs = new Set<string>();
   #currentPairs = new Set<string>();
+  clear() {
+    this.#lastPairs.clear();
+    this.#currentPairs.clear();
+  }
 
   update(world: World) {
     this.#currentPairs.clear();
@@ -30,7 +35,7 @@ export class CollisionResolver {
 
   #detectDiscreteCollisions(world: World, a: BaseEntity) {
     world.engine.measurePerformance("collisionDiscreteMs", () => {
-      const neighbors = world.query(a.position, (a.radius ?? 0) * 2).array();
+      const neighbors = world.query(a.position, (a.radius ?? 0) + world.maxColliderRadius).array();
 
       for (const b of neighbors) {
         if (a === b) continue;
@@ -38,7 +43,7 @@ export class CollisionResolver {
         if (b.continuousCollision && b.moved) continue;
         if (!this.#canCollide(world, a, b)) continue;
 
-        if (this.#checkCircleCollision(a, b)) {
+        if (this.#checkCircleCollision(world, a, b)) {
           const key = this.#pairKey(a, b);
           if (this.#currentPairs.has(key)) continue;
           this.#currentPairs.add(key);
@@ -47,9 +52,8 @@ export class CollisionResolver {
     });
   }
 
-  #checkCircleCollision(a: BaseEntity, b: BaseEntity) {
-    const dx = a.x - b.x;
-    const dy = a.y - b.y;
+  #checkCircleCollision(world: World, a: BaseEntity, b: BaseEntity) {
+    const { x: dx, y: dy } = world.displacement(a, b);
     const r = (a.radius ?? 0) + (b.radius ?? 0);
     return dx ** 2 + dy ** 2 <= r ** 2;
   }
@@ -61,7 +65,7 @@ export class CollisionResolver {
   #detectContinuousCollisions(world: World, entity: BaseEntity) {
     world.engine.measurePerformance("collisionContinuousMs", () => {
       const prevPos = entity.prevPos;
-      const currPos = entity.position;
+      const currPos = prevPos.add(world.displacement(prevPos, entity));
       const dx = currPos.x - prevPos.x;
       const dy = currPos.y - prevPos.y;
       const distance = Math.hypot(dx, dy);
@@ -73,14 +77,11 @@ export class CollisionResolver {
       }
 
       const entityRadius = entity.radius ?? 0;
-      const queryRadius = distance + entityRadius * 2;
+      const queryRadius = distance / 2 + entityRadius + world.maxColliderRadius;
       const midX = (prevPos.x + currPos.x) / 2;
       const midY = (prevPos.y + currPos.y) / 2;
 
-      const candidates = world
-        .query(new Vector2(midX, midY), queryRadius)
-        .precise()
-        .array();
+      const candidates = world.query(new Vector2(midX, midY), queryRadius).precise().array();
 
       let earliestCollision: { entity: BaseEntity; t: number } | null = null;
 
@@ -89,21 +90,19 @@ export class CollisionResolver {
         if (!other.radius || !other.initialized) continue;
         if (!this.#canCollide(world, entity, other)) continue;
 
+        const otherPosition = prevPos.add(world.displacement(prevPos, other));
         const collision = this.#sweptCircleCollision(
           prevPos.x,
           prevPos.y,
           currPos.x,
           currPos.y,
           entityRadius,
-          other.x,
-          other.y,
-          other.radius ?? 0
+          otherPosition.x,
+          otherPosition.y,
+          other.radius ?? 0,
         );
 
-        if (
-          collision &&
-          (!earliestCollision || collision.t < earliestCollision.t)
-        ) {
+        if (collision && (!earliestCollision || collision.t < earliestCollision.t)) {
           earliestCollision = { entity: other, t: collision.t };
         }
       }
@@ -113,6 +112,7 @@ export class CollisionResolver {
         // Move entity to collision point
         const t = Math.max(0, earliestCollision.t - 0.001); // Slight offset to prevent overlap
         entity.position = new Vector2(prevPos.x + dx * t, prevPos.y + dy * t);
+        world.updateSpatialIndex(entity);
 
         // Mark as colliding
         const key = this.#pairKey(entity, earliestCollision.entity);
@@ -132,7 +132,7 @@ export class CollisionResolver {
     r1: number, // Moving entity radius
     x3: number,
     y3: number, // Static entity position
-    r2: number // Static entity radius
+    r2: number, // Static entity radius
   ): { t: number } | null {
     // Vector from start to end
     const dx = x2 - x1;
@@ -158,8 +158,9 @@ export class CollisionResolver {
     // Solve quadratic equation: |start + t * direction - other| = expandedRadius
     // Which expands to: at² + bt + c = 0
     const a = dx * dx + dy * dy;
-    const b = 2 * (fx * dx + fy * dy);
+    const b = -2 * (fx * dx + fy * dy);
     const c = fx * fx + fy * fy - expandedRadius * expandedRadius;
+    if (c <= 0) return { t: 0 };
 
     const discriminant = b * b - 4 * a * c;
 
@@ -186,9 +187,8 @@ export class CollisionResolver {
   #processEvents(world: World) {
     world.engine.measurePerformance("collisionProcessEventsMs", () => {
       for (const key of this.#currentPairs) {
-        const [a, b] = world.engine.measurePerformance(
-          "collisionPairDecodeMs",
-          () => this.#resolvePair(world, key)
+        const [a, b] = world.engine.measurePerformance("collisionPairDecodeMs", () =>
+          this.#resolvePair(world, key),
         );
         if (!a || !b) continue;
 
@@ -203,9 +203,8 @@ export class CollisionResolver {
 
       for (const key of this.#lastPairs) {
         if (!this.#currentPairs.has(key)) {
-          const [a, b] = world.engine.measurePerformance(
-            "collisionPairDecodeMs",
-            () => this.#resolvePair(world, key)
+          const [a, b] = world.engine.measurePerformance("collisionPairDecodeMs", () =>
+            this.#resolvePair(world, key),
           );
           if (!a || !b) continue;
 
@@ -254,6 +253,9 @@ export class CollisionResolver {
   }
 
   #canCollide(world: World, a: BaseEntity, b: BaseEntity) {
+    if (a.removed || b.removed) return false;
+    if ((a instanceof Bullet && a.owner === b) || (b instanceof Bullet && b.owner === a))
+      return false;
     if (world.chunkActivity.isEntitySleeping(a)) {
       return false;
     }

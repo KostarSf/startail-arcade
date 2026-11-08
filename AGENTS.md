@@ -180,3 +180,9 @@ bundled Chromium is unavailable. See `OPTIMIZATION_CHECKLIST.md` for results.
 texture/filter path. The probe now requires a running Pixi application ticker;
 boot flags alone are insufficient evidence of rendered gameplay. Startup allows
 60 seconds for large world generation alongside software WebGL.
+
+`--sim-jitter-ms=120` varies artificial latency from the `--sim-latency` base
+by an additional 0–120ms using a seeded sequence every 50ms. This exercises
+irregular application-level delivery, not packet loss or bandwidth limits.
+Optimization comparisons and their reproducible scripts are documented in
+`OPTIMIZATION_RESULTS.md`; run CPU benchmarks sequentially to avoid contention.

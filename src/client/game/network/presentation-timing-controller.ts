@@ -20,7 +20,7 @@ export class PresentationTimingController {
   #renderDelayMs = 100;
   #targetDelayMs = 100;
   #cadenceMs = 50;
-  #jitter: number[] = [];
+  #arrivalGaps: number[] = [];
   #intervals: number[] = [];
   #lastArrival: number | null = null;
   #lastServerTime: number | null = null;
@@ -60,12 +60,15 @@ export class PresentationTimingController {
     if (this.#lastArrival !== null && this.#lastServerTime !== null) {
       const elapsed = state.serverTime - this.#lastServerTime;
       this.#intervals.push(elapsed);
-      this.#jitter.push(Math.max(0, receivedAtMs - this.#lastArrival - elapsed));
+      this.#arrivalGaps.push(Math.max(0, receivedAtMs - this.#lastArrival));
       if (this.#intervals.length > 60) this.#intervals.shift();
-      if (this.#jitter.length > 60) this.#jitter.shift();
+      if (this.#arrivalGaps.length > 180) this.#arrivalGaps.shift();
       this.#cadenceMs = percentile(this.#intervals, 0.5, 50);
+      // Retain rare gaps for ~9 seconds at 20 Hz. A p95 arrival/server-time
+      // difference misses isolated stalls and cancels out coalesced ticks.
+      // Cover the observed gap, with a two-snapshot minimum for normal jitter.
       this.#targetDelayMs = clamp(
-        2 * this.#cadenceMs + percentile(this.#jitter, 0.95, 0),
+        Math.max(2 * this.#cadenceMs, percentile(this.#arrivalGaps, 1, 50)),
         100,
         400,
       );
@@ -112,7 +115,7 @@ export class PresentationTimingController {
     this.#renderTime = null;
     this.#renderDelayMs = this.#targetDelayMs = 100;
     this.#cadenceMs = 50;
-    this.#jitter.length = this.#intervals.length = 0;
+    this.#arrivalGaps.length = this.#intervals.length = 0;
     this.#lastArrival = this.#lastServerTime = null;
     this.#serverHealth = this.#localHealth = "normal";
     this.#starvationDurationMs = 0;

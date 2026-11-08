@@ -15,7 +15,9 @@ Current implementation (2026-11-08):
   reconnect. Baseline mismatch closes the connection rather than silently
   applying a broken delta chain.
 - The presentation clock is monotonic, with a 100–400ms target buffer derived
-  from observed cadence and p95 positive arrival jitter. Normal playback adjusts
+  from twice the observed cadence and the largest arrival gap over 180 snapshots.
+  This retains rare/coalesced stalls that arrival-minus-server-time p95 missed.
+  Normal playback adjusts
   by at most ±10%; short starvation permits up to 60ms of extrapolation, then
   holds. A tab suspended for over a second may re-anchor forward to current
   history instead of replaying stale seconds. Local prediction consumes the newest authoritative snapshot separately.
@@ -33,8 +35,13 @@ bun run probe:agent --client-mode=rendered --retro-rendering --debug-performance
 ```
 
 The stall endpoint accepts POST only, a bounded 0–250ms duration, and exists only
-in test mode. The probe's artificial latency is fixed in each direction; it is
+in test mode. Add `--sim-jitter-ms=120` to vary the simulated latency above its
+base value every 50ms using a seeded sequence. This is application-level delay,
 not a packet-loss or bandwidth emulator.
+
+Snapshots use gzip with `library: "libdeflate", level: 1`. See
+[OPTIMIZATION_RESULTS.md](OPTIMIZATION_RESULTS.md) for measured trade-offs,
+alternative buffer policies, and the wake broad-phase comparison.
 
 `--retro-rendering` keeps the test API but exercises the normal render texture and
 edge filter. Browser application, graphics, text, event and filter extensions are

@@ -75,6 +75,7 @@ applyEnvOverride(env, "PROBE_ARTIFACTS_DIR", options["artifacts-dir"]);
 applyEnvOverride(env, "PROBE_PORT", options.port);
 applyEnvOverride(env, "PROBE_CLIENT_MODE", options["client-mode"]);
 applyEnvOverride(env, "PROBE_SIMULATED_LATENCY_MS", options["sim-latency"]);
+applyEnvOverride(env, "PROBE_SIMULATED_JITTER_MS", options["sim-jitter-ms"]);
 applyEnvOverride(env, "PROBE_TRACE_INTERVAL_MS", options["trace-interval"]);
 applyEnvOverride(env, "PROBE_SERVER_STALL_MS", options["server-stall-ms"]);
 

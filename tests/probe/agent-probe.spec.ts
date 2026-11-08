@@ -144,6 +144,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   const clientMode = process.env.PROBE_CLIENT_MODE || "lightweight";
   const debugPerformance = process.env.PROBE_DEBUG_PERFORMANCE === "1";
   const simulatedLatencyMs = parseEnvNumber("PROBE_SIMULATED_LATENCY_MS", 0);
+  const simulatedJitterMs = parseEnvNumber("PROBE_SIMULATED_JITTER_MS", 0);
   const disableInterpolation = parseEnvBoolean("PROBE_DISABLE_INTERPOLATION");
   const disableReconciliation = parseEnvBoolean(
     "PROBE_DISABLE_RECONCILIATION"
@@ -166,6 +167,7 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     durationMs,
     clientMode,
     simulatedLatencyMs,
+    simulatedJitterMs,
     disableInterpolation,
     disableReconciliation,
     captureDebugTrace,
@@ -299,6 +301,18 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
         fire: false,
       });
     });
+
+    if (simulatedJitterMs > 0) {
+      await page.evaluate(({seed,base,jitter}) => {
+        let state = seed >>> 0;
+        setInterval(() => {
+          state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+          window.__STARTAIL_TEST_API__?.configureDebug({
+            simulatedLatencyMs: base + Math.floor((state / 4294967296) * jitter),
+          });
+        }, 50);
+      }, {seed,base:simulatedLatencyMs,jitter:simulatedJitterMs});
+    }
 
     const traceStartedAt = Date.now();
     let fireSent = false;

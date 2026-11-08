@@ -3,6 +3,7 @@ import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import { getPlayerCameraQueryBounds } from "../server-network";
 import type { World } from "./world";
+import { WakeSpatialGrid } from "./wake-spatial-grid";
 
 export type ChunkWakeSource =
   | {
@@ -114,7 +115,11 @@ export class ChunkActivityManager {
 
     chunkAsteroids.add(entity);
     this.#asteroidChunkIndices.set(entity, chunkIndex);
-    this.#pendingAsteroidReconciliation.add(entity);
+    // Sleeping spawns join the active set when their chunk wakes. Avoid a
+    // redundant first-tick scan of the entire generated world.
+    if (this.#awakeChunks.has(chunkIndex)) {
+      this.#pendingAsteroidReconciliation.add(entity);
+    }
   }
 
   /**
@@ -250,54 +255,42 @@ export class ChunkActivityManager {
    * active again after asteroids drifted into overlap.
    */
   applyWakeStabilization(world: World) {
+    if (this.#justWokeChunks.size === 0) return;
+    const pendingChunks = new Set(
+      Array.from(this.#justWokeChunks).filter(
+        (index) => this.#chunkStates.get(index)?.stabilizationPending,
+      ),
+    );
+    if (pendingChunks.size === 0) return;
+
+    // Freeze membership: separating a pair can move either asteroid into a
+    // different chunk. Neither live Set iteration nor new membership should
+    // change which bodies are allowed to move during this stabilization pass.
+    const waking = new Set(
+      Array.from(this.#activeAsteroids).filter(
+        (asteroid) =>
+          !asteroid.removed && pendingChunks.has(this.getChunkIndexAt(asteroid.x, asteroid.y)),
+      ),
+    );
+    const grid = new WakeSpatialGrid(this.#activeAsteroids);
     const processedPairs = new Set<string>();
-
-    for (const chunkIndex of this.#justWokeChunks) {
-      const state = this.#chunkStates.get(chunkIndex);
-      if (!state?.stabilizationPending) {
-        continue;
+    for (const asteroid of waking) {
+      for (const other of grid.query(asteroid)) {
+        if (asteroid === other || other.removed) continue;
+        const dx = other.x - asteroid.x,
+          dy = other.y - asteroid.y;
+        const radius = asteroid.radius + other.radius;
+        if (dx * dx + dy * dy >= radius * radius) continue;
+        const pairKey = this.#getPairKey(asteroid, other);
+        if (processedPairs.has(pairKey)) continue;
+        processedPairs.add(pairKey);
+        this.#separateAsteroidPair(world, asteroid, other, waking.has(other));
+        grid.update(asteroid);
+        grid.update(other);
       }
-
-      const chunkAsteroids = this.#asteroidsByChunk.get(chunkIndex);
-      if (!chunkAsteroids || chunkAsteroids.size === 0) {
-        state.stabilizationPending = false;
-        continue;
-      }
-
-      for (const asteroid of chunkAsteroids) {
-        if (asteroid.removed) {
-          continue;
-        }
-
-        for (const neighborChunkIndex of this.#getNeighborChunkIndices(chunkIndex)) {
-          if (neighborChunkIndex !== chunkIndex && !this.#awakeChunks.has(neighborChunkIndex)) {
-            continue;
-          }
-
-          const neighborAsteroids = this.#asteroidsByChunk.get(neighborChunkIndex);
-          if (!neighborAsteroids) {
-            continue;
-          }
-
-          const neighborJustWoke = this.#justWokeChunks.has(neighborChunkIndex);
-
-          for (const other of neighborAsteroids) {
-            if (asteroid === other || other.removed) {
-              continue;
-            }
-
-            const pairKey = this.#getPairKey(asteroid, other);
-            if (processedPairs.has(pairKey)) {
-              continue;
-            }
-            processedPairs.add(pairKey);
-
-            this.#separateAsteroidPair(world, asteroid, other, neighborJustWoke);
-          }
-        }
-      }
-
-      state.stabilizationPending = false;
+    }
+    for (const chunkIndex of pendingChunks) {
+      this.#chunkStates.get(chunkIndex)!.stabilizationPending = false;
     }
   }
 
@@ -441,22 +434,6 @@ export class ChunkActivityManager {
     return mirroredPoints;
   }
 
-  #getNeighborChunkIndices(chunkIndex: number) {
-    const chunkX = chunkIndex % this.#chunksPerAxis;
-    const chunkY = Math.floor(chunkIndex / this.#chunksPerAxis);
-    const neighbors: number[] = [];
-
-    for (let dx = -1; dx <= 1; dx++) {
-      const neighborX = this.#wrapChunkCoord(chunkX + dx);
-      for (let dy = -1; dy <= 1; dy++) {
-        const neighborY = this.#wrapChunkCoord(chunkY + dy);
-        neighbors.push(this.#toChunkIndex(neighborX, neighborY));
-      }
-    }
-
-    return neighbors;
-  }
-
   #separateAsteroidPair(world: World, asteroid: Asteroid, other: Asteroid, otherJustWoke: boolean) {
     const dx = other.x - asteroid.x;
     const dy = other.y - asteroid.y;
@@ -475,9 +452,7 @@ export class ChunkActivityManager {
     const normalX = distance > 0.0001 ? dx / distance : 1;
     const normalY = distance > 0.0001 ? dy / distance : 0;
 
-    const asteroidJustWoke = this.#justWokeChunks.has(this.getChunkIndexAt(asteroid.x, asteroid.y));
-
-    if (asteroidJustWoke && otherJustWoke) {
+    if (otherJustWoke) {
       const shift = overlap * 0.5;
       asteroid.x -= normalX * shift;
       asteroid.y -= normalY * shift;
@@ -490,20 +465,10 @@ export class ChunkActivityManager {
       return;
     }
 
-    if (asteroidJustWoke) {
-      asteroid.x -= normalX * overlap;
-      asteroid.y -= normalY * overlap;
-      asteroid.markChanged();
-      world.updateSpatialIndex(asteroid);
-      return;
-    }
-
-    if (otherJustWoke) {
-      other.x += normalX * overlap;
-      other.y += normalY * overlap;
-      other.markChanged();
-      world.updateSpatialIndex(other);
-    }
+    asteroid.x -= normalX * overlap;
+    asteroid.y -= normalY * overlap;
+    asteroid.markChanged();
+    world.updateSpatialIndex(asteroid);
   }
 
   #getPairKey(a: Asteroid, b: Asteroid) {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { NetworkDecoder } from "../../src/client/game/network/network-decoder";
 import type { ClientEngine } from "../../src/client/game/client-engine";
+import { event } from "../../src/shared/network/utils";
 
 class SlowBlob extends Blob {
   override async arrayBuffer() {
@@ -16,6 +17,15 @@ const message = (data: Blob) => ({ data }) as MessageEvent;
 const decoder = () => new NetworkDecoder({ simulatedLatencyMs: 0 } as ClientEngine);
 
 describe("ordered network decoding", () => {
+  test("production compression is compatible with the browser gzip decoder", async () => {
+    const original = { type: "server:pong" as const, sequence: 1, clientTime: 10, serverTime: 50 };
+    const encoded = event(original).serialize({ compress: true });
+    let decoded: unknown;
+    await decoder().process(message(new Blob([encoded])), (m) => {
+      decoded = m;
+    });
+    expect(decoded).toEqual(original);
+  });
   test("a slow first decode cannot be overtaken by the next packet", async () => {
     const d = decoder(),
       received: number[] = [];

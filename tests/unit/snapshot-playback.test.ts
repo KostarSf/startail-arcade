@@ -90,9 +90,48 @@ test("partial snapshot prediction never mutates buffered history", () => {
 test("returning from a suspended tab reanchors forward instead of replaying obsolete history", () => {
   const clock = new PresentationTimingController();
   clock.observeSnapshot(snapshot(20), 1000);
-  const before = clock.updateWindow({ predictedServerTime: 1000, latestSnapshotServerTime: 1000, hasNextSnapshot: true, dtMs: 16 })!;
+  const before = clock.updateWindow({
+    predictedServerTime: 1000,
+    latestSnapshotServerTime: 1000,
+    hasNextSnapshot: true,
+    dtMs: 16,
+  })!;
   clock.observeSnapshot(snapshot(220), 11000);
-  const after = clock.updateWindow({ predictedServerTime: 11000, latestSnapshotServerTime: 11000, hasNextSnapshot: true, dtMs: 10000 })!;
+  const after = clock.updateWindow({
+    predictedServerTime: 11000,
+    latestSnapshotServerTime: 11000,
+    hasNextSnapshot: true,
+    dtMs: 10000,
+  })!;
   expect(after).toBeGreaterThan(before);
   expect(11000 - after).toBeLessThanOrEqual(400);
+});
+test("playback learns rare coalesced gaps without permanently delaying a healthy connection", () => {
+  const controller = new PresentationTimingController();
+  let latest = 0,
+    previous = -Infinity,
+    lateHolds = 0;
+  let lastReceived = 0;
+  // A 200ms snapshot gap every 5 seconds. Coalescing advances serverTime by
+  // the same amount, so arrival-minus-server jitter would incorrectly be zero.
+  for (let now = 0; now <= 30000; now += 10) {
+    const phase = now % 5000;
+    if (now % 50 === 0 && !(now < 15000 && phase >= 1000 && phase < 1200)) {
+      latest = now;
+      controller.observeSnapshot({ serverTime: now, simTick: now / 50 } as any, now);
+      lastReceived = now;
+    }
+    const target = controller.updateWindow({
+      predictedServerTime: now,
+      latestSnapshotServerTime: latest,
+      hasNextSnapshot: true,
+      dtMs: 10,
+    })!;
+    expect(target).toBeGreaterThanOrEqual(previous);
+    if (now >= 5000 && now < 15000 && target === previous) lateHolds++;
+    previous = target;
+  }
+  expect(lateHolds).toBe(0);
+  expect(lastReceived).toBe(30000);
+  expect(controller.renderDelayMs).toBeLessThan(120);
 });

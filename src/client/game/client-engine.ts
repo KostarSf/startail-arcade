@@ -15,6 +15,7 @@ import {
   RenderTexture,
   Sprite,
   Texture,
+  Text,
   Ticker,
 } from "pixi.js";
 
@@ -598,6 +599,14 @@ export class ClientEngine {
       world: {
         renderedSimTick: services?.world.renderedSimTick ?? 0,
       },
+      effects: this.#camera.children
+        .filter((ref) => ref.label === "world-damage-text" || ref.label === "world-explosion")
+        .map((ref) => ({
+          kind: ref.label,
+          text: ref instanceof Text ? ref.text : null,
+          screenX: round(ref.x * this.#camera.scale.x + this.#camera.x),
+          screenY: round(ref.y * this.#camera.scale.y + this.#camera.y),
+        })),
       ships: [...(latestSnapshot?.entities.values() ?? [])]
         .filter((s) => s.type === "ship")
         .map((s) => {

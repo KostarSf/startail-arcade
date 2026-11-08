@@ -57,10 +57,7 @@ test("the last browser disconnect clears resident, cold, queued and pirate state
   await next.close();
 });
 
-test("a rendered pursuit survives the player and pirate crossing the world seam", async ({
-  page,
-  request,
-}) => {
+test("a rendered pursuit and combat effects survive the world seam", async ({ page, request }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const playerId = await join(page, "Seam Chase", true);
@@ -144,5 +141,60 @@ test("a rendered pursuit survives the player and pirate crossing the world seam"
       () => window.__STARTAIL_TEST_API__!.getDebugNetworkSnapshot()?.rendering?.tickerStarted,
     ),
   ).toBe(true);
+  // Exercise actual damage/death events from a visible NPC on the opposite side.
+  // Sample each frame because an explosion only lives for half a second.
+  for (const amount of [17, 10000000]) {
+    await teleport(pirate.id, 49950, 49950, playerId);
+    const observed = page.evaluate(async (amount) => {
+      const seen = new Set<string>();
+      const samples: unknown[] = [];
+      const end = performance.now() + 10000;
+      while (performance.now() < end) {
+        const debug = window.__STARTAIL_TEST_API__!.getDebugNetworkSnapshot();
+        if (debug?.effects.length && samples.length < 20) samples.push(debug.effects);
+        const visible = (debug?.effects ?? []).filter(
+          (effect) =>
+            effect.screenX !== null &&
+            effect.screenY !== null &&
+            effect.screenX >= 0 &&
+            effect.screenX <= 1280 &&
+            effect.screenY >= 0 &&
+            effect.screenY <= 720,
+        );
+        const damage = visible.find((effect) => effect.text === `-${amount}`);
+        if (damage) {
+          seen.add("world-damage-text");
+          if (
+            visible.some(
+              (effect) =>
+                effect.kind === "world-explosion" &&
+                Math.abs(effect.screenX! - damage.screenX!) < 20 &&
+                Math.abs(effect.screenY! - damage.screenY!) < 40,
+            )
+          )
+            seen.add("world-explosion");
+        }
+        if (seen.size === 2) break;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return {
+        seen: [...seen],
+        samples,
+        debug: window.__STARTAIL_TEST_API__!.getDebugNetworkSnapshot(),
+      };
+    }, amount);
+    const hit = await request.post("/__test/damage", { data: { id: pirate.id, amount } });
+    expect(hit.ok()).toBe(true);
+    const result = await observed;
+    if (result.seen.length !== 2)
+      console.log("Combat effect diagnostics", JSON.stringify({ amount, ...result }));
+    expect(result.seen).toEqual(expect.arrayContaining(["world-damage-text", "world-explosion"]));
+  }
+  await expect
+    .poll(async () => {
+      const s = await (await request.get("/__test/snapshot")).json();
+      return s.pirates.some((p: any) => p.id === pirate.id);
+    })
+    .toBe(false);
   expect(errors).toEqual([]);
 });

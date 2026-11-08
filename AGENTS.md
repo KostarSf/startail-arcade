@@ -200,3 +200,8 @@ The historical broad-phase benchmark extracts its pre-streaming fixture from git
 include background pirate records and loading state. The E2E suite shares one world
 and runs serially to verify the final disconnect reset. Set `BUN_PATH` to the desired
 Bun executable for both E2E and probe servers; local node_modules may contain an older Bun.
+
+Test-only POST `/__test/damage` accepts `{id,amount}` and applies damage to an
+initialized living entity during the next simulation tick. This preserves event
+replication timing. The rendered seam test verifies damage text and explosions;
+Web Audio positioning is covered by unit tests because browser probes mute audio.

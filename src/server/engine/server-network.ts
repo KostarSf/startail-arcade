@@ -1,5 +1,6 @@
 import { level as levelUtils } from "@/shared/game/entities/player";
 import { Vector2 } from "@/shared/math/vector";
+import { wrappedDistance } from "@/shared/math/world-wrap";
 import type {
   FullServerState,
   NetworkEvent,
@@ -630,9 +631,10 @@ export class ServerNetwork {
     }
 
     const { queryPos, queryRadius } = this.#calculateCameraViewBounds(player);
-    const dx = event.x - queryPos.x;
-    const dy = event.y - queryPos.y;
-    return dx * dx + dy * dy <= queryRadius * queryRadius;
+    return (
+      wrappedDistance(queryPos, { x: event.x, y: event.y }, this.engine.world.borderRadius) <=
+      queryRadius
+    );
   }
 
   #getSlowestPlayerLastDeliveredTick() {

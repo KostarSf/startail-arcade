@@ -16,3 +16,15 @@ export function wrappedDistance(
 ) {
   return Math.hypot(wrappedDelta(a.x, b.x, radius), wrappedDelta(a.y, b.y, radius));
 }
+
+/** Nearest image in the observer's coordinate space; never mutates the world position. */
+export function nearestWrappedPosition(
+  position: { x: number; y: number },
+  observer: { x: number; y: number },
+  radius: number,
+) {
+  return {
+    x: observer.x + wrappedDelta(observer.x, position.x, radius),
+    y: observer.y + wrappedDelta(observer.y, position.y, radius),
+  };
+}

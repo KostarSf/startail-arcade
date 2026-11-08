@@ -11,6 +11,7 @@ import { Engine } from "./engine/engine";
 import { Bullet } from "./engine/entities/bullet";
 import { PirateAI } from "./engine/entities/ai/pirate-ai";
 import { Ship } from "./engine/entities/ship";
+import { LivingEntity } from "./engine/entities/living-entity";
 
 export type GameServerOptions = {
   port?: number;
@@ -252,6 +253,25 @@ export function createGameServer(options: GameServerOptions = {}) {
         },
         seed: resolved.seed,
       });
+    },
+    "/__test/damage": async (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const data = (await req.json().catch(() => null)) as { id?: string; amount?: number } | null;
+      if (!data?.id || !Number.isFinite(data.amount) || data.amount! <= 0)
+        return new Response("Invalid damage", { status: 400 });
+      const entity = engine.world.find(data.id);
+      if (!(entity instanceof LivingEntity) || !entity.initialized || !entity.isAlive)
+        return new Response("Entity not active", { status: 404 });
+      // Run in the next simulation tick so the event cannot be stamped with an
+      // already-published tick and lost by replication. This hook is test-only.
+      const preUpdate = entity.preUpdate.bind(entity);
+      entity.preUpdate = function (world, delta) {
+        this.preUpdate = preUpdate;
+        preUpdate(world, delta);
+        if (this.isAlive) this.takeDamage(world, data.amount!);
+      };
+      return Response.json({ ok: true, queued: true });
     },
     "/__test/teleport": async (req: Request) => {
       if (!resolved.testMode) return new Response("Not found", { status: 404 });

@@ -16,6 +16,7 @@ import { lerp } from "@/shared/math/utils";
 import { wrappedDelta, wrapCoordinate } from "@/shared/math/world-wrap";
 
 import type { WorldState } from "../network/snapshot-buffer";
+import { isOwnPredictedBullet } from "../network/predicted-shots";
 import type { ClientServices } from "../types";
 import { addShadowToContainer } from "../utils/shadow-utils";
 
@@ -32,7 +33,7 @@ interface EntityPair {
   to?: TimedEntity;
 }
 
-const ensureRenderable = (
+export const ensureRenderable = (
   services: ClientServices,
   entityId: EntityId,
   snapshotEntity: GenericNetEntityState,
@@ -193,7 +194,7 @@ const ensureRenderable = (
   return renderable;
 };
 
-const ensureEntity = (
+export const ensureEntity = (
   services: ClientServices,
   context: { entityId: EntityId; snapshot: TimedEntity },
 ) => {
@@ -249,6 +250,8 @@ const removeMissingEntities = (
 ) => {
   const liveIds = new Set(latestSnapshot.entities.keys());
   for (const [serverId, entityId] of services.entityIndex.entries()) {
+    if (isOwnPredictedBullet(services.stores.networkState.get(entityId)?.state, services.player.id))
+      continue;
     if (liveIds.has(serverId)) continue;
 
     // Capture death position BEFORE deleting stores (if this is the player)
@@ -387,6 +390,7 @@ export const InterpolationSystem: System<ClientServices> = {
     indexSnapshot(next, "to");
 
     for (const [serverId, pair] of pairMap.entries()) {
+      if (isOwnPredictedBullet((pair.to ?? pair.from)?.state, services.player.id)) continue;
       if (!pair.from && previous && next && targetTime < next.serverTime) continue;
       const source = pair.from ?? pair.to!;
       const target = pair.to ?? pair.from!;

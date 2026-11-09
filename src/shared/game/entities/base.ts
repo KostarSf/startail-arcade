@@ -21,6 +21,10 @@ export interface BaseEntityState {
 }
 
 export interface GenericNetEntityState extends BaseEntityState {
+  ownerId?: string;
+  shotId?: number;
+  life?: number;
+  simulationPaused?: boolean;
   thrust?: boolean;
   lastInputSequence?: number;
   health?: number;
@@ -35,23 +39,14 @@ export type MutableBaseEntityState = BaseEntityState & {
 
 export const TWO_PI = Math.PI * 2;
 
-export const normalizeAngle = (angle: number) =>
-  ((angle + Math.PI) % TWO_PI) - Math.PI;
+export const normalizeAngle = (angle: number) => ((angle + Math.PI) % TWO_PI) - Math.PI;
 
 export function integrateMotion<T extends MutableBaseEntityState>(
   entity: Pick<
     T,
-    | "x"
-    | "y"
-    | "angle"
-    | "vx"
-    | "vy"
-    | "va"
-    | "radius"
-    | "linearDamping"
-    | "targetSpeed"
+    "x" | "y" | "angle" | "vx" | "vy" | "va" | "radius" | "linearDamping" | "targetSpeed"
   >,
-  delta: number
+  delta: number,
 ) {
   if (entity.linearDamping && entity.targetSpeed) {
     const damping = entity.linearDamping;
@@ -84,7 +79,7 @@ export function integrateExpMagnetism<T extends MutableBaseEntityState>(
   exp: Pick<T, "x" | "y" | "vx" | "vy" | "radius">,
   ship: Pick<T, "x" | "y">,
   magnetRadius: number,
-  deltaTime: number
+  deltaTime: number,
 ) {
   const posXDiff = exp.x - ship.x;
   const posYDiff = exp.y - ship.y;

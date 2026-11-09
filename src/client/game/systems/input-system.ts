@@ -1,5 +1,6 @@
 import type { System } from "@/shared/ecs";
 import type { ShipControlComponent } from "@/shared/ecs/components";
+import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
 
 import type { ClientServices } from "../types";
 
@@ -20,7 +21,7 @@ const ANGLE_PACKET_INTERVAL_MS = 1000 / 60; // ~60hz
 const ANGLE_EPSILON = (Math.PI / 180) * 0.25; // 0.25 degree
 const ANGLE_FORCE_THRESHOLD = (Math.PI / 180) * 5; // 5 degrees
 // Keyboard rotation speed (radians per second)
-const KEYBOARD_ROTATION_SPEED = (Math.PI * 2) * 2; // 2 full rotations per second
+const KEYBOARD_ROTATION_SPEED = Math.PI * 2 * 2; // 2 full rotations per second
 
 const normalizeAngleDelta = (current: number, previous: number) => {
   let delta = current - previous;
@@ -40,22 +41,13 @@ export const InputSystem: System<ClientServices> = {
   id: "input-system",
   stage: "input",
   tick({ services, time, dt }) {
-    const {
-      player,
-      controls,
-      stores,
-      network,
-      inputBuffer,
-      pixi,
-      cameraShake,
-    } = services;
+    const { player, controls, stores, network, inputBuffer, pixi, cameraShake } = services;
     if (!player.id || player.entityId === null) return;
 
-    const screenCursor =
-      controls.cursorScreen ?? {
-        x: pixi.renderWidth / 2,
-        y: pixi.renderHeight / 2,
-      };
+    const screenCursor = controls.cursorScreen ?? {
+      x: pixi.renderWidth / 2,
+      y: pixi.renderHeight / 2,
+    };
 
     const cursorWorld = {
       x: (screenCursor.x - pixi.camera.x) / pixi.camera.scale.x,
@@ -64,10 +56,7 @@ export const InputSystem: System<ClientServices> = {
 
     controls.cursorWorld = cursorWorld;
 
-    const shipControl = stores.shipControl.ensure(
-      player.entityId,
-      defaultControl
-    );
+    const shipControl = stores.shipControl.ensure(player.entityId, defaultControl);
     const transform = stores.transform.get(player.entityId);
 
     // Calculate angle based on control mode
@@ -84,7 +73,8 @@ export const InputSystem: System<ClientServices> = {
         // Keyboard/mouse mode
         if (controls.keyboardRotateLeft || controls.keyboardRotateRight) {
           // Use keyboard rotation (arrow keys)
-          const rotationDelta = (controls.keyboardRotateLeft ? -1 : 1) * KEYBOARD_ROTATION_SPEED * dt;
+          const rotationDelta =
+            (controls.keyboardRotateLeft ? -1 : 1) * KEYBOARD_ROTATION_SPEED * dt;
           controls.angle = transform.angle + rotationDelta;
           // Normalize angle to [-PI, PI]
           while (controls.angle > Math.PI) controls.angle -= Math.PI * 2;
@@ -116,7 +106,11 @@ export const InputSystem: System<ClientServices> = {
       shipControl.thrust = controls.thrust;
     }
 
-    const fireTriggered = controls.fire;
+    const fireTriggered =
+      controls.fire && services.predictedShots.canFire(time, network.simulationTickMs);
+    // Consume even a throttled click; it must not become a delayed shot next frame.
+    controls.fire = false;
+    shipControl.fire = fireTriggered;
     if (fireTriggered) {
       shipControl.fire = true;
       cameraShake.add(FIRE_SHAKE_AMPLITUDE, FIRE_SHAKE_DURATION);
@@ -128,8 +122,13 @@ export const InputSystem: System<ClientServices> = {
 
       // Check if player has enough energy to fire (client-side check for sound feedback)
       const shipState = networkState?.state?.type === "ship" ? networkState.state : null;
-      const energy = shipState?.energy ?? shipState?.maxEnergy ?? 100;
-      const energyConsumption = 25; // Approximate energy cost per shot (should match server)
+      const latestShip = player.id
+        ? services.snapshotBuffer.getLatest()?.entities.get(player.id)
+        : undefined;
+      const energy = latestShip
+        ? services.predictedShots.availableEnergy(latestShip)
+        : (shipState?.energy ?? 0);
+      const energyConsumption = SHIP_CONSTANTS.shotEnergy;
 
       if (energy >= energyConsumption) {
         // Play shoot sound (non-positional for player)
@@ -150,14 +149,10 @@ export const InputSystem: System<ClientServices> = {
     const now = time;
     const timeSinceLastAngle = now - controls.lastAnglePacketTime;
     const hasPendingAngle =
-      typeof controls.pendingAngle === "number" &&
-      Number.isFinite(controls.pendingAngle);
+      typeof controls.pendingAngle === "number" && Number.isFinite(controls.pendingAngle);
     const shouldForceAngleSend =
       Math.abs(
-        normalizeAngleDelta(
-          controls.pendingAngle ?? shipControl.angle,
-          controls.lastSentAngle
-        )
+        normalizeAngleDelta(controls.pendingAngle ?? shipControl.angle, controls.lastSentAngle),
       ) >= ANGLE_FORCE_THRESHOLD;
     const angleThrottleElapsed = timeSinceLastAngle >= ANGLE_PACKET_INTERVAL_MS;
 
@@ -206,7 +201,7 @@ export const InputSystem: System<ClientServices> = {
         fire: shipControl.fire,
         firingCompensation: firingCompensation,
       },
-      { fields: Array.from(sendFields) }
+      { fields: Array.from(sendFields) },
     );
 
     if (command) {

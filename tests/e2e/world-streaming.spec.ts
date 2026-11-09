@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { WORLD_CONFIG, resolveWorldConfig } from "../../src/server/engine/world/world-config";
+
+const { borderRadius, targetAsteroids, targetPirates } = resolveWorldConfig(WORLD_CONFIG);
 
 async function join(page: Page, name: string, rendered = false) {
   await page.goto(`/?${rendered ? "agent-rendered" : "agent-mode"}=true&audio=off`);
@@ -26,9 +29,9 @@ test("the last browser disconnect clears resident, cold, queued and pirate state
   await join(second, "Reset Two");
   const before = await (await request.get("/__test/metrics")).json();
   // Loaded asteroids may already have collided/died before the browsers join.
-  expect(before.activity.logicalAsteroids).toBeLessThanOrEqual(500000);
-  expect(before.activity.logicalAsteroids).toBeGreaterThan(490000);
-  expect(before.activity.pirates.total).toBe(50);
+  expect(before.activity.logicalAsteroids).toBeLessThanOrEqual(targetAsteroids);
+  expect(before.activity.logicalAsteroids).toBeGreaterThan(targetAsteroids * 0.98);
+  expect(before.activity.pirates.total).toBe(targetPirates);
   expect(before.entityCount).toBeLessThan(20000);
   await page.close();
   await expect
@@ -53,7 +56,7 @@ test("the last browser disconnect clears resident, cold, queued and pirate state
   await join(next, "Fresh World");
   const after = await (await request.get("/__test/metrics")).json();
   expect(after.activity.streaming.seed).not.toBe(before.activity.streaming.seed);
-  expect(after.activity.pirates.total).toBe(50);
+  expect(after.activity.pirates.total).toBe(targetPirates);
   await next.close();
 });
 
@@ -77,8 +80,8 @@ test("a rendered pursuit and combat effects survive the world seam", async ({ pa
       return s.pirates.find((p: any) => p.id === pirate.id)?.active;
     })
     .toBe(true);
-  await teleport(playerId, -49900, -49900);
-  await teleport(pirate.id, 49900, 49900, playerId);
+  await teleport(playerId, -borderRadius + 100, -borderRadius + 100);
+  await teleport(pirate.id, borderRadius - 100, borderRadius - 100, playerId);
   // Teleports deliberately bypass prefetch. Wait for the cold area to finish
   // loading before asserting rendered visibility, while the pursuit stays pinned.
   await expect
@@ -129,7 +132,7 @@ test("a rendered pursuit and combat effects survive the world seam", async ({ pa
       );
       throw error;
     });
-  await teleport(pirate.id, -49950, -49950, playerId);
+  await teleport(pirate.id, -borderRadius + 50, -borderRadius + 50, playerId);
   await page.waitForTimeout(700);
   const second = await (await request.get("/__test/snapshot")).json();
   expect(second.pirates.find((p: any) => p.id === pirate.id)).toMatchObject({
@@ -144,7 +147,10 @@ test("a rendered pursuit and combat effects survive the world seam", async ({ pa
   // Exercise actual damage/death events from a visible NPC on the opposite side.
   // Sample each frame because an explosion only lives for half a second.
   for (const amount of [17, 10000000]) {
-    await teleport(pirate.id, 49950, 49950, playerId);
+    // Combat can push the player away while the pursuit assertions run.
+    await teleport(playerId, -borderRadius + 100, -borderRadius + 100);
+    await teleport(pirate.id, borderRadius - 50, borderRadius - 50, playerId);
+    await page.waitForTimeout(300);
     const observed = page.evaluate(async (amount) => {
       const seen = new Set<string>();
       const samples: unknown[] = [];

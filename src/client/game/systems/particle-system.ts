@@ -1,6 +1,7 @@
 import type { System } from "@/shared/ecs";
 import { Container, Sprite, Texture } from "pixi.js";
 import type { ClientServices } from "../types";
+import { isOwnPredictedBullet } from "../network/predicted-shots";
 
 interface TraceParticle {
   particle: Sprite;
@@ -32,7 +33,9 @@ export const ParticleSystem: System<ClientServices> = {
     // Clean up existing particle system if it exists (for hot reload)
     const existingContainer = (services as any).particleContainer as Container | undefined;
     const existingTexture = (services as any).particleTexture as Texture | undefined;
-    const existingEmitters = (services as any).bulletEmitters as Map<number, BulletEmitter> | undefined;
+    const existingEmitters = (services as any).bulletEmitters as
+      | Map<number, BulletEmitter>
+      | undefined;
 
     if (existingContainer) {
       // Clean up all particles
@@ -65,13 +68,9 @@ export const ParticleSystem: System<ClientServices> = {
     (services as any).bulletEmitters = new Map<number, BulletEmitter>();
   },
   tick({ services, dt, time }) {
-    const particleContainer = (services as any)
-      .particleContainer as Container;
+    const particleContainer = (services as any).particleContainer as Container;
     const particleTexture = (services as any).particleTexture as Texture;
-    const bulletEmitters = (services as any).bulletEmitters as Map<
-      number,
-      BulletEmitter
-    >;
+    const bulletEmitters = (services as any).bulletEmitters as Map<number, BulletEmitter>;
 
     if (!particleContainer || !particleTexture) return;
 
@@ -87,12 +86,7 @@ export const ParticleSystem: System<ClientServices> = {
       const velocity = stores.velocity.get(entityId);
 
       // Skip if not a bullet or missing data
-      if (
-        !networkState?.state ||
-        networkState.state.type !== "bullet" ||
-        !transform ||
-        !velocity
-      ) {
+      if (!networkState?.state || networkState.state.type !== "bullet" || !transform || !velocity) {
         continue;
       }
 
@@ -120,8 +114,13 @@ export const ParticleSystem: System<ClientServices> = {
 
         // Calculate emission position (behind bullet)
         const emissionOffset = 5; // Distance behind bullet
-        const emissionX = transform.x - Math.cos(bulletAngle) * emissionOffset;
-        const emissionY = transform.y - Math.sin(bulletAngle) * emissionOffset;
+        const offset = isOwnPredictedBullet(networkState.state, services.player.id)
+          ? stores.presentationState.get(entityId)
+          : undefined;
+        const emissionX =
+          transform.x + (offset?.visualOffsetX ?? 0) - Math.cos(bulletAngle) * emissionOffset;
+        const emissionY =
+          transform.y + (offset?.visualOffsetY ?? 0) - Math.sin(bulletAngle) * emissionOffset;
 
         // Random angle deviation (±0.1 radians)
         const angleDeviation = (Math.random() - 0.5) * 0.2;
@@ -156,8 +155,10 @@ export const ParticleSystem: System<ClientServices> = {
         const baseVy = velocity.vy * speedMultiplier;
         // Small random deviation perpendicular to bullet direction
         const randomMagnitude = bulletSpeed * speedMultiplier * 0.1; // 10% of particle speed
-        const randomVx = Math.cos(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
-        const randomVy = Math.sin(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
+        const randomVx =
+          Math.cos(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
+        const randomVy =
+          Math.sin(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
         const vx = baseVx + randomVx;
         const vy = baseVy + randomVy;
 

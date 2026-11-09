@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { World } from "../../src/server/engine/world/world";
 import { ServerNetwork } from "../../src/server/engine/server-network";
 import { Ship } from "../../src/server/engine/entities/ship";
+import { WORLD_CONFIG } from "../../src/server/engine/world/world-config";
 
 const cases = [
   { name: "ordinary nearby", camera: [100, 0], target: [300, 0], relevant: true },
@@ -12,7 +13,7 @@ const cases = [
 ];
 for (const scenario of cases)
   test(scenario.name, () => {
-    const world = new World();
+    const world = new World({ ...WORLD_CONFIG, size: 100000 });
     const messages: any[] = [];
     const engine: any = {
       world,

@@ -23,6 +23,7 @@ import type { AudioEngine } from "../audio/audio-engine";
 import type { StatsStore } from "../store";
 import type { AudioSettingsStore } from "../audio/audio-settings";
 import type { EventBuffer } from "./network/event-buffer";
+import type { PredictedShots } from "./network/predicted-shots";
 
 export interface DamageTextRequest {
   amount: number;
@@ -59,6 +60,7 @@ export interface ClientServices extends Record<string, unknown> {
   snapshotBuffer: SnapshotBuffer;
   eventBuffer: EventBuffer;
   inputBuffer: InputBuffer;
+  predictedShots: PredictedShots;
   cameraShake: CameraShake;
   entityIndex: Map<string, EntityId>;
   stores: {
@@ -117,7 +119,9 @@ export interface ClientServices extends Record<string, unknown> {
           height: number;
         };
       },
-      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds"> }
+      options?: {
+        fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds">;
+      },
     ) => ShipInputCommand | null;
     sendCameraBounds: (viewBounds: {
       centerX: number;

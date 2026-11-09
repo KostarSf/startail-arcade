@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { WORLD_CONFIG, resolveWorldConfig } from "../../src/server/engine/world/world-config";
 
-test("default densities preserve the original world populations", () => {
-  expect(resolveWorldConfig(WORLD_CONFIG)).toEqual({
+test("default densities preserve populations at the original world size", () => {
+  expect(resolveWorldConfig({ ...WORLD_CONFIG, size: 100000 })).toEqual({
     borderRadius: 50_000,
     targetAsteroids: 500_000,
     targetPirates: 50,
@@ -35,7 +35,7 @@ test("invalid sizes, densities and unrepresentable populations fail before gener
       "safe integer",
     );
   }
-  expect(() => resolveWorldConfig({ ...WORLD_CONFIG, asteroidsPerMillionUnits: 500_000 })).toThrow(
-    "Uint32",
-  );
+  expect(() =>
+    resolveWorldConfig({ ...WORLD_CONFIG, size: 100000, asteroidsPerMillionUnits: 500_000 }),
+  ).toThrow("Uint32");
 });

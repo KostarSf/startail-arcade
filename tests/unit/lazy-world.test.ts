@@ -12,7 +12,8 @@ import { CollisionResolver } from "../../src/server/engine/world/collision-resol
 import { WORLD_CONFIG, type WorldConfig } from "../../src/server/engine/world/world-config";
 
 function harness(config?: WorldConfig) {
-  const world = new World(config);
+  // These seam/eviction scenarios use fixed coordinates in a 100k-wide world.
+  const world = new World(config ?? { ...WORLD_CONFIG, size: 100000 });
   const engine: any = {
     tick: 0,
     network: { players: [], handleEntityDestroyed() {} },

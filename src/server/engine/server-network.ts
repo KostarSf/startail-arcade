@@ -9,6 +9,7 @@ import type {
   ReplicatedWorldEvent,
   SnapshotStreamHealth,
   SnapshotStreamMetadata,
+  ShotResult,
 } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 import { DT_MS, TPS } from "./constants";
@@ -79,6 +80,8 @@ export class ServerPlayer {
 
   lastSeenEntityIds = new Set<string>();
   pendingInputs: Extract<NetworkEvent, { type: "player:input" }>[] = [];
+  pendingShotResults: ShotResult[] = [];
+  lastReceivedInputSequence = -1;
 
   constructor(ws: Bun.ServerWebSocket) {
     const id = crypto.randomUUID();
@@ -323,7 +326,18 @@ export class ServerNetwork {
 
     switch (message.type) {
       case "player:input":
-        if (!player.ship || player.ship.removed) break;
+        if (
+          !Number.isSafeInteger(message.sequence) ||
+          message.sequence <= player.lastReceivedInputSequence
+        )
+          break;
+        player.lastReceivedInputSequence = message.sequence;
+        if (message.input.shotId !== undefined && message.input.shotId !== message.sequence) break;
+        if (!player.ship || player.ship.removed) {
+          if (message.input.fire && message.input.shotId !== undefined)
+            player.pendingShotResults.push({ shotId: message.input.shotId, status: "rejected" });
+          break;
+        }
         player.pendingInputs.push(message);
         break;
 
@@ -384,7 +398,7 @@ export class ServerNetwork {
     }
   }
 
-  beginSimulationTick(_simTick: number) {
+  beginSimulationTick(simTick: number) {
     for (const player of this.#players.values()) {
       const ship = player.ship;
       if (!ship || ship.removed || player.pendingInputs.length === 0) {
@@ -401,7 +415,13 @@ export class ServerNetwork {
           ship.angle = inputEvent.input.angle;
         }
         if (inputEvent.input.fire) {
-          ship.fire(inputEvent.input.firingCompensation);
+          const accepted = ship.fire(
+            inputEvent.input.firingCompensation,
+            inputEvent.input.shotId,
+            simTick,
+          );
+          if (!accepted && inputEvent.input.shotId !== undefined)
+            player.pendingShotResults.push({ shotId: inputEvent.input.shotId, status: "rejected" });
         }
         ship.lastInputSequence = inputEvent.sequence;
       }
@@ -461,6 +481,19 @@ export class ServerNetwork {
           visible.push(player.ship);
         }
         const visibleIds = new Set(visible.map((entity) => entity.id));
+        // The owner needs a complete lifetime, including shots outside camera interest.
+        for (const entity of this.engine.world.nonAsteroidEntities) {
+          if (
+            entity instanceof Bullet &&
+            entity.ownerId === player.id &&
+            entity.shotId !== undefined &&
+            !entity.removed &&
+            !visibleIds.has(entity.id)
+          ) {
+            visible.push(entity);
+            visibleIds.add(entity.id);
+          }
+        }
         const state: FullServerState | PartialServerState = needFullState
           ? { type: "full", entities: visible.map((entity) => entity.toJSON()) }
           : {
@@ -469,6 +502,9 @@ export class ServerNetwork {
                 .filter(
                   (entity) =>
                     !player.lastSeenEntityIds.has(entity.id) ||
+                    (entity instanceof Bullet &&
+                      entity.ownerId === player.id &&
+                      entity.shotId !== undefined) ||
                     entity.lastChangedTick > player.lastSentTick,
                 )
                 .map((entity) => entity.toJSON()),
@@ -486,6 +522,7 @@ export class ServerNetwork {
           stream,
           state,
           events: replicatedEvents,
+          shots: player.pendingShotResults.length ? player.pendingShotResults : undefined,
           radar: includeRadar ? radarData?.get(player.id) : undefined,
           players: playersData,
         });
@@ -504,6 +541,7 @@ export class ServerNetwork {
         // -1 means accepted into Bun's ordered transport buffer, not dropped.
         this.#schedulerStats.coalescedTicks += Math.max(0, simTick - player.lastSentTick - 1);
         player.lastSeenEntityIds = visibleIds;
+        player.pendingShotResults.length = 0;
         player.lastSentTick = simTick;
         player.lastAcceptedTick = simTick;
         player.networkFrameIndex++;

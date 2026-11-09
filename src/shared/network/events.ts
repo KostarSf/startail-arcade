@@ -67,6 +67,8 @@ export interface PlayerInputEvent {
     angle?: number;
     fire?: boolean;
     firingCompensation?: boolean;
+    /** Matches the input sequence; unique for this connection. */
+    shotId?: number;
   };
 }
 
@@ -110,6 +112,8 @@ export interface ServerStateEvent {
   stream?: SnapshotStreamMetadata;
   state: FullServerState | PartialServerState;
   events: ReplicatedWorldEvent[];
+  /** Private results retained until this snapshot is accepted by the transport. */
+  shots?: ShotResult[];
   players: {
     id: string;
     name: string;
@@ -118,6 +122,10 @@ export interface ServerStateEvent {
   }[];
   radar?: RadarData[];
 }
+
+export type ShotResult =
+  | { shotId: number; status: "accepted"; bulletId: string }
+  | { shotId: number; status: "rejected" };
 
 export interface RadarData {
   type: "player" | "ship" | "asteroid" | "pirate";

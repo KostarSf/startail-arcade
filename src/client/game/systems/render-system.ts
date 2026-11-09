@@ -1,6 +1,7 @@
 import { view } from "@/shared/ecs";
-import { wrappedDelta } from "@/shared/math/world-wrap";
 import type { System } from "@/shared/ecs";
+import { isOwnPredictedBullet } from "../network/predicted-shots";
+import { wrappedDelta } from "@/shared/math/world-wrap";
 import { AnimatedSprite, Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
 
 import type { ClientServices } from "../types";
@@ -216,8 +217,23 @@ export const RenderSystem: System<ClientServices> = {
       const container = renderable.ref;
 
       // Sync transform
-      container.x = cameraWorldX + wrappedDelta(cameraWorldX, transform.x, services.world.radius);
-      container.y = cameraWorldY + wrappedDelta(cameraWorldY, transform.y, services.world.radius);
+      const state = stores.networkState.get(entity)?.state;
+      const ownShot = isOwnPredictedBullet(state, services.player.id);
+      const offset = ownShot ? stores.presentationState.get(entity) : undefined;
+      container.x =
+        cameraWorldX +
+        wrappedDelta(
+          cameraWorldX,
+          transform.x + (offset?.visualOffsetX ?? 0),
+          services.world.radius,
+        );
+      container.y =
+        cameraWorldY +
+        wrappedDelta(
+          cameraWorldY,
+          transform.y + (offset?.visualOffsetY ?? 0),
+          services.world.radius,
+        );
       container.rotation = transform.angle;
       // Keep any sprite-attached shadows aligned with the latest transform.
       syncShadowsInContainer(container, { cameraScale: shadowCameraScale });

@@ -38,12 +38,12 @@ export const SHIP_CONSTANTS = {
   acceleration: 60,
   bulletSpeed: 350,
   bulletOffset: 10,
+  shotEnergy: 25,
+  recoil: 5,
+  bulletLife: 5,
 };
 
-export function updateShipPhysics(
-  ship: ShipState,
-  options: ShipPhysicsOptions
-): ShipPhysicsResult {
+export function updateShipPhysics(ship: ShipState, options: ShipPhysicsOptions): ShipPhysicsResult {
   const speed = Math.hypot(ship.vx, ship.vy);
   let drift = 0;
 
@@ -57,12 +57,7 @@ export function updateShipPhysics(
   if (options.thrust) {
     // If the ship is moving faster than the limit threshold, slow down.
     const maxSpeedLimiter =
-      1 -
-      inverseLerp(
-        speed,
-        SHIP_CONSTANTS.limitThreshold,
-        SHIP_CONSTANTS.maxSpeed
-      );
+      1 - inverseLerp(speed, SHIP_CONSTANTS.limitThreshold, SHIP_CONSTANTS.maxSpeed);
 
     const velocity =
       SHIP_CONSTANTS.acceleration +
@@ -72,16 +67,8 @@ export function updateShipPhysics(
         (1 - drift) +
       SHIP_CONSTANTS.acceleration * SHIP_CONSTANTS.driftBoost * drift;
 
-    const ax =
-      Math.cos(ship.angle) *
-      velocity *
-      (maxSpeedLimiter + drift) *
-      options.delta;
-    const ay =
-      Math.sin(ship.angle) *
-      velocity *
-      (maxSpeedLimiter + drift) *
-      options.delta;
+    const ax = Math.cos(ship.angle) * velocity * (maxSpeedLimiter + drift) * options.delta;
+    const ay = Math.sin(ship.angle) * velocity * (maxSpeedLimiter + drift) * options.delta;
 
     ship.vx += ax;
     ship.vy += ay;
@@ -103,14 +90,21 @@ export function updateShipPhysics(
     return { fired: false };
   }
 
+  return { fired: true, bullet: createBulletSpawnState(ship, options.compensatedFire, speed) };
+}
+
+/** Shared, side-effect-free muzzle and velocity calculation. */
+export function createBulletSpawnState(
+  ship: Pick<ShipState, "x" | "y" | "angle" | "vx" | "vy">,
+  compensatedFire = false,
+  speed = Math.hypot(ship.vx, ship.vy),
+): BulletSpawnState {
   const cos = Math.cos(ship.angle);
   const sin = Math.sin(ship.angle);
 
-  let velocity = new Vector2(cos, sin)
-    .normalize()
-    .mul(SHIP_CONSTANTS.bulletSpeed + speed * 0.5);
+  let velocity = new Vector2(cos, sin).normalize().mul(SHIP_CONSTANTS.bulletSpeed + speed * 0.5);
 
-  if (options.compensatedFire) {
+  if (compensatedFire) {
     velocity = velocity.add(ship.vx, ship.vy);
   }
 
@@ -122,5 +116,11 @@ export function updateShipPhysics(
     vy: velocity.y,
   };
 
-  return { fired: true, bullet };
+  return bullet;
+}
+
+export function applyShotRecoil(ship: Pick<ShipState, "vx" | "vy">, bullet: BulletSpawnState) {
+  const direction = new Vector2(bullet.vx - ship.vx, bullet.vy - ship.vy).normalize();
+  ship.vx -= direction.x * SHIP_CONSTANTS.recoil;
+  ship.vy -= direction.y * SHIP_CONSTANTS.recoil;
 }

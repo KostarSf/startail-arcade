@@ -1,6 +1,6 @@
 import type { ShipControlComponent, ShipInputCommand } from "@/shared/ecs/components";
 import { integrateMotion } from "@/shared/game/entities/base";
-import { updateShipPhysics, type ShipState } from "@/shared/game/entities/ship";
+import { updateShipPhysics, applyShotRecoil, type ShipState } from "@/shared/game/entities/ship";
 import type { SnapshotStreamHealth } from "@/shared/network/events";
 import { wrappedDelta, wrapCoordinate } from "@/shared/math/world-wrap";
 
@@ -140,11 +140,14 @@ export const reconcileShipState = ({
       authoritative.angle = currentInput.angle;
 
       if (pendingInput.fire) {
-        updateShipPhysics(authoritative, {
+        const result = updateShipPhysics(authoritative, {
           thrust: currentInput.thrust,
           fire: true,
+          compensatedFire: pendingInput.firingCompensation,
           delta: 0,
         });
+        if (pendingInput.predictedFire && result.bullet)
+          applyShotRecoil(authoritative, result.bullet);
       }
 
       nextPendingIndex++;

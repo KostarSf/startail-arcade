@@ -4,6 +4,7 @@ import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { LivingEntity } from "./living-entity";
 
 export interface IBullet extends IBaseEntity {
+  shotId?: number;
   ownerId: string;
   damage: number;
 }
@@ -13,7 +14,20 @@ export class Bullet extends BaseEntity {
 
   static #nextId = 1;
 
-  static lifeSpan = 5; // 5 seconds
+  static lifeSpan = SHIP_CONSTANTS.bulletLife;
+
+  readonly shotId?: number;
+  simulationPaused = true;
+
+  get ownerId() {
+    return this.#ownerId;
+  }
+
+  setSimulationPaused(paused: boolean) {
+    if (this.simulationPaused === paused) return;
+    this.simulationPaused = paused;
+    this.markChanged();
+  }
 
   #owner: BaseEntity | null = null;
   #ownerId: string | null = null;
@@ -36,6 +50,7 @@ export class Bullet extends BaseEntity {
     bullet.continuousCollision = true;
 
     super(bullet);
+    this.shotId = bullet.shotId;
     this.#ownerId = bullet.ownerId ?? null;
     this.life = Bullet.lifeSpan;
     this.damage = bullet.damage ?? 10;
@@ -49,9 +64,7 @@ export class Bullet extends BaseEntity {
     }
 
     if (world.engine.debug.lifecycle) {
-      console.log(
-        `bullet initialized: ${this.name} (owner: ${this.#owner?.name})`
-      );
+      console.log(`bullet initialized: ${this.name} (owner: ${this.#owner?.name})`);
     }
   }
 
@@ -77,11 +90,8 @@ export class Bullet extends BaseEntity {
 
     if (other instanceof LivingEntity) {
       const speedFactor = Math.max(
-        (this.velocity.sub(other.velocity).length() -
-          SHIP_CONSTANTS.bulletSpeed -
-          100) /
-          1000,
-        0
+        (this.velocity.sub(other.velocity).length() - SHIP_CONSTANTS.bulletSpeed - 100) / 1000,
+        0,
       );
       const additionalDamage = Math.floor(this.damage * speedFactor * 6);
 
@@ -95,6 +105,8 @@ export class Bullet extends BaseEntity {
       ...super.toJSON(),
       ownerId: this.#ownerId ?? undefined,
       damage: this.damage,
+      shotId: this.shotId,
+      simulationPaused: this.simulationPaused,
     };
   }
 }

@@ -153,7 +153,7 @@ export class SnapshotBuffer {
       ...oldEntity,
       interpolated: true,
     };
-    integrateMotion(interpolatedEntity, deltaTime);
+    if (!interpolatedEntity.simulationPaused) integrateMotion(interpolatedEntity, deltaTime);
 
     return interpolatedEntity;
   }

@@ -7,6 +7,7 @@ import { PirateAI } from "../entities/ai/pirate-ai";
 import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import { Ship } from "../entities/ship";
+import { Bullet } from "../entities/bullet";
 import { ChunkActivityManager } from "./chunk-activity-manager";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
@@ -377,8 +378,11 @@ export class World {
     });
 
     this.#simulated.clear();
-    for (const entity of this.#nonAsteroidEntities)
-      if (this.#canSimulate(entity)) this.#simulated.add(entity);
+    for (const entity of this.#nonAsteroidEntities) {
+      const canSimulate = this.#canSimulate(entity);
+      if (entity instanceof Bullet) entity.setSimulationPaused(!canSimulate);
+      if (canSimulate) this.#simulated.add(entity);
+    }
     for (const entity of this.#chunkActivity.getActiveAsteroids()) this.#simulated.add(entity);
 
     this.engine.measurePerformance("entityUpdateMs", () => {

@@ -19,6 +19,8 @@ export interface ShipInputCommand {
   angle: number;
   fire: boolean;
   timestamp: number;
+  firingCompensation?: boolean;
+  predictedFire?: boolean;
 }
 
 export interface ShipControlComponent {

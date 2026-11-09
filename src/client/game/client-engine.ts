@@ -63,6 +63,9 @@ import { AudioEngine } from "../audio/audio-engine";
 import { audioSettings } from "../audio/audio-settings";
 import { isDevelopmentClient } from "../dev-mode";
 import { InputBuffer } from "./network/input-buffer";
+import { PredictedShots } from "./network/predicted-shots";
+import { PredictedShotSystem } from "./systems/predicted-shot-system";
+import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
 import { NetworkDecoder } from "./network/network-decoder";
 import { EventBuffer } from "./network/event-buffer";
 import { PresentationTimingController } from "./network/presentation-timing-controller";
@@ -117,6 +120,7 @@ export class ClientEngine {
   #snapshotBuffer = new SnapshotBuffer();
   #eventBuffer = new EventBuffer();
   #inputBuffer = new InputBuffer();
+  #predictedShots = new PredictedShots();
   #cameraShake = new CameraShake();
   #entityIndex = new Map<string, EntityId>();
   #controls: ControlState = {
@@ -471,6 +475,25 @@ export class ClientEngine {
       connectionAttempts: this.#connectionAttempts,
       reconnecting: currentStats.isReconnecting,
       simulatedLatencyMs: this.#simulatedLatencyMs,
+      shots: Array.from(this.#predictedShots.shots.values(), (shot) => {
+        const position = this.#predictedShots.position(
+          shot,
+          this.#predictedServerTime(),
+          currentStats.worldRadius,
+        );
+        return {
+          shotId: shot.shotId,
+          id: shot.state.id,
+          entityId: shot.entityId,
+          confirmed: shot.confirmed,
+          removed: shot.removed,
+          position,
+          visualOffset: { x: shot.offsetX, y: shot.offsetY },
+          serverTime: shot.anchorTime,
+          state: { ...shot.state },
+          rendered: shot.entityId !== undefined && !!this.#renderableStore.get(shot.entityId)?.ref,
+        };
+      }),
       boot: {
         lightweightAgentMode: this.#resolveAgentModeFromURL(),
         renderedProbeMode: this.#resolveRenderedProbeModeFromURL(),
@@ -700,9 +723,11 @@ export class ClientEngine {
     fire: boolean;
     firingCompensation?: boolean;
   }) {
-    return this.#sendInput(input, {
+    const command = this.#sendInput(input, {
       fields: ["thrust", "angle", "fire", "firingCompensation"],
     });
+    if (command) this.#inputBuffer.enqueue(command);
+    return command;
   }
 
   async initialize(parent: HTMLElement) {
@@ -980,6 +1005,7 @@ export class ClientEngine {
       snapshotBuffer: this.#snapshotBuffer,
       eventBuffer: this.#eventBuffer,
       inputBuffer: this.#inputBuffer,
+      predictedShots: this.#predictedShots,
       cameraShake: this.#cameraShake,
       entityIndex: this.#entityIndex,
       stores: {
@@ -1108,6 +1134,7 @@ export class ClientEngine {
     this.#pipeline.register(InputSystem);
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
+    this.#pipeline.register(PredictedShotSystem);
     this.#pipeline.register(WorldEventSystem);
     this.#pipeline.register(RenderSystem);
     this.#pipeline.register(EffectSystem);
@@ -1560,6 +1587,15 @@ export class ClientEngine {
         break;
       case "server:state":
         if (!this.#snapshotBuffer.add(message)) break;
+        if (this.#services?.player.id) {
+          this.#predictedShots.reconcile(
+            this.#snapshotBuffer.getLatest()!,
+            message.shots ?? [],
+            this.#services.player.id,
+            this.#predictedServerTime(),
+            this.#services.world.radius,
+          );
+        }
         this.#presentationTiming.observeSnapshot(message, performance.now());
         this.#trackSnapshotArrivalTiming(message);
         this.#eventBuffer.add(message.events);
@@ -1680,6 +1716,7 @@ export class ClientEngine {
     this.#snapshotBuffer.clear();
     this.#eventBuffer.clear();
     this.#inputBuffer.reset();
+    this.#predictedShots.clear();
     this.#presentationTiming.reset();
     this.#entityIndex.clear();
     this.#entityManager.clear();
@@ -1753,8 +1790,13 @@ export class ClientEngine {
       angle: input.angle,
       fire: input.fire,
       timestamp: this.#predictedServerTime(),
+      firingCompensation: input.firingCompensation,
     };
     const includeFields = options?.fields ?? ["thrust", "angle", "fire"];
+    command.fire =
+      includeFields.includes("fire") &&
+      command.fire &&
+      this.#predictedShots.tryFire(performance.now(), 1000 / this.#serverTps);
     const payloadInput: PlayerInputEvent["input"] = {};
     if (includeFields.includes("thrust")) {
       payloadInput.thrust = command.thrust;
@@ -1764,6 +1806,7 @@ export class ClientEngine {
     }
     if (includeFields.includes("fire") && command.fire) {
       payloadInput.fire = command.fire;
+      payloadInput.shotId = command.sequence;
 
       if (includeFields.includes("firingCompensation") && input.firingCompensation !== undefined) {
         payloadInput.firingCompensation = input.firingCompensation;
@@ -1772,6 +1815,28 @@ export class ClientEngine {
 
     if (Object.keys(payloadInput).length === 0) {
       return null;
+    }
+    if (payloadInput.fire && this.#services?.player.id && this.#services.player.entityId !== null) {
+      const services = this.#services;
+      const entityId = services.player.entityId!;
+      const ship = this.#snapshotBuffer.getLatest()?.entities.get(services.player.id!);
+      const transform = services.stores.transform.get(entityId);
+      const velocity = services.stores.velocity.get(entityId);
+      if (
+        ship &&
+        transform &&
+        velocity &&
+        this.#predictedShots.availableEnergy(ship) >= SHIP_CONSTANTS.shotEnergy
+      ) {
+        this.#predictedShots.predict(
+          command.sequence,
+          services.player.id!,
+          { ...transform, ...velocity, angle: command.angle },
+          !!input.firingCompensation,
+          command.timestamp,
+        );
+        command.predictedFire = true;
+      }
     }
     const payload = event({
       type: "player:input",
@@ -1938,9 +2003,8 @@ export class ClientEngine {
   respawn(name: string) {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
 
-    // Reset input buffer and sequence
+    // Keep sequence/shot IDs unique for the connection, including surviving old-life bullets.
     this.#inputBuffer.reset();
-    this.#inputSequence = 0;
 
     // Clear death position and respawn error when respawning
     this.#statsGetter().setDeathPosition(null);

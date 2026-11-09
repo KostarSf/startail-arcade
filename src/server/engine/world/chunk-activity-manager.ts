@@ -5,6 +5,7 @@ import type { BaseEntity } from "../entities/base-entity";
 import { getPlayerCameraQueryBounds } from "../server-network";
 import type { World } from "./world";
 import { WakeSpatialGrid } from "./wake-spatial-grid";
+import { WORLD_CHUNK_SIZE } from "./world-config";
 
 export type ChunkWakeSource =
   | {
@@ -44,7 +45,7 @@ type ChunkState = {
 };
 
 export class ChunkActivityManager {
-  static DEFAULT_CHUNK_SIZE = 500 * 2;
+  static DEFAULT_CHUNK_SIZE = WORLD_CHUNK_SIZE;
   static DEFAULT_SLEEP_DELAY_TICKS = TPS;
   static PLAYER_WAKE_CHUNK_PADDING = 1;
 

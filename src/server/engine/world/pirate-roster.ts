@@ -13,8 +13,10 @@ type PirateRecord = {
 /** All pirates exist logically; only near-player or combat pirates own live Ship graphs. */
 export class PirateRoster {
   #records = new Map<string, PirateRecord>();
-  readonly limit = 50;
-  constructor(private world: World) {}
+  constructor(
+    private world: World,
+    readonly limit: number,
+  ) {}
   initialize() {
     this.clear();
     for (let i = 0; i < this.limit; i++) this.#create();

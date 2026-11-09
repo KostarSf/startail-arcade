@@ -14,6 +14,7 @@ import { WorldStreaming, type StreamingInterest } from "./world-streaming";
 import { PirateRoster } from "./pirate-roster";
 import { getPlayerCameraQueryBounds } from "../server-network";
 import type { CommittedWorldEvent, WorldEvent, WorldEventListener } from "./world-events";
+import { WORLD_CONFIG, resolveWorldConfig, type WorldConfig } from "./world-config";
 
 export class World {
   #entities = new Map<string, BaseEntity>();
@@ -22,16 +23,16 @@ export class World {
   #chunkActivity = new ChunkActivityManager();
   #collisionResolver = new CollisionResolver();
   readonly streaming = new WorldStreaming(this);
-  readonly pirates = new PirateRoster(this);
+  readonly pirates: PirateRoster;
   #simulated = new Set<BaseEntity>();
   #maxColliderRadius = 0;
   get maxColliderRadius() {
     return this.#maxColliderRadius;
   }
 
-  #borderRadius = 50000;
+  #borderRadius: number;
 
-  #maxAsteroids = 500000;
+  #maxAsteroids: number;
   #currentAsteroids = 0;
   #asteroidsRefillInterval = TPS * 5;
   #asteroidsMinBatchCount = 10;
@@ -42,6 +43,14 @@ export class World {
   #nextTickEventIndex = 0;
 
   #engine: Engine | null = null;
+
+  constructor(config: WorldConfig = WORLD_CONFIG) {
+    const resolved = resolveWorldConfig(config);
+    this.#borderRadius = resolved.borderRadius;
+    this.#maxAsteroids = resolved.targetAsteroids;
+    this.pirates = new PirateRoster(this, resolved.targetPirates);
+  }
+
   get engine() {
     if (!this.#engine) {
       throw new Error("Engine not initialized");

@@ -7,6 +7,7 @@ import {
   type ChunkManifest,
 } from "./chunk-generator";
 import type { World } from "./world";
+import { WORLD_CHUNK_SIZE } from "./world-config";
 
 export type StreamingInterest = { x: number; y: number; radius: number };
 type Resident = { asteroids: Set<Asteroid>; lastNeededTick: number };
@@ -14,7 +15,7 @@ type Job = { index: number; work: Generator<void, Asteroid[]> };
 
 /** Session-only store. Eviction removes entity graphs, retaining packed Float64 state. */
 export class WorldStreaming {
-  readonly chunkSize = 1000;
+  readonly chunkSize = WORLD_CHUNK_SIZE;
   readonly retentionTicks = 200;
   #world: World;
   #seed = 0;

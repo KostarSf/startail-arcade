@@ -9,9 +9,10 @@ import { createChunkManifest, generateChunk } from "../../src/server/engine/worl
 import { wrappedDelta, wrappedDistance } from "../../src/shared/math/world-wrap";
 import { Random } from "../../src/shared/math/random";
 import { CollisionResolver } from "../../src/server/engine/world/collision-resolver";
+import { WORLD_CONFIG, type WorldConfig } from "../../src/server/engine/world/world-config";
 
-function harness() {
-  const world = new World();
+function harness(config?: WorldConfig) {
+  const world = new World(config);
   const engine: any = {
     tick: 0,
     network: { players: [], handleEntityDestroyed() {} },
@@ -71,6 +72,43 @@ test("world starts with zero resident asteroids, exact logical count and 50 dorm
   expect(stats.logicalAsteroids).toBe(500000);
   expect(stats.pirates).toEqual({ total: 50, active: 0, background: 50 });
   expect(stats.streaming.residentChunks).toBe(0);
+  h.world.clear();
+});
+
+test("configured size and densities drive world bounds, chunks and both populations", () => {
+  const h = harness({
+    size: 10_000,
+    asteroidsPerMillionUnits: 2.5,
+    piratesPerMillionUnits: 0.03,
+  });
+  expect(h.world.borderRadius).toBe(5000);
+  expect(h.world.pirates.limit).toBe(3);
+  expect(h.world.getActivityStats()).toMatchObject({
+    logicalAsteroids: 250,
+    totalChunks: 100,
+    pirates: { total: 3, active: 0, background: 3 },
+  });
+  h.load(0, 0, 5000);
+  expect(h.world.entities.filter((e) => e instanceof Asteroid)).toHaveLength(250);
+  h.world.clear();
+  h.world.initialize(h.engine);
+  expect(h.world.getActivityStats().logicalAsteroids).toBe(250);
+  expect(h.world.pirates.getStats().total).toBe(3);
+  h.world.clear();
+});
+
+test("zero densities keep both populations empty through loading and refill ticks", () => {
+  const h = harness({
+    ...WORLD_CONFIG,
+    size: 2000,
+    asteroidsPerMillionUnits: 0,
+    piratesPerMillionUnits: 0,
+  });
+  h.load(0, 0, 1000);
+  for (let i = 0; i < 400; i++) h.step();
+  expect(h.world.entities).toHaveLength(0);
+  expect(h.world.getActivityStats().logicalAsteroids).toBe(0);
+  expect(h.world.pirates.getStats().total).toBe(0);
   h.world.clear();
 });
 

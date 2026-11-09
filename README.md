@@ -57,6 +57,29 @@ The server will start at `http://localhost:3000` (or the next available port).
   - `?sim-latency=random` - Random latency between 20-100ms per refresh
   - `?sim-latency=60` - Fixed 60ms latency simulation
 
+### World Configuration
+
+Edit `WORLD_CONFIG` in `src/server/engine/world/world-config.ts` and restart the server:
+
+```ts
+export const WORLD_CONFIG: WorldConfig = {
+  size: 100_000,
+  asteroidsPerMillionUnits: 50,
+  piratesPerMillionUnits: 0.005,
+};
+```
+
+`size` is the side length of the square world, a positive multiple of 1000.
+Both densities are average counts per **1000 × 1000 world units**, including
+unloaded asteroids and dormant pirates. Target counts are calculated as
+`Math.round((size / 1000) ** 2 * density)`; zero density disables that population.
+Defaults produce 500,000 asteroids and 50 pirates. Doubling the side length
+quadruples both populations. Asteroid clusters retain their existing distribution.
+
+Refill rates remain fixed: 10–50 asteroids every 5 seconds and at most one pirate
+every 20 seconds while below the target population. Pirate replacement attempts
+near players are skipped.
+
 ## Building
 
 Build the production bundle:

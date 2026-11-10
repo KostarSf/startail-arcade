@@ -3,13 +3,19 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 function parseEnvNumber(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseEnvBoolean(name: string): boolean {
+  const raw = process.env[name];
+  if (!raw) return false;
+  return raw === "1" || raw.toLowerCase() === "true";
 }
 
 async function getFreePort() {
@@ -88,6 +94,43 @@ async function terminateProcess(child: ChildProcess) {
   });
 }
 
+async function waitForClientCondition(
+  page: import("@playwright/test").Page,
+  condition: () => unknown,
+  options: {
+    timeoutMs: number;
+    description: string;
+    getPageErrors: () => string[];
+  }
+) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < options.timeoutMs) {
+    const pageErrors = options.getPageErrors();
+    if (pageErrors.length > 0) {
+      throw new Error(
+        `Client boot failed while waiting for ${options.description}: ${pageErrors[0]}`
+      );
+    }
+
+    const satisfied = await page.evaluate(condition);
+    if (satisfied) {
+      return;
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  const pageErrors = options.getPageErrors();
+  if (pageErrors.length > 0) {
+    throw new Error(
+      `Client boot failed while waiting for ${options.description}: ${pageErrors[0]}`
+    );
+  }
+
+  throw new Error(`Timed out waiting for ${options.description}`);
+}
+
 test("agent probe captures client and server artifacts", async ({ browser }) => {
   const cwd = process.cwd();
   const artifactsDir = path.resolve(
@@ -98,7 +141,17 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   const seed = parseEnvNumber("PROBE_SEED", 42);
   const port = parseEnvNumber("PROBE_PORT", await getFreePort());
   const probeName = process.env.PROBE_NAME || "Agent Probe";
+  const clientMode = process.env.PROBE_CLIENT_MODE || "lightweight";
   const debugPerformance = process.env.PROBE_DEBUG_PERFORMANCE === "1";
+  const simulatedLatencyMs = parseEnvNumber("PROBE_SIMULATED_LATENCY_MS", 0);
+  const simulatedJitterMs = parseEnvNumber("PROBE_SIMULATED_JITTER_MS", 0);
+  const disableInterpolation = parseEnvBoolean("PROBE_DISABLE_INTERPOLATION");
+  const disableReconciliation = parseEnvBoolean(
+    "PROBE_DISABLE_RECONCILIATION"
+  );
+  const captureDebugTrace = parseEnvBoolean("PROBE_CAPTURE_DEBUG_TRACE");
+  const traceIntervalMs = parseEnvNumber("PROBE_TRACE_INTERVAL_MS", 50);
+  const serverStallMs = parseEnvNumber("PROBE_SERVER_STALL_MS", 0);
   const baseUrl = `http://127.0.0.1:${port}`;
 
   await mkdir(artifactsDir, { recursive: true });
@@ -106,13 +159,22 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
   let serverStdout = "";
   let serverStderr = "";
   const clientLogs: string[] = [];
+  const pageErrors: string[] = [];
   const summary: Record<string, unknown> = {
     ok: false,
     baseUrl,
     seed,
     durationMs,
+    clientMode,
+    simulatedLatencyMs,
+    simulatedJitterMs,
+    disableInterpolation,
+    disableReconciliation,
+    captureDebugTrace,
+    serverStallMs,
     startedAt: new Date().toISOString(),
   };
+  const debugTrace: Array<Record<string, unknown>> = [];
 
   const serverProcess = spawn(
     process.env.BUN_PATH || "bun",
@@ -127,7 +189,12 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...(clientMode === "rendered" && process.env.STARTAIL_STATIC_DIST_DIR
+          ? { STARTAIL_STATIC_DIST_DIR: process.env.STARTAIL_STATIC_DIST_DIR }
+          : {}),
+      },
     }
   );
 
@@ -146,40 +213,85 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
     clientLogs.push(`[${message.type()}] ${message.text()}`);
   });
   page.on("pageerror", (error) => {
-    clientLogs.push(`[pageerror] ${error.stack ?? error.message}`);
+    const message = error.stack ?? error.message;
+    pageErrors.push(message);
+    clientLogs.push(`[pageerror] ${message}`);
   });
 
   try {
     await waitForHealth(baseUrl, 60_000);
 
-    await page.goto(`${baseUrl}/?agent-mode=true&audio=off`);
+    const searchParams = new URLSearchParams();
+    searchParams.set("audio", "off");
+    if (clientMode === "rendered") {
+      searchParams.set("agent-rendered", "true");
+      if (process.env.PROBE_RETRO_RENDERING === "1") searchParams.set("agent-retro", "true");
+    } else {
+      searchParams.set("agent-mode", "true");
+    }
 
-    await page.waitForFunction(() => {
+    await page.goto(`${baseUrl}/?${searchParams.toString()}`);
+
+    await waitForClientCondition(page, () => {
       return window.__STARTAIL_TEST_API__?.ping() === "pong";
+    }, {
+      timeoutMs: 20_000,
+      description: "test API to become available",
+      getPageErrors: () => pageErrors,
     });
 
-    await page.evaluate(() => {
-      window.__STARTAIL_TEST_API__?.configureDebug({
-        simulatedLatencyMs: 0,
+    if (clientMode === "rendered") {
+      await waitForClientCondition(page, () => {
+        const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
+        return Boolean(
+          snapshot?.boot.appInitialized &&
+            snapshot.boot.servicesReady &&
+            snapshot.boot.pipelineReady &&
+            window.__STARTAIL_TEST_API__?.getDebugNetworkSnapshot()?.rendering?.tickerStarted
+        );
+      }, {
+        timeoutMs: 20_000,
+        description: "rendered client pipeline to finish booting",
+        getPageErrors: () => pageErrors,
       });
-    });
+    }
 
-    await page.waitForFunction(() => {
+    await page.evaluate(
+      ({ simulatedLatencyMs, disableInterpolation, disableReconciliation }) => {
+      window.__STARTAIL_TEST_API__?.configureDebug({
+        simulatedLatencyMs,
+        disableInterpolation,
+        disableReconciliation,
+      });
+      },
+      { simulatedLatencyMs, disableInterpolation, disableReconciliation }
+    );
+
+    await waitForClientCondition(page, () => {
       const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
       return Boolean(snapshot?.connected);
+    }, {
+      timeoutMs: 20_000,
+      description: "websocket connection",
+      getPageErrors: () => pageErrors,
     });
 
     await page.evaluate((name) => {
       window.__STARTAIL_TEST_API__?.respawn(name);
     }, probeName);
 
-    await page.waitForFunction(() => {
+    await waitForClientCondition(page, () => {
       const snapshot = window.__STARTAIL_TEST_API__?.getSnapshot();
       return Boolean(
         snapshot?.connected &&
           snapshot.player.alive &&
           snapshot.stats.hasTimeSync
       );
+    }, {
+      // Generating 500k entities can exceed 20s alongside software WebGL.
+      timeoutMs: 60_000,
+      description: "spawned player with time sync",
+      getPageErrors: () => pageErrors,
     });
 
     await page.evaluate(() => {
@@ -189,27 +301,68 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
         fire: false,
       });
     });
-    await page.waitForTimeout(1_000);
-    await page.evaluate(() => {
-      window.__STARTAIL_TEST_API__?.sendInput({
-        thrust: true,
-        angle: 0,
-        fire: true,
-        firingCompensation: true,
-      });
-    });
-    await page.waitForTimeout(250);
-    await page.evaluate(() => {
-      window.__STARTAIL_TEST_API__?.sendInput({
-        thrust: false,
-        angle: 0,
-        fire: false,
-      });
-    });
 
-    const remainingMs = Math.max(durationMs - 1_250, 0);
-    if (remainingMs > 0) {
-      await page.waitForTimeout(remainingMs);
+    if (simulatedJitterMs > 0) {
+      await page.evaluate(({seed,base,jitter}) => {
+        let state = seed >>> 0;
+        setInterval(() => {
+          state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+          window.__STARTAIL_TEST_API__?.configureDebug({
+            simulatedLatencyMs: base + Math.floor((state / 4294967296) * jitter),
+          });
+        }, 50);
+      }, {seed,base:simulatedLatencyMs,jitter:simulatedJitterMs});
+    }
+
+    const traceStartedAt = Date.now();
+    let fireSent = false;
+    let stopSent = false;
+    let stallSent = false;
+
+    while (Date.now() - traceStartedAt < durationMs) {
+      const elapsedMs = Date.now() - traceStartedAt;
+      if (!stallSent && serverStallMs > 0 && elapsedMs >= 5_000) {
+        stallSent = true;
+        const response = await fetch(`${baseUrl}/__test/stall?ms=${serverStallMs}`, { method: "POST" });
+        expect(response.ok).toBe(true);
+      }
+
+      if (!fireSent && elapsedMs >= 1_000) {
+        fireSent = true;
+        await page.evaluate(() => {
+          window.__STARTAIL_TEST_API__?.sendInput({
+            thrust: true,
+            angle: 0,
+            fire: true,
+            firingCompensation: true,
+          });
+        });
+      }
+
+      if (!stopSent && elapsedMs >= 1_250) {
+        stopSent = true;
+        await page.evaluate(() => {
+          window.__STARTAIL_TEST_API__?.sendInput({
+            thrust: false,
+            angle: 0,
+            fire: false,
+          });
+        });
+      }
+
+      if (captureDebugTrace) {
+        const traceSample = await page.evaluate(() => ({
+          runtime: window.__STARTAIL_TEST_API__?.getSnapshot() ?? null,
+          debug:
+            window.__STARTAIL_TEST_API__?.getDebugNetworkSnapshot() ?? null,
+        }));
+        debugTrace.push({
+          elapsedMs,
+          ...traceSample,
+        });
+      }
+
+      await page.waitForTimeout(traceIntervalMs);
     }
 
     const clientSnapshot = await page.evaluate(() => {
@@ -228,12 +381,25 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
       fullPage: true,
     });
 
+    expect(pageErrors).toEqual([]);
+    if (clientMode === "rendered" && captureDebugTrace) {
+      let previousRenderTime = -Infinity;
+      for (const sample of debugTrace) {
+        const debug = sample.debug as { renderTargetTime: number } | null;
+        if (!debug) continue;
+        expect(debug.renderTargetTime).toBeGreaterThanOrEqual(previousRenderTime);
+        previousRenderTime = debug.renderTargetTime;
+      }
+    }
+
     Object.assign(summary, {
       ok: true,
       finishedAt: new Date().toISOString(),
       clientSnapshot,
       serverMetrics,
       serverSnapshot,
+      pageErrors,
+      debugTraceSamples: debugTrace.length,
     });
 
     await writeFile(
@@ -248,10 +414,18 @@ test("agent probe captures client and server artifacts", async ({ browser }) => 
         2
       )
     );
+
+    if (captureDebugTrace) {
+      await writeFile(
+        path.join(artifactsDir, "debug-trace.json"),
+        JSON.stringify(debugTrace, null, 2)
+      );
+    }
   } catch (error) {
     Object.assign(summary, {
       ok: false,
       finishedAt: new Date().toISOString(),
+      pageErrors,
       error: error instanceof Error ? error.stack ?? error.message : String(error),
     });
     throw error;

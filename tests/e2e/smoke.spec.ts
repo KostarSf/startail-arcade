@@ -24,7 +24,8 @@ test("player can join in agent mode", async ({ page }) => {
     return Boolean(
       snapshot?.connected &&
         snapshot.player.alive &&
-        snapshot.stats.hasTimeSync
+        snapshot.stats.hasTimeSync &&
+        (snapshot.stats.objectsCount ?? 0) > 0
     );
   });
 

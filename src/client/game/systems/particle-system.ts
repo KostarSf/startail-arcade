@@ -1,9 +1,10 @@
 import type { System } from "@/shared/ecs";
-import { Graphics, Particle, ParticleContainer, Texture } from "pixi.js";
+import { Container, Sprite, Texture } from "pixi.js";
 import type { ClientServices } from "../types";
+import { isOwnPredictedBullet } from "../network/predicted-shots";
 
 interface TraceParticle {
-  particle: Particle;
+  particle: Sprite;
   vx: number;
   vy: number;
   lifespan: number;
@@ -19,19 +20,10 @@ interface BulletEmitter {
   particles: TraceParticle[];
 }
 
-// Create white pixel texture
-function createWhitePixelTexture(app: ClientServices["pixi"]["app"]): Texture {
-  const graphics = new Graphics();
-  graphics.rect(0, 0, 2, 2);
-  graphics.fill(0xffffff);
-  const texture = app.renderer.generateTexture({
-    target: graphics,
-    textureSourceOptions: {
-      scaleMode: "nearest",
-    },
-  });
-  graphics.destroy();
-  return texture;
+// Reuse the built-in white texture so rendered probe mode does not depend on
+// generateTexture internals during boot.
+function createWhitePixelTexture(_app: ClientServices["pixi"]["app"]): Texture {
+  return Texture.WHITE;
 }
 
 export const ParticleSystem: System<ClientServices> = {
@@ -39,16 +31,18 @@ export const ParticleSystem: System<ClientServices> = {
   stage: "presentation",
   init({ services }) {
     // Clean up existing particle system if it exists (for hot reload)
-    const existingContainer = (services as any).particleContainer as ParticleContainer | undefined;
+    const existingContainer = (services as any).particleContainer as Container | undefined;
     const existingTexture = (services as any).particleTexture as Texture | undefined;
-    const existingEmitters = (services as any).bulletEmitters as Map<number, BulletEmitter> | undefined;
+    const existingEmitters = (services as any).bulletEmitters as
+      | Map<number, BulletEmitter>
+      | undefined;
 
     if (existingContainer) {
       // Clean up all particles
       if (existingEmitters) {
         for (const emitter of existingEmitters.values()) {
           for (const traceParticle of emitter.particles) {
-            existingContainer.removeParticle(traceParticle.particle);
+            existingContainer.removeChild(traceParticle.particle);
           }
         }
       }
@@ -57,17 +51,12 @@ export const ParticleSystem: System<ClientServices> = {
       existingContainer.destroy();
     }
 
-    if (existingTexture) {
+    if (existingTexture && existingTexture !== Texture.WHITE) {
       existingTexture.destroy(true);
     }
 
     // Create particle container
-    const particleContainer = new ParticleContainer({
-      dynamicProperties: {
-        position: true,
-        color: true, // For alpha flickering
-      },
-    });
+    const particleContainer = new Container();
     services.pixi.camera.addChild(particleContainer);
 
     // Create white pixel texture
@@ -79,13 +68,9 @@ export const ParticleSystem: System<ClientServices> = {
     (services as any).bulletEmitters = new Map<number, BulletEmitter>();
   },
   tick({ services, dt, time }) {
-    const particleContainer = (services as any)
-      .particleContainer as ParticleContainer;
+    const particleContainer = (services as any).particleContainer as Container;
     const particleTexture = (services as any).particleTexture as Texture;
-    const bulletEmitters = (services as any).bulletEmitters as Map<
-      number,
-      BulletEmitter
-    >;
+    const bulletEmitters = (services as any).bulletEmitters as Map<number, BulletEmitter>;
 
     if (!particleContainer || !particleTexture) return;
 
@@ -101,12 +86,7 @@ export const ParticleSystem: System<ClientServices> = {
       const velocity = stores.velocity.get(entityId);
 
       // Skip if not a bullet or missing data
-      if (
-        !networkState?.state ||
-        networkState.state.type !== "bullet" ||
-        !transform ||
-        !velocity
-      ) {
+      if (!networkState?.state || networkState.state.type !== "bullet" || !transform || !velocity) {
         continue;
       }
 
@@ -134,8 +114,13 @@ export const ParticleSystem: System<ClientServices> = {
 
         // Calculate emission position (behind bullet)
         const emissionOffset = 5; // Distance behind bullet
-        const emissionX = transform.x - Math.cos(bulletAngle) * emissionOffset;
-        const emissionY = transform.y - Math.sin(bulletAngle) * emissionOffset;
+        const offset = isOwnPredictedBullet(networkState.state, services.player.id)
+          ? stores.presentationState.get(entityId)
+          : undefined;
+        const emissionX =
+          transform.x + (offset?.visualOffsetX ?? 0) - Math.cos(bulletAngle) * emissionOffset;
+        const emissionY =
+          transform.y + (offset?.visualOffsetY ?? 0) - Math.sin(bulletAngle) * emissionOffset;
 
         // Random angle deviation (±0.1 radians)
         const angleDeviation = (Math.random() - 0.5) * 0.2;
@@ -151,20 +136,18 @@ export const ParticleSystem: System<ClientServices> = {
         const minAlpha = Math.random() * 0.4 + 0.4;
 
         // Create particle (smaller size)
-        const particle = new Particle({
+        const particle = new Sprite({
           texture: particleTexture,
-          x: emissionX,
-          y: emissionY,
-          scaleX: 0.5,
-          scaleY: 0.5,
-          anchorX: 0.5,
-          anchorY: 0.5,
-          rotation: emissionAngle,
-          tint: 0xffffff,
-          alpha: 1.0, // Start at max, will flicker
+          anchor: 0.5,
         });
+        particle.x = emissionX;
+        particle.y = emissionY;
+        particle.scale.set(0.5);
+        particle.rotation = emissionAngle;
+        particle.tint = 0xffffff;
+        particle.alpha = 1.0;
 
-        particleContainer.addParticle(particle);
+        particleContainer.addChild(particle);
 
         // Calculate velocity components: inherit bullet velocity but slower
         // Start with bullet's velocity scaled down, then add small random deviation
@@ -172,8 +155,10 @@ export const ParticleSystem: System<ClientServices> = {
         const baseVy = velocity.vy * speedMultiplier;
         // Small random deviation perpendicular to bullet direction
         const randomMagnitude = bulletSpeed * speedMultiplier * 0.1; // 10% of particle speed
-        const randomVx = Math.cos(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
-        const randomVy = Math.sin(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
+        const randomVx =
+          Math.cos(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
+        const randomVy =
+          Math.sin(bulletAngle + Math.PI / 2) * randomMagnitude * (Math.random() - 0.5);
         const vx = baseVx + randomVx;
         const vy = baseVy + randomVy;
 
@@ -196,7 +181,7 @@ export const ParticleSystem: System<ClientServices> = {
 
         // Remove if expired
         if (traceParticle.age >= traceParticle.lifespan) {
-          particleContainer.removeParticle(traceParticle.particle);
+          particleContainer.removeChild(traceParticle.particle);
           emitter.particles.splice(i, 1);
           continue;
         }
@@ -237,7 +222,7 @@ export const ParticleSystem: System<ClientServices> = {
 
         // Remove if expired
         if (traceParticle.age >= traceParticle.lifespan) {
-          particleContainer.removeParticle(traceParticle.particle);
+          particleContainer.removeChild(traceParticle.particle);
           emitter.particles.splice(i, 1);
           continue;
         }

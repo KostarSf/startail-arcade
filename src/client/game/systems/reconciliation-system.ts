@@ -1,42 +1,9 @@
 import type { System } from "@/shared/ecs";
-import type { ShipInputCommand } from "@/shared/ecs/components";
-import { integrateMotion } from "@/shared/game/entities/base";
-import { updateShipPhysics, type ShipState } from "@/shared/game/entities/ship";
+import type { ShipState } from "@/shared/game/entities/ship";
+import { wrapCoordinate } from "@/shared/math/world-wrap";
 
+import { reconcileShipState } from "../network/reconcile-ship-state";
 import type { ClientServices } from "../types";
-
-const cloneShipState = (state: Partial<ShipState>): ShipState => ({
-  name: state.name ?? "unknown",
-  type: state.type ?? "ship",
-  id: state.id ?? "",
-  x: state.x ?? 0,
-  y: state.y ?? 0,
-  angle: state.angle ?? 0,
-  vx: state.vx ?? 0,
-  vy: state.vy ?? 0,
-  va: state.va ?? 0,
-  thrust: state.thrust ?? false,
-});
-
-const simulateUntil = (
-  shipState: ShipState,
-  currentInput: ShipInputCommand,
-  fromTime: number,
-  toTime: number
-) => {
-  const deltaMs = Math.max(0, toTime - fromTime);
-  if (deltaMs <= 0) {
-    return fromTime;
-  }
-  const deltaSeconds = deltaMs / 1000;
-  integrateMotion(shipState, deltaSeconds);
-  updateShipPhysics(shipState, {
-    thrust: currentInput.thrust,
-    fire: false,
-    delta: deltaSeconds,
-  });
-  return toTime;
-};
 
 /**
  * Replays buffered player inputs on top of the latest authoritative snapshot
@@ -47,6 +14,10 @@ export const ReconciliationSystem: System<ClientServices> = {
   stage: "prediction",
   priority: 1,
   tick({ services }) {
+    if (services.debug.disableReconciliation) {
+      return;
+    }
+
     const { player, stores, inputBuffer, network } = services;
     if (player.entityId === null) return;
 
@@ -57,77 +28,52 @@ export const ReconciliationSystem: System<ClientServices> = {
 
     if (!transform || !velocity || !networkState || !shipControl) return;
 
-    inputBuffer.acknowledge(shipControl.lastServerSequence);
-
-    const latestServerState = networkState.state as
-      | Partial<ShipState>
+    const latestSnapshot = services.snapshotBuffer.getLatest();
+    const latestServerState = (player.id ? latestSnapshot?.entities.get(player.id) : undefined) as
+      | (Partial<ShipState> & { lastInputSequence?: number })
       | undefined;
+    if (!latestSnapshot || !latestServerState) return;
+    const acknowledged = latestServerState.lastInputSequence ?? -1;
+    inputBuffer.acknowledge(acknowledged);
 
     let baseline = inputBuffer.baseline;
     if (!baseline) {
       baseline = {
-        sequence: shipControl.lastServerSequence,
-        thrust: shipControl.thrust,
-        angle: shipControl.angle,
+        sequence: acknowledged,
+        thrust: latestServerState?.thrust ?? shipControl.thrust,
+        angle: latestServerState?.angle ?? shipControl.angle,
         fire: false,
-        timestamp: networkState.lastServerTime,
+        timestamp: latestSnapshot.serverTime,
       };
       inputBuffer.setBaseline(baseline);
     }
 
-    baseline.thrust = shipControl.thrust;
-    baseline.angle = shipControl.angle;
-    baseline.timestamp = Math.max(
-      baseline.timestamp,
-      networkState.lastServerTime
-    );
-
-    const authoritative = cloneShipState({
-      ...latestServerState,
-      x: latestServerState?.x ?? transform.x,
-      y: latestServerState?.y ?? transform.y,
-      angle: latestServerState?.angle ?? transform.angle,
-      vx: latestServerState?.vx ?? velocity.vx,
-      vy: latestServerState?.vy ?? velocity.vy,
-      va: latestServerState?.va ?? velocity.va,
-      thrust: latestServerState?.thrust ?? shipControl.thrust,
+    const authoritative = reconcileShipState({
+      latestServerState,
+      fallbackState: {
+        x: transform.x,
+        y: transform.y,
+        angle: transform.angle,
+        vx: velocity.vx,
+        vy: velocity.vy,
+        va: velocity.va,
+      },
+      acknowledgedInput: baseline,
+      pendingInputs: inputBuffer.pending,
+      localControl: {
+        thrust: shipControl.thrust,
+        angle: shipControl.angle,
+      },
+      snapshotSimTick: latestSnapshot.simTick,
+      snapshotServerTime: latestSnapshot.serverTime,
+      predictedServerTime: network.predictedServerTime(),
+      simulationTickMs: network.simulationTickMs,
+      streamHealth: network.streamHealth,
+      worldRadius: services.world.radius,
     });
 
-    authoritative.angle = baseline.angle;
-
-    let currentInput = baseline;
-    let currentTime = baseline.timestamp;
-    const predictedTime = network.predictedServerTime();
-
-    for (const command of inputBuffer.pending) {
-      authoritative.angle = currentInput.angle;
-      currentTime = simulateUntil(
-        authoritative,
-        currentInput,
-        currentTime,
-        command.timestamp
-      );
-      currentInput = command;
-      authoritative.angle = currentInput.angle;
-      if (command.fire) {
-        updateShipPhysics(authoritative, {
-          thrust: currentInput.thrust,
-          fire: true,
-          delta: 0,
-        });
-      }
-    }
-
-    authoritative.angle = currentInput.angle;
-    currentTime = simulateUntil(
-      authoritative,
-      currentInput,
-      currentTime,
-      predictedTime
-    );
-
-    transform.x = authoritative.x;
-    transform.y = authoritative.y;
+    transform.x = wrapCoordinate(authoritative.x, services.world.radius);
+    transform.y = wrapCoordinate(authoritative.y, services.world.radius);
     transform.angle = authoritative.angle;
 
     velocity.vx = authoritative.vx;

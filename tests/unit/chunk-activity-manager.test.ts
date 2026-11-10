@@ -35,6 +35,57 @@ function createFakeWorld(args?: {
 }
 
 describe("ChunkActivityManager", () => {
+  test("wake separation preserves already active bodies and ignores sleeping neighbors", () => {
+    const manager = new ChunkActivityManager();
+    const camera = {
+      cameraViewBounds: { centerX: 0, centerY: 0, width: 1000, height: 1000 },
+      ship: null,
+    };
+    const { world, mutable } = createFakeWorld({ tick: 1, players: [camera] });
+    mutable.updateSpatialIndex = (a?: any) => {
+      if (a) manager.onEntityMoved(a);
+    };
+    manager.initialize(world);
+    const awake = new Asteroid({ x: 1995, y: 0, radius: 20 });
+    const waking = new Asteroid({ x: 2010, y: 0, radius: 20 });
+    const edge = new Asteroid({ x: 2995, y: 0, radius: 20 });
+    const asleep = new Asteroid({ x: 3010, y: 0, radius: 20 });
+    for (const a of [awake, waking, edge, asleep]) manager.onSpawn(a);
+    manager.beginTick(world, 0.05);
+    manager.applyWakeStabilization(world);
+    expect(waking.x).toBe(2010);
+    camera.cameraViewBounds.centerX = 1000;
+    mutable.engine.tick++;
+    manager.beginTick(world, 0.05);
+    manager.applyWakeStabilization(world);
+    expect(awake.x).toBe(1995);
+    expect(waking.x).toBe(2035);
+    expect(edge.x).toBe(2995);
+    expect(asleep.x).toBe(3010);
+    expect(manager.isEntitySleeping(asleep)).toBeTrue();
+    const positions = [awake.x, waking.x, edge.x, asleep.x];
+    manager.applyWakeStabilization(world);
+    expect([awake.x, waking.x, edge.x, asleep.x]).toEqual(positions);
+  });
+
+  test("new asteroids in awake chunks join on the next tick and can subsequently sleep", () => {
+    const manager = new ChunkActivityManager();
+    const { world, mutable } = createFakeWorld({
+      tick: 1,
+      players: [{ cameraViewBounds: null, ship: null }],
+    });
+    manager.initialize(world);
+    manager.beginTick(world, 0.05);
+    const a = new Asteroid({ x: 0, y: 0, radius: 18 });
+    manager.onSpawn(a);
+    manager.beginTick(world, 0.05);
+    expect([...manager.getActiveAsteroids()]).toContain(a);
+    mutable.engine.network.players = [];
+    mutable.engine.tick = 30;
+    manager.beginTick(world, 0.05);
+    expect([...manager.getActiveAsteroids()]).not.toContain(a);
+  });
+
   test("wakes and sleeps asteroids based on nearby player camera", () => {
     const manager = new ChunkActivityManager();
     const { world, mutable } = createFakeWorld({

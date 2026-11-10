@@ -23,7 +23,10 @@ export type PerformanceMetric =
   | "networkSerializeMs"
   | "networkBuildFullStateMs"
   | "networkBuildPartialStateMs"
+  | "networkBuildPerPlayerMs"
+  | "networkBuildEventsMs"
   | "networkVisibleIdsMs"
+  | "networkSchedulerTickMs"
   | "wsSendMs";
 
 type PerformanceWindow = { ticks: number } & Record<PerformanceMetric, number>;
@@ -50,11 +53,13 @@ export class Engine {
 
   #world = new World();
   #running = false;
+  #runGeneration = 0;
   #tick = 0;
   #startTime = 0;
   #lastTime = 0;
   #accumulatedTime = 0;
   #lastTickDuration = 0;
+  #lastTickCommittedAt = 0;
   #performanceWindowStartedAt = 0;
   #performanceWindow: PerformanceWindow = this.#createEmptyPerformanceWindow();
   #lastPerformanceSummary: PerformanceSummary | null = null;
@@ -72,7 +77,13 @@ export class Engine {
   }
 
   get serverTime() {
-    return performance.now() - this.#startTime;
+    // Share the simulation timeline with snapshots; exclude startup and stalls.
+    return (
+      this.#tick * DT_MS +
+      (this.#running
+        ? Math.min(DT_MS, Math.max(0, performance.now() - this.#lastTickCommittedAt))
+        : 0)
+    );
   }
 
   get lastTickDuration() {
@@ -90,6 +101,7 @@ export class Engine {
   start() {
     if (this.#running) return;
     this.#running = true;
+    const generation = ++this.#runGeneration;
 
     this.#startTime = performance.now();
     this.#lastTime = this.#startTime;
@@ -98,9 +110,11 @@ export class Engine {
     this.#resetPerformanceWindow();
 
     this.#world.initialize(this);
+    this.#lastTime = performance.now();
+    this.#lastTickCommittedAt = this.#lastTime;
 
     const loop = () => {
-      if (!this.#running) return;
+      if (!this.#running || generation !== this.#runGeneration) return;
 
       const now = performance.now();
       let frameTime = now - this.#lastTime;
@@ -111,9 +125,15 @@ export class Engine {
 
       this.#accumulatedTime += frameTime;
 
-      while (this.#accumulatedTime >= DT_MS) {
+      while (this.#running && this.#accumulatedTime >= DT_MS) {
         this.#update(1 / TPS);
         this.#accumulatedTime -= DT_MS;
+      }
+
+      // Replicate once after catch-up, never once per intermediate tick.
+      if (this.#running) {
+        this.network.flushCommittedState();
+        if (this.#running) this.world.prepareStreaming(2);
       }
 
       setImmediate(loop);
@@ -125,16 +145,19 @@ export class Engine {
 
   stop() {
     this.#running = false;
+    this.#runGeneration++;
+    this.network.resetReplicationState();
     this.world.clear();
     this.#tick = 0;
     this.#lastTickDuration = 0;
+    this.#accumulatedTime = 0;
+    this.#lastTime = 0;
+    this.#lastTickCommittedAt = 0;
+    this.#lastPerformanceSummary = null;
     this.#resetPerformanceWindow();
 
     console.log("engine stopped");
   }
-
-  #ticksWithoutPlayers = 0;
-  #MAX_TICKS_WITHOUT_PLAYERS = TPS * 60;
 
   #update(dt: number) {
     const tickStart = performance.now();
@@ -146,30 +169,17 @@ export class Engine {
         "\tactual:",
         Math.round(this.lastTickDuration * 100) / 100,
         "\tavailable:",
-        Math.floor(dt * 1000 - this.lastTickDuration)
+        Math.floor(dt * 1000 - this.lastTickDuration),
       );
     }
 
     this.#tick++;
+    this.network.beginSimulationTick(this.#tick);
     this.#world.update(dt);
 
-    this.network.sendServerState();
-
     this.#world.postUpdate(dt);
-
-    if (this.network.playerCount === 0) {
-      this.#ticksWithoutPlayers++;
-      if (this.#ticksWithoutPlayers >= this.#MAX_TICKS_WITHOUT_PLAYERS) {
-        console.log(
-          `no players for the last ${(
-            this.#ticksWithoutPlayers / TPS
-          ).toFixed()} seconds, stopping engine`
-        );
-        this.stop();
-      }
-    } else {
-      this.#ticksWithoutPlayers = 0;
-    }
+    this.#lastTickCommittedAt = performance.now();
+    this.network.markTickCommitted(this.#tick);
 
     this.#lastTickDuration = performance.now() - tickStart;
     this.#flushPerformanceWindowIfNeeded();
@@ -231,10 +241,16 @@ export class Engine {
         `(discrete ${avgMetric("collisionDiscreteMs")}ms, continuous ${avgMetric("collisionContinuousMs")}ms, ` +
         `process events ${avgMetric("collisionProcessEventsMs")}ms, pair decode ${avgMetric("collisionPairDecodeMs")}ms, ` +
         `remove entity ${avgMetric("collisionRemoveEntityMs")}ms)\n` +
-        `  network serialize ${avgMetric("networkSerializeMs")}ms ` +
-        `(full state ${avgMetric("networkBuildFullStateMs")}ms, partial state ${avgMetric("networkBuildPartialStateMs")}ms, ` +
-        `visible ids ${avgMetric("networkVisibleIdsMs")}ms)\n` +
-        `  ws send ${avgMetric("wsSendMs")}ms`
+        `  network replication ${(
+          averagesMs.networkSchedulerTickMs +
+          averagesMs.networkBuildPerPlayerMs +
+          averagesMs.networkSerializeMs +
+          averagesMs.wsSendMs
+        ).toFixed(2)}ms ` +
+        `(scheduler ${avgMetric("networkSchedulerTickMs")}ms, full state ${avgMetric("networkBuildFullStateMs")}ms, ` +
+        `partial state ${avgMetric("networkBuildPartialStateMs")}ms, per-player ${avgMetric("networkBuildPerPlayerMs")}ms, ` +
+        `events ${avgMetric("networkBuildEventsMs")}ms, visible ids ${avgMetric("networkVisibleIdsMs")}ms, ` +
+        `serialize ${avgMetric("networkSerializeMs")}ms, ws send ${avgMetric("wsSendMs")}ms)`,
     );
 
     this.#performanceWindowStartedAt = now;
@@ -245,51 +261,32 @@ export class Engine {
     this.#performanceWindow = this.#createEmptyPerformanceWindow();
   }
 
-  #createAveragesSnapshot(
-    average: (value: number) => number
-  ): Record<PerformanceMetric, number> {
+  #createAveragesSnapshot(average: (value: number) => number): Record<PerformanceMetric, number> {
     return {
-      chunkActivityUpdateMs: average(
-        this.#performanceWindow.chunkActivityUpdateMs
-      ),
+      chunkActivityUpdateMs: average(this.#performanceWindow.chunkActivityUpdateMs),
       wakeStabilizationMs: average(this.#performanceWindow.wakeStabilizationMs),
       entityUpdateMs: average(this.#performanceWindow.entityUpdateMs),
       entityPreUpdateMs: average(this.#performanceWindow.entityPreUpdateMs),
-      entityUpdateAsteroidMs: average(
-        this.#performanceWindow.entityUpdateAsteroidMs
-      ),
+      entityUpdateAsteroidMs: average(this.#performanceWindow.entityUpdateAsteroidMs),
       entityUpdateShipMs: average(this.#performanceWindow.entityUpdateShipMs),
-      entityUpdateBulletMs: average(
-        this.#performanceWindow.entityUpdateBulletMs
-      ),
+      entityUpdateBulletMs: average(this.#performanceWindow.entityUpdateBulletMs),
       entityUpdateExpMs: average(this.#performanceWindow.entityUpdateExpMs),
       entityUpdateOtherMs: average(this.#performanceWindow.entityUpdateOtherMs),
       gridUpdateMs: average(this.#performanceWindow.gridUpdateMs),
-      entityRemovalQueueMs: average(
-        this.#performanceWindow.entityRemovalQueueMs
-      ),
+      entityRemovalQueueMs: average(this.#performanceWindow.entityRemovalQueueMs),
       collisionMs: average(this.#performanceWindow.collisionMs),
       collisionDiscreteMs: average(this.#performanceWindow.collisionDiscreteMs),
-      collisionContinuousMs: average(
-        this.#performanceWindow.collisionContinuousMs
-      ),
-      collisionProcessEventsMs: average(
-        this.#performanceWindow.collisionProcessEventsMs
-      ),
-      collisionPairDecodeMs: average(
-        this.#performanceWindow.collisionPairDecodeMs
-      ),
-      collisionRemoveEntityMs: average(
-        this.#performanceWindow.collisionRemoveEntityMs
-      ),
+      collisionContinuousMs: average(this.#performanceWindow.collisionContinuousMs),
+      collisionProcessEventsMs: average(this.#performanceWindow.collisionProcessEventsMs),
+      collisionPairDecodeMs: average(this.#performanceWindow.collisionPairDecodeMs),
+      collisionRemoveEntityMs: average(this.#performanceWindow.collisionRemoveEntityMs),
       networkSerializeMs: average(this.#performanceWindow.networkSerializeMs),
-      networkBuildFullStateMs: average(
-        this.#performanceWindow.networkBuildFullStateMs
-      ),
-      networkBuildPartialStateMs: average(
-        this.#performanceWindow.networkBuildPartialStateMs
-      ),
+      networkBuildFullStateMs: average(this.#performanceWindow.networkBuildFullStateMs),
+      networkBuildPartialStateMs: average(this.#performanceWindow.networkBuildPartialStateMs),
+      networkBuildPerPlayerMs: average(this.#performanceWindow.networkBuildPerPlayerMs),
+      networkBuildEventsMs: average(this.#performanceWindow.networkBuildEventsMs),
       networkVisibleIdsMs: average(this.#performanceWindow.networkVisibleIdsMs),
+      networkSchedulerTickMs: average(this.#performanceWindow.networkSchedulerTickMs),
       wsSendMs: average(this.#performanceWindow.wsSendMs),
     };
   }
@@ -317,7 +314,10 @@ export class Engine {
       networkSerializeMs: 0,
       networkBuildFullStateMs: 0,
       networkBuildPartialStateMs: 0,
+      networkBuildPerPlayerMs: 0,
+      networkBuildEventsMs: 0,
       networkVisibleIdsMs: 0,
+      networkSchedulerTickMs: 0,
       wsSendMs: 0,
     };
   }

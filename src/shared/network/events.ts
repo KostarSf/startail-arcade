@@ -1,5 +1,62 @@
 import type { GenericNetEntityState } from "../game/entities/base";
 
+export type SnapshotStreamHealth = "normal" | "stressed" | "degraded";
+
+export interface SnapshotDegradedFeatures {
+  radarReduced?: boolean;
+  keyframesRelaxed?: boolean;
+}
+
+export interface SnapshotStreamMetadata {
+  health: SnapshotStreamHealth;
+  degradedFeatures?: SnapshotDegradedFeatures;
+}
+
+export interface ReplicatedWorldEventBase {
+  simTick: number;
+  tickEventIndex: number;
+}
+
+export interface EntityDamageWorldEvent extends ReplicatedWorldEventBase {
+  kind: "entity-damage";
+  entityId: string;
+  amount: number;
+  x: number;
+  y: number;
+  sourceId?: string;
+}
+
+export interface EntityDestroyWorldEvent extends ReplicatedWorldEventBase {
+  kind: "entity-destroy";
+  entityId: string;
+  x: number;
+  y: number;
+  sourceId?: string;
+  playerId?: string;
+  score?: number;
+}
+
+export interface PlayerScoreWorldEvent extends ReplicatedWorldEventBase {
+  kind: "player-score";
+  playerId: string;
+  score: number;
+  delta: number;
+}
+
+export interface PlayerLevelUpWorldEvent extends ReplicatedWorldEventBase {
+  kind: "player-level-up";
+  playerId: string;
+  level: number;
+  score: number;
+  nextLevelScore: number;
+}
+
+export type ReplicatedWorldEvent =
+  | EntityDamageWorldEvent
+  | EntityDestroyWorldEvent
+  | PlayerScoreWorldEvent
+  | PlayerLevelUpWorldEvent;
+
 export interface PlayerInputEvent {
   type: "player:input";
   sequence: number;
@@ -10,6 +67,8 @@ export interface PlayerInputEvent {
     angle?: number;
     fire?: boolean;
     firingCompensation?: boolean;
+    /** Matches the input sequence; unique for this connection. */
+    shotId?: number;
   };
 }
 
@@ -46,8 +105,15 @@ export interface ServerPongEvent {
 export interface ServerStateEvent {
   type: "server:state";
   serverTime: number;
+  simTick: number;
+  /** Tick of the previously accepted delta baseline; null for full snapshots. */
+  baseSimTick: number | null;
   tickDuration: number;
+  stream?: SnapshotStreamMetadata;
   state: FullServerState | PartialServerState;
+  events: ReplicatedWorldEvent[];
+  /** Private results retained until this snapshot is accepted by the transport. */
+  shots?: ShotResult[];
   players: {
     id: string;
     name: string;
@@ -56,6 +122,10 @@ export interface ServerStateEvent {
   }[];
   radar?: RadarData[];
 }
+
+export type ShotResult =
+  | { shotId: number; status: "accepted"; bulletId: string }
+  | { shotId: number; status: "rejected" };
 
 export interface RadarData {
   type: "player" | "ship" | "asteroid" | "pirate";

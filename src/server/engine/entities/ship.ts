@@ -1,6 +1,10 @@
 import { integrateExpMagnetism } from "@/shared/game/entities/base";
-import { SHIP_CONSTANTS, updateShipPhysics } from "@/shared/game/entities/ship";
-import { event } from "@/shared/network/utils";
+import {
+  SHIP_CONSTANTS,
+  updateShipPhysics,
+  createBulletSpawnState,
+  applyShotRecoil,
+} from "@/shared/game/entities/ship";
 import type { ServerPlayer } from "../server-network";
 import type { World } from "../world/world";
 import type { ShipAI } from "./ai/ship-ai";
@@ -26,8 +30,32 @@ export class Ship extends LivingEntity {
 
   lastInputSequence = -1;
 
-  #firing = false;
-  #compensatedFire = false;
+  #pendingShot: { angle: number; compensateMotion: boolean; shotId?: number } | null = null;
+  #lastShotTick = -Infinity;
+
+  captureRuntimeState() {
+    return {
+      body: this.toJSON(),
+      energy: this.#energy,
+      maxEnergy: this.maxEnergy,
+      energyRechargeRate: this.energyRechargeRate,
+      baseDamage: this.baseDamage,
+      earnablePoints: this.earnablePoints,
+      pendingShot: this.#pendingShot ? { ...this.#pendingShot } : null,
+      lastShotTick: this.#lastShotTick,
+    };
+  }
+
+  restoreRuntimeState(state: ReturnType<Ship["captureRuntimeState"]>) {
+    this.#energy = state.energy;
+    this.maxEnergy = state.maxEnergy;
+    this.energyRechargeRate = state.energyRechargeRate;
+    this.baseDamage = state.baseDamage;
+    this.earnablePoints = state.earnablePoints;
+    this.level = state.body.level;
+    this.#pendingShot = state.pendingShot ? { ...state.pendingShot } : null;
+    this.#lastShotTick = state.lastShotTick;
+  }
 
   #energy = 100;
   maxEnergy = 100;
@@ -44,6 +72,13 @@ export class Ship extends LivingEntity {
   override earnablePoints = 1;
   override radius = SHIP_CONSTANTS.radius;
 
+  override canWakeChunks() {
+    return true;
+  }
+  override getChunkWakeSources() {
+    return [{ shape: "circle" as const, x: this.x, y: this.y, radius: 1000 }];
+  }
+
   constructor(ship: Partial<IShip>) {
     if (!ship.name) {
       ship.name = `ship-${Ship.#nextId++}`;
@@ -56,11 +91,7 @@ export class Ship extends LivingEntity {
     this.health = ship.health ?? this.maxHealth;
   }
 
-  protected override onDamage(
-    world: World,
-    amount: number,
-    source?: BaseEntity
-  ): number {
+  protected override onDamage(world: World, amount: number, source?: BaseEntity): number {
     if (source && source instanceof Bullet) {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.15));
@@ -77,16 +108,14 @@ export class Ship extends LivingEntity {
   protected override onDeath(world: World, source?: BaseEntity) {
     if (this.earnablePoints <= 0) return;
 
-    const relativeVelocity = source
-      ? source.velocity.mul(0.3).sub(this.velocity)
-      : this.velocity;
+    const relativeVelocity = source ? source.velocity.mul(0.3).sub(this.velocity) : this.velocity;
 
     Exp.spawn(
       world,
       this.position,
       relativeVelocity,
       Math.ceil(this.earnablePoints),
-      (this.radius ?? 0) * 0.7
+      (this.radius ?? 0) * 0.7,
     );
   }
 
@@ -101,9 +130,9 @@ export class Ship extends LivingEntity {
     const oldVY = this.vy;
     const oldAngle = this.angle;
 
-    const result = updateShipPhysics(this, {
+    const spawnSpeed = Math.hypot(this.vx, this.vy);
+    updateShipPhysics(this, {
       thrust: this.thrust,
-      ...this.#consumeFire(),
       delta,
     });
 
@@ -118,14 +147,32 @@ export class Ship extends LivingEntity {
       this.markChanged();
     }
 
-    if (result.bullet) {
-      result.bullet.ownerId = this.id;
-      result.bullet.damage = this.baseDamage;
-      const bullet = new Bullet(result.bullet);
+    const shot = this.#pendingShot;
+    if (shot) {
+      this.#pendingShot = null;
+      // Loading may defer an accepted shot; its eventual spawn also consumes this tick.
+      this.#lastShotTick = world.engine.tick;
+      const spawn = createBulletSpawnState(
+        { x: this.x, y: this.y, vx: this.vx, vy: this.vy, angle: shot.angle },
+        shot.compensateMotion,
+        spawnSpeed,
+      );
+      const bullet = new Bullet({
+        ...spawn,
+        ownerId: this.id,
+        damage: this.baseDamage,
+        shotId: shot.shotId,
+      });
       this.world.spawn(bullet);
-
-      const direction = bullet.velocity.sub(this.velocity).normalize();
-      this.velocity = this.velocity.sub(direction.mul(5));
+      applyShotRecoil(this, spawn);
+      if (shot.shotId !== undefined) {
+        this.player?.pendingShotResults.push({
+          shotId: shot.shotId,
+          status: "accepted",
+          bulletId: bullet.id,
+        });
+      }
+      this.markChanged();
     }
 
     this.#rechargeEnergy(delta);
@@ -148,10 +195,7 @@ export class Ship extends LivingEntity {
     const earnablePoints = value / 25;
     this.earnablePoints += earnablePoints;
     this.heal(Math.ceil(earnablePoints));
-    this.#energy = Math.min(
-      this.#energy + Math.ceil(value * 0.25),
-      this.maxEnergy
-    );
+    this.#energy = Math.min(this.#energy + Math.ceil(value * 0.25), this.maxEnergy);
     this.player?.addScore(value);
   }
 
@@ -178,13 +222,19 @@ export class Ship extends LivingEntity {
    * Fire a bullet.
    * @param compensateMotion - If true, compensate for the ship's motion when firing.
    */
-  fire(compensateMotion = false) {
-    const consumpsion = 25;
-    if (this.#energy < consumpsion) return;
-
-    this.#energy -= consumpsion;
-    this.#firing = true;
-    this.#compensatedFire = compensateMotion;
+  fire(
+    compensateMotion = false,
+    shotId?: number,
+    simTick = this.initialized ? this.world.engine.tick : -1,
+  ) {
+    // Keep the first valid shot and its aim. Never bank a burst across ticks.
+    if (this.#pendingShot || this.#lastShotTick === simTick) return false;
+    if (this.#energy < SHIP_CONSTANTS.shotEnergy) return false;
+    this.#energy -= SHIP_CONSTANTS.shotEnergy;
+    this.#lastShotTick = simTick;
+    this.#pendingShot = { angle: this.angle, compensateMotion, shotId };
+    this.markChanged();
+    return true;
   }
 
   heal(amount: number) {
@@ -193,15 +243,14 @@ export class Ship extends LivingEntity {
     this.health += amount;
     this.health = Math.min(this.health, this.maxHealth);
 
-    this.world.broadcast(
-      event({
-        type: "entity:damage",
-        entityId: this.id,
-        amount: -amount,
-        x: this.position.x,
-        y: this.position.y,
-      })
-    );
+    this.world.emit({
+      kind: "entity-damage",
+      replication: "relevant",
+      entityId: this.id,
+      amount: -amount,
+      x: this.position.x,
+      y: this.position.y,
+    });
 
     this.markChanged();
   }
@@ -214,40 +263,26 @@ export class Ship extends LivingEntity {
     // Preserve health percentage when maxHealth increases
     if (oldMaxHealth > 0) {
       const healthPercentage = this.health / oldMaxHealth;
-      this.health = Math.min(
-        Math.round(this.maxHealth * healthPercentage),
-        this.maxHealth
-      );
+      this.health = Math.min(Math.round(this.maxHealth * healthPercentage), this.maxHealth);
     }
 
     // Preserve energy percentage when maxEnergy increases
     if (oldMaxEnergy > 0) {
       const energyPercentage = this.#energy / oldMaxEnergy;
-      this.#energy = Math.min(
-        Math.round(this.maxEnergy * energyPercentage),
-        this.maxEnergy
-      );
+      this.#energy = Math.min(Math.round(this.maxEnergy * energyPercentage), this.maxEnergy);
     }
 
     this.markChanged();
   }
 
-  #consumeFire() {
-    if (!this.#firing) {
-      return null;
+  override onRemove(world: World) {
+    const shot = this.#pendingShot;
+    if (shot) {
+      if (shot.shotId !== undefined)
+        this.player?.pendingShotResults.push({ shotId: shot.shotId, status: "rejected" });
     }
-
-    this.markChanged();
-
-    const firing = {
-      fire: this.#firing,
-      compensatedFire: this.#firing ? this.#compensatedFire : false,
-    };
-
-    this.#firing = false;
-    this.#compensatedFire = false;
-
-    return firing;
+    this.#pendingShot = null;
+    super.onRemove(world);
   }
 
   override onCollisionStart(world: World, other: BaseEntity): void {
@@ -264,14 +299,12 @@ export class Ship extends LivingEntity {
   override onCollision(world: World, other: BaseEntity): void {
     if (other instanceof Asteroid || other instanceof Ship) {
       this.markChanged();
-      const direction = other.position.sub(this.position).normalize();
+      const direction = world.displacement(this, other).normalize();
       const relativeSpeed = Math.max(
         Math.abs(other.velocity.sub(this.velocity).dot(direction)),
-        10
+        10,
       );
-      this.velocity = this.velocity.add(
-        direction.mul(relativeSpeed * 0.5).neg()
-      );
+      this.velocity = this.velocity.add(direction.mul(relativeSpeed * 0.5).neg());
     }
   }
 

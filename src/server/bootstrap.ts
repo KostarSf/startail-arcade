@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { serve } from "bun";
 
 import index from "../client/index.html";
@@ -5,6 +8,10 @@ import notSupported from "../client/not-supported.html";
 import { Random } from "../shared/math/random";
 import type { NetworkEvent } from "../shared/network/events";
 import { Engine } from "./engine/engine";
+import { Bullet } from "./engine/entities/bullet";
+import { PirateAI } from "./engine/entities/ai/pirate-ai";
+import { Ship } from "./engine/entities/ship";
+import { LivingEntity } from "./engine/entities/living-entity";
 
 export type GameServerOptions = {
   port?: number;
@@ -12,6 +19,7 @@ export type GameServerOptions = {
   debugPerformance?: boolean;
   testMode?: boolean;
   seed?: number | null;
+  staticDistDir?: string | null;
 };
 
 export type ResolvedGameServerOptions = {
@@ -20,6 +28,7 @@ export type ResolvedGameServerOptions = {
   debugPerformance: boolean;
   testMode: boolean;
   seed: number | null;
+  staticDistDir: string | null;
 };
 
 type CliOptions = Record<string, string | boolean>;
@@ -87,6 +96,29 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
+function normalizeStaticDistDir(value: string | undefined): string | null {
+  if (!value) return null;
+
+  const resolved = path.resolve(value);
+  return existsSync(resolved) ? resolved : null;
+}
+
+function getStaticAssetPath(distDir: string, requestPath: string): string | null {
+  const trimmedPath = requestPath === "/" ? "/index.html" : requestPath;
+  const relativePath = trimmedPath.replace(/^\/+/, "");
+  const resolved = path.resolve(distDir, relativePath);
+
+  if (!resolved.startsWith(distDir)) {
+    return null;
+  }
+
+  if (!existsSync(resolved)) {
+    return null;
+  }
+
+  return resolved;
+}
+
 function installSeededMathRandom(seed: number) {
   if (installedMathRandomSeed === seed) {
     return;
@@ -98,18 +130,13 @@ function installSeededMathRandom(seed: number) {
 }
 
 export function resolveGameServerOptions(
-  argv: string[] = typeof Bun !== "undefined"
-    ? Bun.argv.slice(2)
-    : process.argv.slice(2),
-  env: Record<string, string | undefined> = process.env
+  argv: string[] = typeof Bun !== "undefined" ? Bun.argv.slice(2) : process.argv.slice(2),
+  env: Record<string, string | undefined> = process.env,
 ): ResolvedGameServerOptions {
   const cli = parseCliOptions(argv);
-  const cliPort =
-    typeof cli.port === "string" ? parseOptionalNumber(cli.port) : undefined;
-  const cliSeed =
-    typeof cli.seed === "string" ? parseOptionalNumber(cli.seed) : undefined;
-  const hostname =
-    typeof cli.hostname === "string" ? cli.hostname : env.HOST;
+  const cliPort = typeof cli.port === "string" ? parseOptionalNumber(cli.port) : undefined;
+  const cliSeed = typeof cli.seed === "string" ? parseOptionalNumber(cli.seed) : undefined;
+  const hostname = typeof cli.hostname === "string" ? cli.hostname : env.HOST;
 
   return {
     port: cliPort ?? parseOptionalNumber(env.PORT) ?? DEFAULT_PORT,
@@ -117,10 +144,9 @@ export function resolveGameServerOptions(
     debugPerformance:
       cli["debug-performance"] === true ||
       (parseBooleanEnv(env.STARTAIL_DEBUG_PERFORMANCE) ?? false),
-    testMode:
-      cli["test-mode"] === true ||
-      (parseBooleanEnv(env.STARTAIL_TEST_MODE) ?? false),
+    testMode: cli["test-mode"] === true || (parseBooleanEnv(env.STARTAIL_TEST_MODE) ?? false),
     seed: cliSeed ?? parseOptionalNumber(env.STARTAIL_TEST_SEED) ?? null,
+    staticDistDir: normalizeStaticDistDir(env.STARTAIL_STATIC_DIST_DIR),
   };
 }
 
@@ -131,7 +157,12 @@ export function createGameServer(options: GameServerOptions = {}) {
     debugPerformance: options.debugPerformance ?? false,
     testMode: options.testMode ?? false,
     seed: options.seed ?? null,
+    staticDistDir: options.staticDistDir ?? null,
   };
+
+  if (resolved.staticDistDir !== null) {
+    resolved.staticDistDir = normalizeStaticDistDir(resolved.staticDistDir);
+  }
 
   if (resolved.seed !== null) {
     // The server still contains a fair amount of Math.random()-based gameplay
@@ -140,79 +171,175 @@ export function createGameServer(options: GameServerOptions = {}) {
   }
 
   const engine = new Engine();
+  const serveBundledClient = resolved.staticDistDir !== null;
+
+  const serveBundledAsset = (requestPath: string) => {
+    if (!serveBundledClient || !resolved.staticDistDir) {
+      return null;
+    }
+
+    const assetPath = getStaticAssetPath(resolved.staticDistDir, requestPath);
+    if (!assetPath) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    return new Response(Bun.file(assetPath));
+  };
 
   if (resolved.debugPerformance) {
     engine.debug.performanceBreakdown = true;
   }
 
+  const routes = {
+    ...(serveBundledClient
+      ? {
+          "/not-supported": () =>
+            serveBundledAsset("/not-supported.html") ?? new Response("Not found", { status: 404 }),
+        }
+      : {
+          "/not-supported": notSupported,
+        }),
+    "/check-support": (req: Request) => {
+      const userAgent = req.headers.get("user-agent") || "";
+      return Response.json({
+        supported: !isMobileUserAgent(userAgent),
+      });
+    },
+    "/__test/health": () => {
+      if (!resolved.testMode) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return Response.json({
+        ok: true,
+        running: engine.running,
+        tick: engine.tick,
+        playerCount: engine.network.playerCount,
+        serverTimeMs: Math.round(engine.serverTime),
+      });
+    },
+    "/__test/stall": (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const requested = Number(new URL(req.url).searchParams.get("ms"));
+      if (!Number.isFinite(requested) || requested < 0 || requested > 250) {
+        return new Response("Expected 0..250ms", { status: 400 });
+      }
+      const until = performance.now() + requested;
+      while (performance.now() < until) {
+        /* Intentional test-only event-loop stall. */
+      }
+      return Response.json({ stalledMs: requested });
+    },
+    "/__test/metrics": () => {
+      if (!resolved.testMode) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return Response.json({
+        running: engine.running,
+        tick: engine.tick,
+        serverTimeMs: Math.round(engine.serverTime),
+        lastTickDurationMs: Math.round(engine.lastTickDuration * 100) / 100,
+        playerCount: engine.network.playerCount,
+        entityCount: engine.world.entities.length,
+        memory: process.memoryUsage(),
+        entityCounts: engine.world.getEntityCountsByType(),
+        activity: engine.world.getActivityStats(),
+        performance: engine.lastPerformanceSummary,
+        networkScheduler: engine.network.getSchedulerStats(),
+        debug: {
+          ...engine.debug,
+        },
+        seed: resolved.seed,
+      });
+    },
+    "/__test/damage": async (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const data = (await req.json().catch(() => null)) as { id?: string; amount?: number } | null;
+      if (!data?.id || !Number.isFinite(data.amount) || data.amount! <= 0)
+        return new Response("Invalid damage", { status: 400 });
+      const entity = engine.world.find(data.id);
+      if (!(entity instanceof LivingEntity) || !entity.initialized || !entity.isAlive)
+        return new Response("Entity not active", { status: 404 });
+      // Run in the next simulation tick so the event cannot be stamped with an
+      // already-published tick and lost by replication. This hook is test-only.
+      const preUpdate = entity.preUpdate.bind(entity);
+      entity.preUpdate = function (world, delta) {
+        this.preUpdate = preUpdate;
+        preUpdate(world, delta);
+        if (this.isAlive) this.takeDamage(world, data.amount!);
+      };
+      return Response.json({ ok: true, queued: true });
+    },
+    "/__test/teleport": async (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const data = (await req.json().catch(() => null)) as {
+        id?: string;
+        x?: number;
+        y?: number;
+        targetId?: string;
+        health?: number;
+      } | null;
+      if (!data?.id || !Number.isFinite(data.x) || !Number.isFinite(data.y))
+        return new Response("Invalid position", { status: 400 });
+      const entity = engine.world.find(data.id);
+      if (!entity) return new Response("Entity not resident", { status: 404 });
+      entity.x = data.x!;
+      entity.y = data.y!;
+      entity.vx = entity.vy = 0;
+      if (entity instanceof Ship && Number.isFinite(data.health) && data.health! > 0) {
+        entity.maxHealth = entity.health = data.health!;
+      }
+      entity.markChanged();
+      engine.world.updateSpatialIndex(entity);
+      if (entity instanceof Ship && entity.ai instanceof PirateAI && data.targetId) {
+        const shot = new Bullet({ ownerId: data.targetId });
+        shot.initialize(engine.world);
+        entity.ai.onShipDamage(engine.world, 1, shot);
+      }
+      return Response.json({ ok: true });
+    },
+    "/__test/snapshot": () => {
+      if (!resolved.testMode) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return Response.json({
+        running: engine.running,
+        tick: engine.tick,
+        serverTimeMs: Math.round(engine.serverTime),
+        players: engine.network.getPlayerSnapshots(),
+        pirates: engine.world.pirates.getSnapshots(),
+        entityCounts: engine.world.getEntityCountsByType(),
+        activity: engine.world.getActivityStats(),
+        seed: resolved.seed,
+      });
+    },
+    "/ws": (req: Request, activeServer: Bun.Server<undefined>) => {
+      if (activeServer.upgrade(req)) {
+        return new Response(null, { status: 101 });
+      }
+      return new Response("Upgrade failed", { status: 500 });
+    },
+    ...(serveBundledClient
+      ? {
+          "/*": (req: Request) => {
+            const url = new URL(req.url);
+            return serveBundledAsset(url.pathname) ?? new Response("Not found", { status: 404 });
+          },
+        }
+      : {
+          "/*": index,
+        }),
+  };
+
   const server = serve({
     port: resolved.port,
     hostname: resolved.hostname,
-    routes: {
-      "/not-supported": notSupported,
-      "/check-support": (req) => {
-        const userAgent = req.headers.get("user-agent") || "";
-        return Response.json({
-          supported: !isMobileUserAgent(userAgent),
-        });
-      },
-      "/__test/health": () => {
-        if (!resolved.testMode) {
-          return new Response("Not found", { status: 404 });
-        }
-
-        return Response.json({
-          ok: true,
-          running: engine.running,
-          tick: engine.tick,
-          playerCount: engine.network.playerCount,
-          serverTimeMs: Math.round(engine.serverTime),
-        });
-      },
-      "/__test/metrics": () => {
-        if (!resolved.testMode) {
-          return new Response("Not found", { status: 404 });
-        }
-
-        return Response.json({
-          running: engine.running,
-          tick: engine.tick,
-          serverTimeMs: Math.round(engine.serverTime),
-          lastTickDurationMs: Math.round(engine.lastTickDuration * 100) / 100,
-          playerCount: engine.network.playerCount,
-          entityCount: engine.world.entities.length,
-          entityCounts: engine.world.getEntityCountsByType(),
-          activity: engine.world.getActivityStats(),
-          performance: engine.lastPerformanceSummary,
-          debug: {
-            ...engine.debug,
-          },
-          seed: resolved.seed,
-        });
-      },
-      "/__test/snapshot": () => {
-        if (!resolved.testMode) {
-          return new Response("Not found", { status: 404 });
-        }
-
-        return Response.json({
-          running: engine.running,
-          tick: engine.tick,
-          serverTimeMs: Math.round(engine.serverTime),
-          players: engine.network.getPlayerSnapshots(),
-          entityCounts: engine.world.getEntityCountsByType(),
-          activity: engine.world.getActivityStats(),
-          seed: resolved.seed,
-        });
-      },
-      "/ws": (req, activeServer) => {
-        if (activeServer.upgrade(req)) {
-          return new Response(null, { status: 101 });
-        }
-        return new Response("Upgrade failed", { status: 500 });
-      },
-      "/*": index,
-    },
+    routes,
     websocket: {
       open: (ws) => {
         engine.network.connectPlayer(ws);
@@ -220,9 +347,7 @@ export function createGameServer(options: GameServerOptions = {}) {
       message: (ws, data) => {
         engine.network.onMessage(
           ws,
-          JSON.parse(
-            Buffer.isBuffer(data) ? data.toString("utf-8") : data
-          ) as NetworkEvent
+          JSON.parse(Buffer.isBuffer(data) ? data.toString("utf-8") : data) as NetworkEvent,
         );
       },
       close: (ws) => {
@@ -234,8 +359,6 @@ export function createGameServer(options: GameServerOptions = {}) {
       console: true,
     },
   });
-
-  engine.network.initialize(server);
 
   return {
     engine,

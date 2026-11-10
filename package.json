@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "test:install-browsers": "playwright install chromium",
     "probe:agent": "node scripts/run-agent-probe.mjs",
+    "probe:agent:rendered": "PROBE_CLIENT_MODE=rendered node scripts/run-agent-probe.mjs",
     "typecheck": "tsgo --noEmit",
     "lint": "oxlint --type-aware src build.ts"
   },
@@ -30,6 +31,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@typescript/native-preview": "^7.0.0-dev.20260409.1",
+    "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
     "oxlint-tsgolint": "^0.20.0"
   }

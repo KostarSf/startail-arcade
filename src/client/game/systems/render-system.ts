@@ -1,5 +1,7 @@
 import { view } from "@/shared/ecs";
 import type { System } from "@/shared/ecs";
+import { isOwnPredictedBullet } from "../network/predicted-shots";
+import { wrappedDelta } from "@/shared/math/world-wrap";
 import { AnimatedSprite, Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
 
 import type { ClientServices } from "../types";
@@ -44,9 +46,7 @@ export const RenderSystem: System<ClientServices> = {
     const viewportBottom = cameraWorldY + viewHeight / 2;
 
     // Get player transform for distance calculation
-    const playerTransform = player.entityId
-      ? stores.transform.get(player.entityId)
-      : null;
+    const playerTransform = player.entityId ? stores.transform.get(player.entityId) : null;
 
     const ensureShipUiContainer = (entityId: number) => {
       const name = `ship-ui-${entityId}`;
@@ -113,11 +113,11 @@ export const RenderSystem: System<ClientServices> = {
         name: string;
         level?: number;
       },
-      isPlayer: boolean
+      isPlayer: boolean,
     ) => {
       const uiContainer = ensureShipUiContainer(entityId);
-      uiContainer.x = transform.x;
-      uiContainer.y = transform.y;
+      uiContainer.x = cameraWorldX + wrappedDelta(cameraWorldX, transform.x, services.world.radius);
+      uiContainer.y = cameraWorldY + wrappedDelta(cameraWorldY, transform.y, services.world.radius);
       uiContainer.rotation = 0;
 
       const shipRadius = shipState.radius ?? 13;
@@ -154,14 +154,8 @@ export const RenderSystem: System<ClientServices> = {
       const getBackgroundRect = (baseY: number) => ({
         x: -barWidth / 2 - barBackgroundPadding.left,
         y: baseY - barBackgroundPadding.top,
-        width:
-          barWidth +
-          barBackgroundPadding.left +
-          barBackgroundPadding.right,
-        height:
-          barHeight +
-          barBackgroundPadding.top +
-          barBackgroundPadding.bottom,
+        width: barWidth + barBackgroundPadding.left + barBackgroundPadding.right,
+        height: barHeight + barBackgroundPadding.top + barBackgroundPadding.bottom,
       });
 
       const health = shipState.health ?? shipState.maxHealth ?? 1;
@@ -171,12 +165,10 @@ export const RenderSystem: System<ClientServices> = {
       const hpBg = ensureGraphicsChild(uiContainer, "hp-bg");
       hpBg.clear();
       const hpBgRect = getBackgroundRect(healthYOffset);
-      hpBg
-        .rect(hpBgRect.x, hpBgRect.y, hpBgRect.width, hpBgRect.height)
-        .fill({
-          color: 0x222222,
-          alpha: 0.85,
-        });
+      hpBg.rect(hpBgRect.x, hpBgRect.y, hpBgRect.width, hpBgRect.height).fill({
+        color: 0x222222,
+        alpha: 0.85,
+      });
 
       const hpColor = isPlayer
         ? hpRatio < 0.25
@@ -189,12 +181,7 @@ export const RenderSystem: System<ClientServices> = {
       const hpFill = ensureGraphicsChild(uiContainer, "hp-fill");
       hpFill.clear();
       hpFill
-        .rect(
-          -barWidth / 2,
-          healthYOffset,
-          Math.max(barWidth * hpRatio, 0),
-          barHeight
-        )
+        .rect(-barWidth / 2, healthYOffset, Math.max(barWidth * hpRatio, 0), barHeight)
         .fill({ color: hpColor });
 
       if (isPlayer) {
@@ -205,33 +192,18 @@ export const RenderSystem: System<ClientServices> = {
         energyBg.clear();
         const energyBgRect = getBackgroundRect(energyYOffset);
         energyBg
-          .rect(
-            energyBgRect.x,
-            energyBgRect.y,
-            energyBgRect.width,
-            energyBgRect.height
-          )
+          .rect(energyBgRect.x, energyBgRect.y, energyBgRect.width, energyBgRect.height)
           .fill({
             color: 0x222222,
             alpha: 0.85,
           });
 
-        const energyColor =
-          energyRatio < 0.3
-            ? 0xff0000
-            : energyRatio < 0.7
-              ? 0xffff00
-              : 0x00ffff;
+        const energyColor = energyRatio < 0.3 ? 0xff0000 : energyRatio < 0.7 ? 0xffff00 : 0x00ffff;
 
         const energyFill = ensureGraphicsChild(uiContainer, "energy-fill");
         energyFill.clear();
         energyFill
-          .rect(
-            -barWidth / 2,
-            energyYOffset,
-            Math.max(barWidth * energyRatio, 0),
-            barHeight
-          )
+          .rect(-barWidth / 2, energyYOffset, Math.max(barWidth * energyRatio, 0), barHeight)
           .fill({ color: energyColor });
       } else {
         removeChildByName(uiContainer, "energy-bg");
@@ -239,17 +211,29 @@ export const RenderSystem: System<ClientServices> = {
       }
     };
 
-    for (const [entity, transform, renderable] of view(
-      stores.transform,
-      stores.renderable
-    )) {
+    for (const [entity, transform, renderable] of view(stores.transform, stores.renderable)) {
       if (!renderable.ref) continue;
 
       const container = renderable.ref;
 
       // Sync transform
-      container.x = transform.x;
-      container.y = transform.y;
+      const state = stores.networkState.get(entity)?.state;
+      const ownShot = isOwnPredictedBullet(state, services.player.id);
+      const offset = ownShot ? stores.presentationState.get(entity) : undefined;
+      container.x =
+        cameraWorldX +
+        wrappedDelta(
+          cameraWorldX,
+          transform.x + (offset?.visualOffsetX ?? 0),
+          services.world.radius,
+        );
+      container.y =
+        cameraWorldY +
+        wrappedDelta(
+          cameraWorldY,
+          transform.y + (offset?.visualOffsetY ?? 0),
+          services.world.radius,
+        );
       container.rotation = transform.angle;
       // Keep any sprite-attached shadows aligned with the latest transform.
       syncShadowsInContainer(container, { cameraScale: shadowCameraScale });
@@ -262,22 +246,17 @@ export const RenderSystem: System<ClientServices> = {
           // Calculate distance to player
           let distanceToPlayer = Infinity;
           if (playerTransform) {
-            const dx = transform.x - playerTransform.x;
-            const dy = transform.y - playerTransform.y;
+            const dx = wrappedDelta(playerTransform.x, transform.x, services.world.radius);
+            const dy = wrappedDelta(playerTransform.y, transform.y, services.world.radius);
             distanceToPlayer = Math.hypot(dx, dy);
           }
 
           // Calculate distance to nearest screen border
-          const distToLeft = transform.x - viewportLeft;
-          const distToRight = viewportRight - transform.x;
-          const distToTop = transform.y - viewportTop;
-          const distToBottom = viewportBottom - transform.y;
-          const distanceToBorder = Math.min(
-            distToLeft,
-            distToRight,
-            distToTop,
-            distToBottom
-          );
+          const distToLeft = container.x - viewportLeft;
+          const distToRight = viewportRight - container.x;
+          const distToTop = container.y - viewportTop;
+          const distToBottom = viewportBottom - container.y;
+          const distanceToBorder = Math.min(distToLeft, distToRight, distToTop, distToBottom);
 
           // Calculate glare scale: 0.1 when near player, 1.5 when near/beyond border
           // Scale based on distance to border - far from border (near player) = 0.1, near/beyond border = 1.5
@@ -289,7 +268,7 @@ export const RenderSystem: System<ClientServices> = {
             glareScale = 1.5;
           } else {
             // Interpolate between 0.1 (far from border) and 1.5 (near border)
-            const t = Math.max(0, Math.min(1, 1 - (distanceToBorder / borderTransitionDistance)));
+            const t = Math.max(0, Math.min(1, 1 - distanceToBorder / borderTransitionDistance));
             glareScale = 0.1 + t * (1.5 - 0.1);
           }
 
@@ -307,7 +286,8 @@ export const RenderSystem: System<ClientServices> = {
               const maxBlinkInterval = 500; // When life = 5
               const minBlinkInterval = 250; // When life = 0 (2x faster)
               const lifeRatio = Math.max(0, Math.min(1, expLife / blinkingThreshold)); // 0 to 1, where 1 = life 5, 0 = life 0
-              const blinkInterval = minBlinkInterval + (maxBlinkInterval - minBlinkInterval) * lifeRatio;
+              const blinkInterval =
+                minBlinkInterval + (maxBlinkInterval - minBlinkInterval) * lifeRatio;
               const blinkStep = Math.floor(time / blinkInterval);
               // Blink together with exp sprite: visible when blinkStep is even, invisible when odd
               glareSprite.alpha = blinkStep % 2 === 0 ? 1.0 : 0.0;
@@ -336,11 +316,7 @@ export const RenderSystem: System<ClientServices> = {
         // Find the exp sprite (not the glare or shadow)
         let expSprite: Sprite | null = null;
         for (const child of container.children) {
-          if (
-            child instanceof Sprite &&
-            child.name !== "glare" &&
-            !isShadowClone(child)
-          ) {
+          if (child instanceof Sprite && child.name !== "glare" && !isShadowClone(child)) {
             expSprite = child;
             break;
           }
@@ -355,7 +331,8 @@ export const RenderSystem: System<ClientServices> = {
             const maxBlinkInterval = 500; // When life = 5
             const minBlinkInterval = 250; // When life = 0 (2x faster)
             const lifeRatio = Math.max(0, Math.min(1, expLife / blinkingThreshold)); // 0 to 1, where 1 = life 5, 0 = life 0
-            const blinkInterval = minBlinkInterval + (maxBlinkInterval - minBlinkInterval) * lifeRatio;
+            const blinkInterval =
+              minBlinkInterval + (maxBlinkInterval - minBlinkInterval) * lifeRatio;
             const blinkStep = Math.floor(time / blinkInterval);
             // Toggle visibility: visible when blinkStep is even, invisible when odd
             // This matches the glare blinking logic above
@@ -367,8 +344,7 @@ export const RenderSystem: System<ClientServices> = {
         }
       }
 
-      const shipState =
-        networkState?.state?.type === "ship" ? networkState.state : null;
+      const shipState = networkState?.state?.type === "ship" ? networkState.state : null;
       if (shipState) {
         const isPlayerShip = services.player.entityId === entity;
         updateShipBars(entity, transform, shipState, isPlayerShip);
@@ -408,9 +384,7 @@ export const RenderSystem: System<ClientServices> = {
               ? services.textures.playerDamaged1
               : services.textures.pirateDamaged1;
           } else {
-            newTexture = isPlayerShip
-              ? services.textures.player
-              : services.textures.pirate;
+            newTexture = isPlayerShip ? services.textures.player : services.textures.pirate;
           }
 
           // Update ship sprite texture if it changed
@@ -421,9 +395,7 @@ export const RenderSystem: System<ClientServices> = {
           // Always ensure shadow uses base texture (never damaged variants)
           const shadow = getShadowForBase(shipSprite);
           if (shadow instanceof Sprite) {
-            const baseTexture = isPlayerShip
-              ? services.textures.player
-              : services.textures.pirate;
+            const baseTexture = isPlayerShip ? services.textures.player : services.textures.pirate;
             if (shadow.texture !== baseTexture) {
               shadow.texture = baseTexture;
             }
@@ -434,9 +406,7 @@ export const RenderSystem: System<ClientServices> = {
         const shipControl = stores.shipControl.get(entity);
         const isThrusting = shipControl?.thrust ?? false;
 
-        let jetstreamSprite = container.getChildByName(
-          "jetstream"
-        ) as AnimatedSprite | null;
+        let jetstreamSprite = container.getChildByName("jetstream") as AnimatedSprite | null;
 
         if (isThrusting) {
           if (!jetstreamSprite) {
@@ -464,9 +434,7 @@ export const RenderSystem: System<ClientServices> = {
             jetstreamSprite.play();
 
             // Add jetstream before ship sprite so it renders behind
-            const shipSpriteIndex = container.children.findIndex(
-              (child) => child === shipSprite
-            );
+            const shipSpriteIndex = container.children.findIndex((child) => child === shipSprite);
             if (shipSpriteIndex >= 0) {
               container.addChildAt(jetstreamSprite, shipSpriteIndex);
             } else {
@@ -493,15 +461,11 @@ export const RenderSystem: System<ClientServices> = {
       // Debug collider rendering (if we have network state with radius)
       const radius = networkState?.state?.radius;
 
-      const existing = container.getChildByName("debug-collider") as
-        | Graphics
-        | null;
+      const existing = container.getChildByName("debug-collider") as Graphics | null;
 
       // Radius label is attached to the camera so it doesn't rotate with the ship
       const labelName = `debug-radius-${entity}`;
-      const existingLabel = pixi.camera.getChildByName(labelName) as
-        | Text
-        | null;
+      const existingLabel = pixi.camera.getChildByName(labelName) as Text | null;
 
       if (drawColliders && typeof radius === "number" && radius > 0) {
         // Circle

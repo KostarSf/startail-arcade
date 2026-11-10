@@ -5,7 +5,8 @@ export default defineConfig({
   timeout: 120_000,
   fullyParallel: false,
   use: {
-    headless: true,
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
+    headless: process.env.PROBE_HEADED !== "1",
     launchOptions: {
       args: [
         "--enable-webgl",

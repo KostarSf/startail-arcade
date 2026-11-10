@@ -48,7 +48,8 @@ export const AudioSystem: System<ClientServices> = {
     // Update audio listener
     audio.updateListener(
       { x: cameraWorldX, y: cameraWorldY },
-      { vx: cameraVelX, vy: cameraVelY }
+      { vx: cameraVelX, vy: cameraVelY },
+      services.world.radius,
     );
 
     // Update space ambience pitch slightly based on camera speed
@@ -218,12 +219,5 @@ export const AudioSystem: System<ClientServices> = {
       }
     }
 
-    // Handle explosion effects from effect queue (visual only)
-    // Explosion sounds are now played immediately in ClientEngine.#handleMessage
-    // This queue is just for visual effects
-    while (services.effectQueues.explosions.length > 0) {
-      // Just remove from queue - sounds are played immediately on event
-      services.effectQueues.explosions.shift();
-    }
   },
 };

@@ -3,6 +3,8 @@
  * Handles positional 2D audio, Doppler effect, reverb, music, and sound categories
  */
 
+import { nearestWrappedPosition, wrappedDelta } from "@/shared/math/world-wrap";
+
 // Sound asset imports
 import sndClickUrl from "../assets/sounds/snd_click.ogg";
 import sndCoinUrl from "../assets/sounds/snd_coin.wav";
@@ -220,6 +222,7 @@ interface ActiveSound {
   source: AudioBufferSourceNode;
   gain: GainNode;
   panner?: PannerNode;
+  position?: { x: number; y: number };
   reverbSend?: GainNode;
   soundId: string; // Track sound ID for stopping specific sounds
   createdAt: number;
@@ -267,6 +270,14 @@ export class AudioEngine {
   // Listener state
   private listenerPosition: { x: number; y: number } = { x: 0, y: 0 };
   private listenerVelocity: { vx: number; vy: number } = { vx: 0, vy: 0 };
+  private worldRadius = 0;
+
+  private positionPanner(panner: PannerNode, position: { x: number; y: number }) {
+    const image = nearestWrappedPosition(position, this.listenerPosition, this.worldRadius);
+    panner.positionX.value = image.x;
+    panner.positionY.value = image.y;
+    panner.positionZ.value = 0;
+  }
 
   // Category volumes and mutes
   private categoryVolumes: Record<SoundCategory, number> = {
@@ -379,9 +390,19 @@ export class AudioEngine {
   }
 
   // Update listener position and velocity (called each frame)
-  updateListener(position: { x: number; y: number }, velocity: { vx: number; vy: number }): void {
+  updateListener(position: { x: number; y: number }, velocity: { vx: number; vy: number }, worldRadius = 0): void {
     this.listenerPosition = position;
     this.listenerVelocity = velocity;
+    this.worldRadius = worldRadius;
+
+    // A playing sound must follow the nearest image even if only the listener wraps.
+    for (const sound of this.activeSounds) {
+      if (sound.panner && sound.position) this.positionPanner(sound.panner, sound.position);
+    }
+    for (const sound of this.loopingSounds.values()) {
+      if (sound.panner && sound.position)
+        this.updateLoopingSound({ soundId: sound.soundId, entityId: sound.entityId });
+    }
 
     // Update Web Audio API listener position (convert 2D to 3D)
     if (this.audioContext) {
@@ -473,15 +494,13 @@ export class AudioEngine {
       panner.coneOuterGain = 0;
 
       // Set source position (convert 2D to 3D)
-      panner.positionX.value = params.position.x;
-      panner.positionY.value = params.position.y;
-      panner.positionZ.value = 0;
+      this.positionPanner(panner, params.position);
 
       // Calculate Doppler shift based on relative velocity
       let finalPlaybackRate = params.pitch ?? 1.0;
       if (params.velocity && metadata.dopplerEnabled !== false) {
-        const dx = params.position.x - this.listenerPosition.x;
-        const dy = params.position.y - this.listenerPosition.y;
+        const dx = wrappedDelta(this.listenerPosition.x, params.position.x, this.worldRadius);
+        const dy = wrappedDelta(this.listenerPosition.y, params.position.y, this.worldRadius);
         const distance = Math.hypot(dx, dy);
         if (distance > 0.1) {
           const dirX = dx / distance;
@@ -533,6 +552,7 @@ export class AudioEngine {
       source,
       gain,
       panner,
+      position: params.position ? { ...params.position } : undefined,
       soundId: params.soundId, // Store sound ID for stopping
       createdAt: performance.now(),
     };
@@ -686,14 +706,12 @@ export class AudioEngine {
       panner.coneOuterGain = 0;
 
       // Set source position
-      panner.positionX.value = params.position.x;
-      panner.positionY.value = params.position.y;
-      panner.positionZ.value = 0;
+      this.positionPanner(panner, params.position);
 
       // Calculate Doppler shift if enabled
       if (params.velocity && metadata.dopplerEnabled !== false) {
-        const dx = params.position.x - this.listenerPosition.x;
-        const dy = params.position.y - this.listenerPosition.y;
+        const dx = wrappedDelta(this.listenerPosition.x, params.position.x, this.worldRadius);
+        const dy = wrappedDelta(this.listenerPosition.y, params.position.y, this.worldRadius);
         const distance = Math.hypot(dx, dy);
         if (distance > 0.1) {
           const dirX = dx / distance;
@@ -731,7 +749,7 @@ export class AudioEngine {
       source,
       gain,
       panner,
-      position: params.position,
+      position: params.position ? { ...params.position } : undefined,
       velocity: params.velocity,
       basePitch,
       isPlaying: true,
@@ -753,7 +771,7 @@ export class AudioEngine {
     if (!loopingSound || !loopingSound.isPlaying) return;
 
     if (params.position) {
-      loopingSound.position = params.position;
+      loopingSound.position = { ...params.position };
     }
     if (params.velocity) {
       loopingSound.velocity = params.velocity;
@@ -761,8 +779,7 @@ export class AudioEngine {
 
     // Update audio nodes if positional
     if (loopingSound.panner && loopingSound.position) {
-      loopingSound.panner.positionX.value = loopingSound.position.x;
-      loopingSound.panner.positionY.value = loopingSound.position.y;
+      this.positionPanner(loopingSound.panner, loopingSound.position);
     }
 
     // Update Doppler
@@ -774,8 +791,8 @@ export class AudioEngine {
       loopingSound.position &&
       loopingSound.source
     ) {
-      const dx = loopingSound.position.x - this.listenerPosition.x;
-      const dy = loopingSound.position.y - this.listenerPosition.y;
+      const dx = wrappedDelta(this.listenerPosition.x, loopingSound.position.x, this.worldRadius);
+      const dy = wrappedDelta(this.listenerPosition.y, loopingSound.position.y, this.worldRadius);
       const distance = Math.hypot(dx, dy);
       if (distance > 0.1) {
         const dirX = dx / distance;

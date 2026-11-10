@@ -6,48 +6,51 @@ export type NetEventCallback = (event: NetworkEvent) => void;
 export class NetworkDecoder {
   #engine: ClientEngine;
 
-  // Очередь декодированных сообщений, отсортированная по serverTime
-  #messageQueue: Array<{
-    message: NetworkEvent;
-    cb: NetEventCallback;
-    receiveOrder: number; // Порядковый номер получения для сообщений без serverTime
-    serverTime?: number; // Извлекается из message если есть
-  }> = [];
-
-  #processingQueue = false; // Флаг, чтобы не обрабатывать очередь параллельно
-  #receiveCounter = 0; // Счетчик для отслеживания порядка получения
-
-  get #fakeLatency() {
-    return this.#engine.simulatedLatencyMs;
-  }
+  #tail: Promise<void> = Promise.resolve();
+  #generation = 0;
 
   constructor(engine: ClientEngine) {
     this.#engine = engine;
   }
 
-  async process(event: MessageEvent<any>, cb: NetEventCallback) {
-    const receiveOrder = ++this.#receiveCounter;
-
-    if (this.#fakeLatency > 0) {
-      await new Promise((resolve) => setTimeout(resolve, this.#fakeLatency));
-    }
-
-    const message = await this.#decodeMessage(event.data);
-    this.#enqueueMessage(message, receiveOrder, cb);
-
-    await this.#processQueue();
+  reset() {
+    this.#generation++;
+    this.#tail = Promise.resolve();
   }
 
-  async #decodeMessage(
-    payload: string | ArrayBuffer | Blob
-  ): Promise<NetworkEvent> {
+  process(event: MessageEvent<any>, cb: NetEventCallback): Promise<void> {
+    const generation = this.#generation;
+    const latency = this.#engine.simulatedLatencyMs;
+    // Start latency timers on arrival, but serialize decoding AND application.
+    const arrival =
+      latency > 0
+        ? new Promise<void>((resolve) => setTimeout(resolve, latency))
+        : Promise.resolve();
+    const work = this.#tail.then(async () => {
+      await arrival;
+      if (generation !== this.#generation) return;
+      const message = await this.#decodeMessage(event.data);
+      if (generation === this.#generation) cb(message);
+    });
+    this.#tail = work.catch(() => {
+      if (generation === this.#generation) this.reset();
+    });
+    return work;
+  }
+
+  async #decodeMessage(payload: string | ArrayBuffer | Blob): Promise<NetworkEvent> {
     const isGzip = await this.#isGzipCompressed(payload);
 
     let raw: string;
     if (isGzip) {
       raw = await this.#decompressGzip(payload);
     } else {
-      raw = typeof payload === "string" ? payload : payload.toString();
+      raw =
+        typeof payload === "string"
+          ? payload
+          : new TextDecoder().decode(
+              payload instanceof Blob ? await payload.arrayBuffer() : payload,
+            );
     }
 
     return JSON.parse(raw) as NetworkEvent;
@@ -88,93 +91,7 @@ export class NetworkDecoder {
       arrayBuffer = encoder.encode(data).buffer;
     }
 
-    // Используем DecompressionStream API для декодирования gzip
-    const stream = new DecompressionStream("gzip");
-    const writer = stream.writable.getWriter();
-    const reader = stream.readable.getReader();
-
-    writer.write(new Uint8Array(arrayBuffer));
-    writer.close();
-
-    const chunks: Uint8Array[] = [];
-    let done = false;
-
-    while (!done) {
-      const { value, done: streamDone } = await reader.read();
-      done = streamDone;
-      if (value) {
-        chunks.push(value);
-      }
-    }
-
-    // Объединяем все chunks в один ArrayBuffer
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    // Конвертируем в строку
-    const decoder = new TextDecoder();
-    return decoder.decode(result);
-  }
-
-  #enqueueMessage(
-    message: NetworkEvent,
-    receiveOrder: number,
-    cb: NetEventCallback
-  ) {
-    // Извлекаем serverTime если есть (у ServerStateEvent и ServerPongEvent)
-    const serverTime = this.#extractServerTime(message);
-
-    this.#messageQueue.push({
-      message,
-      receiveOrder,
-      serverTime,
-      cb,
-    });
-
-    // Сортируем очередь:
-    // 1. Сначала по serverTime (если есть), по возрастанию
-    // 2. Затем по receiveOrder для сообщений без serverTime
-    this.#messageQueue.sort((a, b) => {
-      // Если у обоих есть serverTime - сортируем по нему
-      if (a.serverTime !== undefined && b.serverTime !== undefined) {
-        return a.serverTime - b.serverTime;
-      }
-      // Если только у одного есть serverTime - он приоритетнее
-      if (a.serverTime !== undefined) return -1;
-      if (b.serverTime !== undefined) return 1;
-      // Если у обоих нет serverTime - по порядку получения
-      return a.receiveOrder - b.receiveOrder;
-    });
-  }
-
-  #extractServerTime(message: NetworkEvent): number | undefined {
-    if ("serverTime" in message && typeof message.serverTime === "number") {
-      return message.serverTime;
-    }
-    return undefined;
-  }
-
-  async #processQueue() {
-    // Предотвращаем параллельную обработку
-    if (this.#processingQueue) {
-      return;
-    }
-
-    this.#processingQueue = true;
-
-    try {
-      // Обрабатываем все сообщения из очереди по порядку
-      while (this.#messageQueue.length > 0) {
-        const { message, cb } = this.#messageQueue.shift()!;
-        cb(message);
-      }
-    } finally {
-      this.#processingQueue = false;
-    }
+    const stream = new Blob([arrayBuffer]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return new Response(stream).text();
   }
 }

@@ -19,6 +19,8 @@ export interface ShipInputCommand {
   angle: number;
   fire: boolean;
   timestamp: number;
+  firingCompensation?: boolean;
+  predictedFire?: boolean;
 }
 
 export interface ShipControlComponent {
@@ -41,11 +43,19 @@ export interface SnapshotState<TState = BaseEntityState> {
 
 export interface NetworkStateComponent<TState = BaseEntityState> {
   lastServerTime: number;
+  lastSimTick: number;
   predictedServerTime: number;
   renderDelay: number;
   snapshots: SnapshotState<TState>[];
   lastAcknowledgedInput: number;
   state?: TState;
+}
+
+export interface PresentationStateComponent {
+  wasUsingTail: boolean;
+  visualOffsetX: number;
+  visualOffsetY: number;
+  visualOffsetAngle: number;
 }
 
 export interface BulletSpawnComponent {

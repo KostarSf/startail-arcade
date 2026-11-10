@@ -8,17 +8,22 @@ import type {
   RenderableComponent,
   ShipControlComponent,
   NetworkStateComponent,
+  PresentationStateComponent,
 } from "@/shared/ecs";
 import type { BaseEntityState } from "@/shared/game/entities/base";
 import type { ShipInputCommand } from "@/shared/ecs/components";
+import type { SnapshotStreamHealth } from "@/shared/network/events";
 
 import type { Starfield } from "../starfield";
 import type { SnapshotBuffer } from "./network/snapshot-buffer";
 import type { InputBuffer } from "./network/input-buffer";
+import type { PresentationWindowObservation } from "./network/presentation-timing-controller";
 import type { CameraShake } from "./systems/camera-shake";
 import type { AudioEngine } from "../audio/audio-engine";
 import type { StatsStore } from "../store";
 import type { AudioSettingsStore } from "../audio/audio-settings";
+import type { EventBuffer } from "./network/event-buffer";
+import type { PredictedShots } from "./network/predicted-shots";
 
 export interface DamageTextRequest {
   amount: number;
@@ -53,7 +58,9 @@ export interface ControlState {
 export interface ClientServices extends Record<string, unknown> {
   controls: ControlState;
   snapshotBuffer: SnapshotBuffer;
+  eventBuffer: EventBuffer;
   inputBuffer: InputBuffer;
+  predictedShots: PredictedShots;
   cameraShake: CameraShake;
   entityIndex: Map<string, EntityId>;
   stores: {
@@ -62,6 +69,7 @@ export interface ClientServices extends Record<string, unknown> {
     renderable: ComponentStore<RenderableComponent<Container>>;
     shipControl: ComponentStore<ShipControlComponent>;
     networkState: ComponentStore<NetworkStateComponent<BaseEntityState>>;
+    presentationState: ComponentStore<PresentationStateComponent>;
   };
   pixi: {
     app: import("pixi.js").Application;
@@ -111,7 +119,9 @@ export interface ClientServices extends Record<string, unknown> {
           height: number;
         };
       },
-      options?: { fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds"> }
+      options?: {
+        fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds">;
+      },
     ) => ShipInputCommand | null;
     sendCameraBounds: (viewBounds: {
       centerX: number;
@@ -120,18 +130,28 @@ export interface ClientServices extends Record<string, unknown> {
       height: number;
     }) => void;
     predictedServerTime: () => number;
+    updatePresentationWindow: (observation: PresentationWindowObservation) => number | null;
     renderDelayMs: number;
+    simulationTickMs: number;
+    streamHealth: SnapshotStreamHealth;
+    starvationDurationMs: number;
+    latestSnapshotAgeMs: number | null;
   };
   debug: {
     drawGrid: boolean;
     drawWorldBorder: boolean;
     drawColliders: boolean;
+    disableInterpolation: boolean;
+    disableReconciliation: boolean;
     setDrawGrid: (value: boolean) => void;
     setDrawWorldBorder: (value: boolean) => void;
     setDrawColliders: (value: boolean) => void;
+    setDisableInterpolation: (value: boolean) => void;
+    setDisableReconciliation: (value: boolean) => void;
   };
   world: {
     radius: number;
+    renderedSimTick: number;
   };
   effectQueues: {
     damageTexts: DamageTextRequest[];

@@ -11,6 +11,9 @@ import { Ship } from "../ship";
 import { ShipAI } from "./ship-ai";
 
 export class PirateAI extends ShipAI {
+  #outOfPursuitSince: number | null = null;
+  #restoreTargets: { current: string | null; memorized: string | null } | null = null;
+  #lastCombatTick = -Infinity;
   #memorizedTarget: LivingEntity | null = null;
   #currentTarget: LivingEntity | null = null;
 
@@ -26,6 +29,35 @@ export class PirateAI extends ShipAI {
   #targetAngle = 0;
 
   #level: number;
+
+  captureState() {
+    return {
+      level: this.#level,
+      targetAngle: this.#targetAngle,
+      current: this.#currentTarget?.id ?? null,
+      memorized: this.#memorizedTarget?.id ?? null,
+      outOfPursuitSince: this.#outOfPursuitSince,
+      lastCombatTick: this.#lastCombatTick,
+    };
+  }
+  restoreState(state: ReturnType<PirateAI["captureState"]>) {
+    this.#level = state.level;
+    this.#targetAngle = state.targetAngle;
+    this.#restoreTargets = state;
+    this.#outOfPursuitSince = state.outOfPursuitSince;
+    this.#lastCombatTick = state.lastCombatTick;
+    this.restoreInitialization();
+  }
+  get pursuitTargetId() {
+    return this.#currentTarget instanceof Ship &&
+      this.#currentTarget.player &&
+      this.#currentTarget.isAlive
+      ? this.#currentTarget.id
+      : null;
+  }
+  keepsActive(world: World) {
+    return this.pursuitTargetId !== null || world.engine.tick - this.#lastCombatTick < TPS * 5;
+  }
 
   constructor(level?: number) {
     const tickRate = Math.floor(TPS / 4); // 4x slower than the game
@@ -44,25 +76,30 @@ export class PirateAI extends ShipAI {
     ship.energyRechargeRate = 20 + this.#level * 2;
     ship.baseDamage = 10 + this.#level * 2;
     ship.earnablePoints =
-      this.#earnablePoints +
-      this.#earnablePoints * Math.max(this.#level - 1, 0) * 0.1;
+      this.#earnablePoints + this.#earnablePoints * Math.max(this.#level - 1, 0) * 0.1;
   }
 
-  override onShipDamage(
-    world: World,
-    amount: number,
-    source?: BaseEntity
-  ): void {
+  override onShipDamage(world: World, amount: number, source?: BaseEntity): void {
     if (
-      source instanceof Bullet &&
-      source.owner instanceof Ship &&
-      source.owner.isAlive
+      (source instanceof Ship && source.player) ||
+      (source instanceof Bullet && source.owner instanceof Ship && source.owner.player)
     ) {
+      this.#lastCombatTick = world.engine.tick;
+    }
+    if (source instanceof Bullet && source.owner instanceof Ship && source.owner.isAlive) {
+      this.#restoreTargets = null;
       this.#updateTarget(source.owner);
     }
   }
 
   override update(ship: Ship, world: World, delta: number) {
+    if (this.#restoreTargets) {
+      const current = world.find(this.#restoreTargets.current ?? ""),
+        memorized = world.find(this.#restoreTargets.memorized ?? "");
+      this.#currentTarget = current instanceof LivingEntity ? current : null;
+      this.#memorizedTarget = memorized instanceof LivingEntity ? memorized : null;
+      this.#restoreTargets = null;
+    }
     super.update(ship, world, delta);
 
     ship.markChanged();
@@ -115,7 +152,7 @@ export class PirateAI extends ShipAI {
    * Computes a safe escape angle by analyzing all nearby obstacles.
    * Returns null if no obstacles need avoiding.
    */
-  #computeEscapeAngle(ship: Ship): { angle: number; urgency: number } | null {
+  #computeEscapeAngle(ship: Ship, world: World): { angle: number; urgency: number } | null {
     if (this.#nearestObstacles.size === 0) return null;
 
     const speed = ship.velocity.length();
@@ -140,17 +177,17 @@ export class PirateAI extends ShipAI {
         continue;
       }
 
-      const distance = ship.position.distance(obstacle.position);
+      const distance = world.distance(ship, obstacle);
       if (distance > dynamicRange) continue;
 
       // Direction away from obstacle
-      const awayDirection = ship.position.sub(obstacle.position).normalize();
+      const awayDirection = world.displacement(obstacle, ship).normalize();
 
       // Base weight: closer obstacles have more influence
       let weight = 1 - inverseLerp(distance, 0, dynamicRange);
 
       // Check if obstacle is in predicted path
-      const predictedDistance = predictedPosition.distance(obstacle.position);
+      const predictedDistance = world.distance(predictedPosition, obstacle);
       const obstacleRadius = obstacle.radius ?? 20;
       const threatDistance = obstacleRadius + 30; // Safety margin
 
@@ -199,7 +236,7 @@ export class PirateAI extends ShipAI {
    * maintain the original goal (chasing or idling).
    */
   #avadeObstacles(ship: Ship, world: World, delta: number) {
-    const escapeResult = this.#computeEscapeAngle(ship);
+    const escapeResult = this.#computeEscapeAngle(ship, world);
 
     if (!escapeResult) {
       // No obstacles to avoid
@@ -244,13 +281,16 @@ export class PirateAI extends ShipAI {
     }
 
     if (this.#currentTarget) {
-      const outOfRange =
-        this.#currentTarget.position.distance(ship.position) >
-        this.#pursuitRange;
-
-      if (!this.#currentTarget.isAlive || (outOfRange && Math.random() < 0.2)) {
+      const outOfRange = world.distance(this.#currentTarget, ship) > this.#pursuitRange;
+      if (outOfRange) this.#outOfPursuitSince ??= world.engine.tick;
+      else this.#outOfPursuitSince = null;
+      if (
+        !this.#currentTarget.isAlive ||
+        (this.#outOfPursuitSince !== null && world.engine.tick - this.#outOfPursuitSince > TPS * 3)
+      ) {
         this.#currentTarget = this.#memorizedTarget;
         this.#memorizedTarget = null;
+        this.#outOfPursuitSince = null;
       }
     }
 
@@ -258,18 +298,12 @@ export class PirateAI extends ShipAI {
     const dynamicRange = this.#getDynamicAvoidanceRange(ship);
 
     for (const obstacle of this.#nearestObstacles) {
-      if (
-        !obstacle.isAlive ||
-        ship.position.distance(obstacle.position) > dynamicRange
-      ) {
+      if (!obstacle.isAlive || world.distance(ship, obstacle) > dynamicRange) {
         this.#nearestObstacles.delete(obstacle);
       }
     }
 
-    const nearbyEntities = world
-      .query(ship.position, this.#alertRange)
-      .precise()
-      .array();
+    const nearbyEntities = world.query(ship.position, this.#alertRange).precise().array();
 
     const healthPercentage = ship.health / ship.maxHealth;
 
@@ -284,7 +318,7 @@ export class PirateAI extends ShipAI {
         entity instanceof LivingEntity &&
         !(entity instanceof Exp) &&
         entity.isAlive &&
-        ship.position.distance(entity.position) < dynamicRange
+        world.distance(ship, entity) < dynamicRange
       ) {
         this.#nearestObstacles.add(entity);
         continue;
@@ -305,7 +339,7 @@ export class PirateAI extends ShipAI {
       if (
         entity instanceof Exp &&
         entity.isAlive &&
-        ship.position.distance(entity.position) <= this.#closeRange
+        world.distance(ship, entity) <= this.#closeRange
       ) {
         expCandidates.push(entity);
       }
@@ -314,7 +348,7 @@ export class PirateAI extends ShipAI {
       if (
         entity instanceof Asteroid &&
         entity.isAlive &&
-        ship.position.distance(entity.position) <= this.#closeRange
+        world.distance(ship, entity) <= this.#closeRange
       ) {
         asteroidCandidates.push(entity);
       }
@@ -327,7 +361,7 @@ export class PirateAI extends ShipAI {
 
       // Prefer exp over asteroid
       for (const exp of expCandidates) {
-        const distance = ship.position.distance(exp.position);
+        const distance = world.distance(ship, exp);
         if (distance < closestDistance) {
           closestDistance = distance;
           closestTarget = exp;
@@ -337,7 +371,7 @@ export class PirateAI extends ShipAI {
       // If no exp found, look for asteroids
       if (!closestTarget) {
         for (const asteroid of asteroidCandidates) {
-          const distance = ship.position.distance(asteroid.position);
+          const distance = world.distance(ship, asteroid);
           if (distance < closestDistance) {
             closestDistance = distance;
             closestTarget = asteroid;
@@ -360,7 +394,7 @@ export class PirateAI extends ShipAI {
       let closestDistance = Infinity;
 
       for (const exp of expCandidates) {
-        const distance = ship.position.distance(exp.position);
+        const distance = world.distance(ship, exp);
         if (distance < closestDistance) {
           closestDistance = distance;
           closestExp = exp;
@@ -387,19 +421,13 @@ export class PirateAI extends ShipAI {
     const target = this.#currentTarget;
     if (!target) return;
 
-    const distance = ship.position.distance(target.position);
+    const distance = world.distance(ship, target);
 
     const inCloseRange = distance < this.#closeRange;
     ship.thrust = !inCloseRange;
 
     const fireChance =
-      target instanceof Ship
-        ? inCloseRange
-          ? 0.1
-          : 0.15
-        : target instanceof Exp
-        ? 0
-        : 0.2;
+      target instanceof Ship ? (inCloseRange ? 0.1 : 0.15) : target instanceof Exp ? 0 : 0.2;
 
     const fire = Math.random() < fireChance;
     if (fire) {
@@ -407,12 +435,12 @@ export class PirateAI extends ShipAI {
     }
 
     if (distance > 100) {
-      this.#targetAngle = target.position
+      this.#targetAngle = world
+        .displacement(ship, target)
         .add(target.velocity.sub(ship.velocity))
-        .sub(ship.position)
         .angle();
     } else {
-      this.#targetAngle = target.position.sub(ship.position).angle();
+      this.#targetAngle = world.displacement(ship, target).angle();
     }
   }
 
@@ -432,8 +460,7 @@ export class PirateAI extends ShipAI {
 
     if (
       target instanceof Ship &&
-      (this.#currentTarget instanceof Asteroid ||
-        this.#currentTarget instanceof Exp)
+      (this.#currentTarget instanceof Asteroid || this.#currentTarget instanceof Exp)
     ) {
       this.#memorizedTarget = this.#currentTarget;
       this.#currentTarget = target;

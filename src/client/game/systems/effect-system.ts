@@ -1,20 +1,19 @@
 import type { System } from "@/shared/ecs";
+import { nearestWrappedPosition } from "@/shared/math/world-wrap";
 import { AnimatedSprite, Rectangle, Text, Texture } from "pixi.js";
 
-import type {
-  ClientServices,
-  DamageTextRequest,
-  ExplosionRequest,
-} from "../types";
+import type { ClientServices, DamageTextRequest, ExplosionRequest } from "../types";
 
 interface DamageTextInstance {
   text: Text;
+  position: { x: number; y: number };
   age: number;
   duration: number;
 }
 
 interface ExplosionInstance {
   sprite: AnimatedSprite;
+  position: { x: number; y: number };
   age: number;
   duration: number;
 }
@@ -41,7 +40,7 @@ const createExplosionFrames = (baseTexture: Texture) => {
       new Texture({
         source: baseTexture.source,
         frame: new Rectangle(i * frameWidth, 0, frameWidth, frameHeight),
-      })
+      }),
     );
   }
   return frames;
@@ -50,7 +49,7 @@ const createExplosionFrames = (baseTexture: Texture) => {
 const spawnDamageText = (
   runtime: EffectRuntimeState,
   services: ClientServices,
-  payload: DamageTextRequest
+  payload: DamageTextRequest,
 ) => {
   const isHealing = payload.amount < 0;
   const amount = Math.abs(payload.amount);
@@ -70,11 +69,13 @@ const spawnDamageText = (
   text.anchor.set(0.5, 1);
   text.resolution = 2;
   text.roundPixels = true;
+  text.label = "world-damage-text";
   text.x = payload.x;
   text.y = payload.y;
   services.pixi.camera.addChild(text);
   runtime.damageTexts.push({
     text,
+    position: { x: payload.x, y: payload.y },
     age: 0,
     duration: DAMAGE_TEXT_DURATION,
   });
@@ -83,9 +84,10 @@ const spawnDamageText = (
 const spawnExplosion = (
   runtime: EffectRuntimeState,
   services: ClientServices,
-  payload: ExplosionRequest
+  payload: ExplosionRequest,
 ) => {
   const sprite = new AnimatedSprite(runtime.explosionFrames);
+  sprite.label = "world-explosion";
   sprite.anchor.set(0.5);
   sprite.loop = false;
   const framesPerSecond = runtime.explosionFrames.length / EXPLOSION_DURATION;
@@ -96,20 +98,22 @@ const spawnExplosion = (
   services.pixi.camera.addChild(sprite);
   runtime.explosions.push({
     sprite,
+    position: { x: payload.x, y: payload.y },
     age: 0,
     duration: EXPLOSION_DURATION,
   });
 };
 
-const updateDamageTexts = (
-  runtime: EffectRuntimeState,
-  services: ClientServices,
-  dt: number
-) => {
+const updateDamageTexts = (runtime: EffectRuntimeState, services: ClientServices, dt: number) => {
   for (let i = runtime.damageTexts.length - 1; i >= 0; i--) {
     const instance = runtime.damageTexts[i]!;
     instance.age += dt;
-    instance.text.y -= DAMAGE_TEXT_SPEED * dt;
+    const position = nearestWrappedPosition(
+      { x: instance.position.x, y: instance.position.y - DAMAGE_TEXT_SPEED * instance.age },
+      cameraPosition(services),
+      services.world.radius,
+    );
+    instance.text.position.set(position.x, position.y);
     const alpha = clamp01(1 - instance.age / instance.duration);
     instance.text.alpha = alpha;
     if (instance.age >= instance.duration) {
@@ -120,14 +124,16 @@ const updateDamageTexts = (
   }
 };
 
-const updateExplosions = (
-  runtime: EffectRuntimeState,
-  services: ClientServices,
-  dt: number
-) => {
+const updateExplosions = (runtime: EffectRuntimeState, services: ClientServices, dt: number) => {
   for (let i = runtime.explosions.length - 1; i >= 0; i--) {
     const instance = runtime.explosions[i]!;
     instance.age += dt;
+    const position = nearestWrappedPosition(
+      instance.position,
+      cameraPosition(services),
+      services.world.radius,
+    );
+    instance.sprite.position.set(position.x, position.y);
     if (instance.age >= instance.duration) {
       services.pixi.camera.removeChild(instance.sprite);
       instance.sprite.destroy();
@@ -136,15 +142,18 @@ const updateExplosions = (
   }
 };
 
+const cameraPosition = ({ pixi }: ClientServices) => ({
+  x: (pixi.renderWidth / 2 - pixi.camera.x) / (pixi.camera.scale.x || 1),
+  y: (pixi.renderHeight / 2 - pixi.camera.y) / (pixi.camera.scale.y || 1),
+});
+
 export const EffectSystem: System<ClientServices> = {
   id: "effect-system",
   stage: "presentation",
-  priority: 1,
+  priority: 3, // Reproject after the camera, including while an effect is already alive.
   init({ services }) {
     // Clean up existing effect state if it exists (for hot reload)
-    const existingRuntime = (services as any)[EFFECT_STATE_KEY] as
-      | EffectRuntimeState
-      | undefined;
+    const existingRuntime = (services as any)[EFFECT_STATE_KEY] as EffectRuntimeState | undefined;
     if (existingRuntime) {
       // Clean up all damage texts
       for (const instance of existingRuntime.damageTexts) {
@@ -180,9 +189,7 @@ export const EffectSystem: System<ClientServices> = {
     };
   },
   tick({ services, dt }) {
-    const runtime = (services as any)[EFFECT_STATE_KEY] as
-      | EffectRuntimeState
-      | undefined;
+    const runtime = (services as any)[EFFECT_STATE_KEY] as EffectRuntimeState | undefined;
     if (!runtime) return;
 
     while (services.effectQueues.damageTexts.length > 0) {

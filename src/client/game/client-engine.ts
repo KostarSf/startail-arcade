@@ -1,21 +1,28 @@
 import {
   Application,
+  extensions,
+  ResizePlugin,
+  TickerPlugin,
+  GraphicsPipe,
+  GraphicsContextSystem,
+  CanvasTextPipe,
+  CanvasTextSystem,
+  EventSystem,
+  FilterPipe,
+  FilterSystem,
   Assets,
   Container,
   RenderTexture,
   Sprite,
   Texture,
+  Text,
   Ticker,
 } from "pixi.js";
 
-import {
-  ComponentStore,
-  EntityManager,
-  Pipeline,
-  type EntityId,
-} from "@/shared/ecs";
+import { ComponentStore, EntityManager, Pipeline, type EntityId } from "@/shared/ecs";
 import type {
   NetworkStateComponent,
+  PresentationStateComponent,
   RenderableComponent,
   ShipControlComponent,
   ShipInputCommand,
@@ -23,6 +30,7 @@ import type {
   VelocityComponent,
 } from "@/shared/ecs/components";
 import type { BaseEntityState } from "@/shared/game/entities/base";
+import type { GenericNetEntityState } from "@/shared/game/entities/base";
 import type { NetworkEvent, PlayerInputEvent } from "@/shared/network/events";
 import { event } from "@/shared/network/utils";
 
@@ -53,8 +61,14 @@ import { Starfield } from "../starfield";
 import { stats } from "../store";
 import { AudioEngine } from "../audio/audio-engine";
 import { audioSettings } from "../audio/audio-settings";
+import { isDevelopmentClient } from "../dev-mode";
 import { InputBuffer } from "./network/input-buffer";
+import { PredictedShots } from "./network/predicted-shots";
+import { PredictedShotSystem } from "./systems/predicted-shot-system";
+import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
 import { NetworkDecoder } from "./network/network-decoder";
+import { EventBuffer } from "./network/event-buffer";
+import { PresentationTimingController } from "./network/presentation-timing-controller";
 import { SnapshotBuffer } from "./network/snapshot-buffer";
 import { EdgeOfWorldFilter } from "./shaders/edge-of-world-filter";
 import { CameraShake } from "./systems/camera-shake";
@@ -68,14 +82,13 @@ import { ParticleSystem } from "./systems/particle-system";
 import { ReconciliationSystem } from "./systems/reconciliation-system";
 import { RenderSystem } from "./systems/render-system";
 import { AudioSystem } from "./systems/audio-system";
-import type {
-  ClientServices,
-  ControlState,
-  DamageTextRequest,
-  ExplosionRequest,
-} from "./types";
+import { WorldEventSystem } from "./systems/world-event-system";
+import type { ClientServices, ControlState, DamageTextRequest, ExplosionRequest } from "./types";
 
-const RENDER_DELAY_MS = 100;
+const SNAPSHOT_TIMING_SAMPLE_SIZE = 30;
+const SNAPSHOT_TIMING_MIN_SAMPLES = 5;
+const SNAPSHOT_TIMING_WARN_FACTOR = 1.5;
+const SNAPSHOT_TIMING_WARN_MIN_DELTA_MS = 8;
 
 export class ClientEngine {
   #app: Application;
@@ -87,6 +100,7 @@ export class ClientEngine {
   #renderSprite: Sprite | null = null;
   #edgeOfWorldFilter: EdgeOfWorldFilter | null = null;
   #renderScale = 0.7;
+  #useRetroRendering = true;
   #lastScreenWidth = 0;
   #lastScreenHeight = 0;
   #audioEngine: AudioEngine | null = null;
@@ -96,18 +110,17 @@ export class ClientEngine {
 
   #transformStore = new ComponentStore<TransformComponent>(this.#entityManager);
   #velocityStore = new ComponentStore<VelocityComponent>(this.#entityManager);
-  #renderableStore = new ComponentStore<RenderableComponent<Container>>(
-    this.#entityManager
+  #renderableStore = new ComponentStore<RenderableComponent<Container>>(this.#entityManager);
+  #shipControlStore = new ComponentStore<ShipControlComponent>(this.#entityManager);
+  #networkStateStore = new ComponentStore<NetworkStateComponent<BaseEntityState>>(
+    this.#entityManager,
   );
-  #shipControlStore = new ComponentStore<ShipControlComponent>(
-    this.#entityManager
-  );
-  #networkStateStore = new ComponentStore<
-    NetworkStateComponent<BaseEntityState>
-  >(this.#entityManager);
+  #presentationStateStore = new ComponentStore<PresentationStateComponent>(this.#entityManager);
 
   #snapshotBuffer = new SnapshotBuffer();
+  #eventBuffer = new EventBuffer();
   #inputBuffer = new InputBuffer();
+  #predictedShots = new PredictedShots();
   #cameraShake = new CameraShake();
   #entityIndex = new Map<string, EntityId>();
   #controls: ControlState = {
@@ -177,16 +190,29 @@ export class ClientEngine {
   #pingSequence = 0;
   #pingTicker = new Ticker();
   #networkStatsTicker = new Ticker();
+  #frameTicker = new Ticker();
   #inboundBytes = 0;
   #outboundBytes = 0;
   #simulatedLatencyMs = 0;
   #drawGrid = false;
   #drawWorldBorder = false;
   #drawColliders = false;
+  #disableInterpolation = false;
+  #disableReconciliation = false;
   #fpsSampleFrames = 0;
   #fpsLastSampleTime = 0;
   #connectionAttempts = 0;
   #maxConnectionAttempts = 5;
+  #snapshotTimingDebugEnabled = false;
+  #snapshotArrivalIntervalsMs: number[] = [];
+  #lastSnapshotArrivalTimeMs: number | null = null;
+  #serverTps = 20;
+  #appInitialized = false;
+  #servicesReady = false;
+  #pipelineReady = false;
+  #presentationTiming = new PresentationTimingController();
+  #timeSyncReadyAt = Infinity;
+  #rttSamples: number[] = [];
 
   #networkDecoder: NetworkDecoder;
 
@@ -195,19 +221,47 @@ export class ClientEngine {
   }
 
   constructor() {
+    // Explicit registration survives bundlers omitting Pixi's side-effect imports.
+    extensions.add(
+      ResizePlugin,
+      TickerPlugin,
+      GraphicsPipe,
+      GraphicsContextSystem,
+      CanvasTextPipe,
+      CanvasTextSystem,
+      EventSystem,
+      FilterPipe,
+      FilterSystem,
+    );
     this.#app = new Application();
     this.#simulatedLatencyMs = this.#resolveSimulatedLatency();
     if (this.#simulatedLatencyMs > 0) {
-      console.info(
-        `[net] Using simulated latency: ${this.#simulatedLatencyMs}ms`
-      );
+      console.info(`[net] Using simulated latency: ${this.#simulatedLatencyMs}ms`);
     }
     // Initialize debug settings from URL params
     this.#drawWorldBorder = this.#resolveWorldBorderFromURL();
     this.#drawGrid = this.#resolveDrawGridFromURL();
     this.#drawColliders = this.#resolveDrawCollidersFromURL();
+    this.#disableInterpolation = this.#resolveDisableInterpolationFromURL();
+    this.#disableReconciliation = this.#resolveDisableReconciliationFromURL();
+    this.#snapshotTimingDebugEnabled = this.#resolveSnapshotTimingDebugFromURL();
+    this.#useRetroRendering =
+      !this.#resolveRenderedProbeModeFromURL() || this.#resolveBooleanFlagFromURL("agent-retro");
+    if (!this.#useRetroRendering) {
+      this.#renderScale = 1;
+    }
 
     this.#networkDecoder = new NetworkDecoder(this);
+  }
+
+  #isDevelopmentEnvironment(): boolean {
+    return isDevelopmentClient();
+  }
+
+  #resolveBooleanFlagFromURL(paramName: string): boolean {
+    if (typeof window === "undefined") return false;
+    const value = new URLSearchParams(window.location.search).get(paramName);
+    return value === "true" || value === "1" || value === "on";
   }
 
   #resolveWorldBorderFromURL(): boolean {
@@ -222,6 +276,12 @@ export class ClientEngine {
     return params.get("agent-mode") === "true";
   }
 
+  #resolveRenderedProbeModeFromURL(): boolean {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("agent-rendered") === "true";
+  }
+
   #resolveAudioDisabledFromURL(): boolean {
     if (typeof window === "undefined") return false;
     const params = new URLSearchParams(window.location.search);
@@ -230,7 +290,7 @@ export class ClientEngine {
       return true;
     }
 
-    return this.#resolveAgentModeFromURL();
+    return this.#resolveAgentModeFromURL() || this.#resolveRenderedProbeModeFromURL();
   }
 
   #resolveDrawGridFromURL(): boolean {
@@ -243,10 +303,26 @@ export class ClientEngine {
 
   #resolveDrawCollidersFromURL(): boolean {
     if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    const value = params.get("draw-colliders");
-    if (value === null) return false;
-    return value === "true";
+    return this.#resolveBooleanFlagFromURL("draw-colliders");
+  }
+
+  #resolveDisableInterpolationFromURL(): boolean {
+    if (!this.#isDevelopmentEnvironment()) return false;
+    return this.#resolveBooleanFlagFromURL("disable-interpolation");
+  }
+
+  #resolveDisableReconciliationFromURL(): boolean {
+    if (!this.#isDevelopmentEnvironment()) return false;
+    return this.#resolveBooleanFlagFromURL("disable-reconciliation");
+  }
+
+  #resolveSnapshotTimingDebugFromURL(): boolean {
+    return (
+      this.#resolveBooleanFlagFromURL("debug-snapshot-timing") ||
+      this.#resolveAgentModeFromURL() ||
+      this.#resolveRenderedProbeModeFromURL() ||
+      this.#isDevelopmentEnvironment()
+    );
   }
 
   setDrawGrid(value: boolean) {
@@ -291,6 +367,42 @@ export class ClientEngine {
     }
   }
 
+  setDisableInterpolation(value: boolean) {
+    if (!this.#isDevelopmentEnvironment()) {
+      this.#disableInterpolation = false;
+      return;
+    }
+
+    this.#disableInterpolation = value;
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("disable-interpolation", "true");
+      } else {
+        url.searchParams.delete("disable-interpolation");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
+  setDisableReconciliation(value: boolean) {
+    if (!this.#isDevelopmentEnvironment()) {
+      this.#disableReconciliation = false;
+      return;
+    }
+
+    this.#disableReconciliation = value;
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set("disable-reconciliation", "true");
+      } else {
+        url.searchParams.delete("disable-reconciliation");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
   getSimulatedLatency(): number {
     return this.#simulatedLatencyMs;
   }
@@ -311,6 +423,14 @@ export class ClientEngine {
     return this.#drawColliders;
   }
 
+  getDisableInterpolation(): boolean {
+    return this.#disableInterpolation;
+  }
+
+  getDisableReconciliation(): boolean {
+    return this.#disableReconciliation;
+  }
+
   isConnected(): boolean {
     return this.#ws?.readyState === WebSocket.OPEN;
   }
@@ -320,6 +440,8 @@ export class ClientEngine {
     drawWorldBorder?: boolean;
     drawColliders?: boolean;
     simulatedLatencyMs?: number;
+    disableInterpolation?: boolean;
+    disableReconciliation?: boolean;
   }) {
     if (options.drawGrid !== undefined) {
       this.setDrawGrid(options.drawGrid);
@@ -332,6 +454,12 @@ export class ClientEngine {
     }
     if (options.simulatedLatencyMs !== undefined) {
       this.setSimulatedLatency(options.simulatedLatencyMs);
+    }
+    if (options.disableInterpolation !== undefined) {
+      this.setDisableInterpolation(options.disableInterpolation);
+    }
+    if (options.disableReconciliation !== undefined) {
+      this.setDisableReconciliation(options.disableReconciliation);
     }
   }
 
@@ -347,10 +475,47 @@ export class ClientEngine {
       connectionAttempts: this.#connectionAttempts,
       reconnecting: currentStats.isReconnecting,
       simulatedLatencyMs: this.#simulatedLatencyMs,
+      shots: Array.from(this.#predictedShots.shots.values(), (shot) => {
+        const position = this.#predictedShots.position(
+          shot,
+          this.#predictedServerTime(),
+          currentStats.worldRadius,
+        );
+        return {
+          shotId: shot.shotId,
+          id: shot.state.id,
+          entityId: shot.entityId,
+          confirmed: shot.confirmed,
+          removed: shot.removed,
+          position,
+          visualOffset: { x: shot.offsetX, y: shot.offsetY },
+          serverTime: shot.anchorTime,
+          state: { ...shot.state },
+          rendered: shot.entityId !== undefined && !!this.#renderableStore.get(shot.entityId)?.ref,
+        };
+      }),
+      boot: {
+        lightweightAgentMode: this.#resolveAgentModeFromURL(),
+        renderedProbeMode: this.#resolveRenderedProbeModeFromURL(),
+        appInitialized: this.#appInitialized,
+        servicesReady: this.#servicesReady,
+        pipelineReady: this.#pipelineReady,
+      },
+      network: {
+        streamHealth: this.#presentationTiming.effectiveHealth,
+        renderDelayMs: Math.round(this.#presentationTiming.renderDelayMs * 100) / 100,
+        starvationDurationMs: Math.round(this.#presentationTiming.starvationDurationMs * 100) / 100,
+        latestSnapshotAgeMs:
+          this.#presentationTiming.latestSnapshotAgeMs !== null
+            ? Math.round(this.#presentationTiming.latestSnapshotAgeMs * 100) / 100
+            : null,
+      },
       debug: {
         drawGrid: this.#drawGrid,
         drawWorldBorder: this.#drawWorldBorder,
         drawColliders: this.#drawColliders,
+        disableInterpolation: this.#disableInterpolation,
+        disableReconciliation: this.#disableReconciliation,
       },
       player: {
         id: currentStats.playerId,
@@ -376,10 +541,8 @@ export class ClientEngine {
         fps: Math.round(currentStats.fps * 10) / 10,
         tickDuration: Math.round(currentStats.tickDuration * 100) / 100,
         connectionError: currentStats.connectionError,
-        inboundBytesPerSecond:
-          Math.round(currentStats.inboundBytesPerSecond * 100) / 100,
-        outboundBytesPerSecond:
-          Math.round(currentStats.outboundBytesPerSecond * 100) / 100,
+        inboundBytesPerSecond: Math.round(currentStats.inboundBytesPerSecond * 100) / 100,
+        outboundBytesPerSecond: Math.round(currentStats.outboundBytesPerSecond * 100) / 100,
         leaderboard: currentStats.players.map((player) => ({
           id: player.id,
           name: player.name,
@@ -393,15 +556,178 @@ export class ClientEngine {
     };
   }
 
+  getDebugNetworkSnapshot() {
+    const services = this.#services;
+    const predictedServerTime = this.#predictedServerTime();
+    const renderDelayMs = this.#presentationTiming.renderDelayMs;
+    const renderTargetTime =
+      this.#presentationTiming.renderTime ?? predictedServerTime - renderDelayMs;
+    const latestSnapshot = this.#snapshotBuffer.getLatest();
+    const { previous, next } = this.#snapshotBuffer.getWindow(renderTargetTime);
+    const latestSnapshotAgeMs =
+      latestSnapshot !== null ? predictedServerTime - latestSnapshot.serverTime : null;
+    const interpolationBufferLeadMs =
+      latestSnapshot !== null ? latestSnapshot.serverTime - renderTargetTime : null;
+
+    const round = (value: number | null | undefined, precision = 2) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        return null;
+      }
+
+      const factor = 10 ** precision;
+      return Math.round(value * factor) / factor;
+    };
+
+    const summarizeSnapshot = (snapshot: { serverTime: number; simTick: number } | null) =>
+      snapshot
+        ? {
+            serverTime: round(snapshot.serverTime),
+            simTick: snapshot.simTick,
+          }
+        : null;
+
+    const playerEntityId = services?.player.entityId ?? null;
+    const transform =
+      playerEntityId !== null ? services?.stores.transform.get(playerEntityId) : null;
+    const velocity = playerEntityId !== null ? services?.stores.velocity.get(playerEntityId) : null;
+    const shipControl =
+      playerEntityId !== null ? services?.stores.shipControl.get(playerEntityId) : null;
+    const networkState =
+      playerEntityId !== null ? services?.stores.networkState.get(playerEntityId) : null;
+
+    const latestServerState =
+      networkState?.state?.type === "ship" ? (networkState.state as GenericNetEntityState) : null;
+
+    return {
+      rendering: this.#appInitialized
+        ? {
+            tickerStarted: this.#app.ticker?.started ?? false,
+            cameraChildren: this.#camera.children.length,
+            screen: { width: this.#app.screen.width, height: this.#app.screen.height },
+          }
+        : null,
+      predictedServerTime: round(predictedServerTime),
+      renderDelayMs: round(renderDelayMs),
+      renderTargetTime: round(renderTargetTime),
+      streamHealth: this.#presentationTiming.effectiveHealth,
+      starvation: {
+        hasPreviousSnapshot: previous !== null,
+        hasNextSnapshot: next !== null,
+        latestSnapshotAgeMs: round(latestSnapshotAgeMs),
+        interpolationBufferLeadMs: round(interpolationBufferLeadMs),
+        interpolationStarved:
+          latestSnapshot !== null && latestSnapshot.serverTime < renderTargetTime,
+        starvationDurationMs: round(this.#presentationTiming.starvationDurationMs),
+      },
+      world: {
+        renderedSimTick: services?.world.renderedSimTick ?? 0,
+      },
+      effects: this.#camera.children
+        .filter((ref) => ref.label === "world-damage-text" || ref.label === "world-explosion")
+        .map((ref) => ({
+          kind: ref.label,
+          text: ref instanceof Text ? ref.text : null,
+          screenX: round(ref.x * this.#camera.scale.x + this.#camera.x),
+          screenY: round(ref.y * this.#camera.scale.y + this.#camera.y),
+        })),
+      ships: [...(latestSnapshot?.entities.values() ?? [])]
+        .filter((s) => s.type === "ship")
+        .map((s) => {
+          const id = services?.entityIndex.get(s.id);
+          const ref = id !== undefined ? services?.stores.renderable.get(id)?.ref : undefined;
+          return {
+            id: s.id,
+            rendered: !!ref,
+            screenX: ref ? round(ref.x * this.#camera.scale.x + this.#camera.x) : null,
+            screenY: ref ? round(ref.y * this.#camera.scale.y + this.#camera.y) : null,
+          };
+        }),
+      snapshots: {
+        latest: summarizeSnapshot(latestSnapshot),
+        previous: summarizeSnapshot(previous),
+        next: summarizeSnapshot(next),
+      },
+      timing: {
+        simulationTickMs: round(1000 / this.#serverTps),
+      },
+      inputBuffer: {
+        baseline: this.#inputBuffer.baseline
+          ? {
+              sequence: this.#inputBuffer.baseline.sequence,
+              timestamp: round(this.#inputBuffer.baseline.timestamp),
+              thrust: this.#inputBuffer.baseline.thrust,
+              angle: round(this.#inputBuffer.baseline.angle, 4),
+            }
+          : null,
+        pending: this.#inputBuffer.pending.map((command) => ({
+          sequence: command.sequence,
+          timestamp: round(command.timestamp),
+          thrust: command.thrust,
+          angle: round(command.angle, 4),
+          fire: command.fire,
+        })),
+      },
+      player: {
+        id: services?.player.id ?? null,
+        entityId: playerEntityId,
+        transform: transform
+          ? {
+              x: round(transform.x),
+              y: round(transform.y),
+              angle: round(transform.angle, 4),
+            }
+          : null,
+        velocity: velocity
+          ? {
+              vx: round(velocity.vx),
+              vy: round(velocity.vy),
+              va: round(velocity.va, 4),
+            }
+          : null,
+        shipControl: shipControl
+          ? {
+              thrust: shipControl.thrust,
+              angle: round(shipControl.angle, 4),
+              fire: shipControl.fire,
+              lastServerSequence: shipControl.lastServerSequence,
+            }
+          : null,
+        networkState: networkState
+          ? {
+              lastServerTime: round(networkState.lastServerTime),
+              lastSimTick: networkState.lastSimTick,
+              predictedServerTime: round(networkState.predictedServerTime),
+              renderDelay: networkState.renderDelay,
+              lastAcknowledgedInput: networkState.lastAcknowledgedInput,
+              state:
+                latestServerState !== null
+                  ? {
+                      x: round(latestServerState.x),
+                      y: round(latestServerState.y),
+                      angle: round(latestServerState.angle, 4),
+                      vx: round(latestServerState.vx),
+                      vy: round(latestServerState.vy),
+                      thrust: latestServerState.thrust ?? false,
+                      lastInputSequence: latestServerState.lastInputSequence ?? -1,
+                    }
+                  : null,
+            }
+          : null,
+      },
+    };
+  }
+
   sendInputForTest(input: {
     thrust: boolean;
     angle: number;
     fire: boolean;
     firingCompensation?: boolean;
   }) {
-    return this.#sendInput(input, {
+    const command = this.#sendInput(input, {
       fields: ["thrust", "angle", "fire", "firingCompensation"],
     });
+    if (command) this.#inputBuffer.enqueue(command);
+    return command;
   }
 
   async initialize(parent: HTMLElement) {
@@ -419,16 +745,13 @@ export class ClientEngine {
       antialias: false,
       resolution: 1,
     });
+    this.#appInitialized = true;
 
     parent.appendChild(this.#app.canvas);
     // Disable CSS-level antialiasing for pixelated retro look
     const canvas = this.#app.canvas;
     canvas.style.imageRendering = "pixelated";
-    canvas.style.setProperty(
-      "image-rendering",
-      "-moz-crisp-edges",
-      "important"
-    );
+    canvas.style.setProperty("image-rendering", "-moz-crisp-edges", "important");
     canvas.style.setProperty("image-rendering", "crisp-edges", "important");
 
     // Disable right-click context menu
@@ -436,17 +759,30 @@ export class ClientEngine {
       e.preventDefault();
     });
 
-    // Set up retro rendering: render game at 0.75x resolution
-    this.#setupRetroRendering();
+    if (this.#useRetroRendering) {
+      // Set up retro rendering for the normal game client.
+      this.#setupRetroRendering();
+    } else {
+      // Rendered probe mode uses a direct stage pipeline so Playwright can boot
+      // a real graphics client without relying on render-to-texture effects.
+      this.#setupRenderedProbeRendering();
+    }
 
     this.#app.stage.eventMode = "static";
     this.#app.stage.hitArea = this.#app.screen;
 
     // Ensure render texture is updated after initialization
     // Use requestAnimationFrame to ensure screen dimensions are set
-    requestAnimationFrame(() => {
-      this.#checkAndUpdateRenderTexture();
-    });
+    if (this.#useRetroRendering) {
+      requestAnimationFrame(() => {
+        this.#checkAndUpdateRenderTexture();
+      });
+    } else {
+      this.#controls.cursorScreen = {
+        x: this.#app.screen.width / 2,
+        y: this.#app.screen.height / 2,
+      };
+    }
 
     await this.#loadTextures();
     this.#audioEngine = new AudioEngine();
@@ -455,6 +791,7 @@ export class ClientEngine {
     this.#setupPipeline();
     this.#setupInputListeners();
     this.#setupTickers();
+    this.#frameTicker.start();
     this.#connect();
   }
 
@@ -544,9 +881,7 @@ export class ClientEngine {
     // Create and apply edge of world filter
     this.#edgeOfWorldFilter = new EdgeOfWorldFilter();
     const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
-    const renderHeight = Math.floor(
-      this.#app.screen.height * this.#renderScale
-    );
+    const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
     this.#edgeOfWorldFilter.setResolution(renderWidth, renderHeight);
     this.#renderSprite.filters = [this.#edgeOfWorldFilter];
 
@@ -565,16 +900,33 @@ export class ClientEngine {
     this.#app.renderer.on("resize", handleResize);
 
     // Render game container to texture each frame and check for size changes
-    this.#app.ticker.add(() => {
+    this.#frameTicker.add(() => {
       // Check if screen dimensions changed and update if needed
       this.#checkAndUpdateRenderTexture();
 
       if (this.#renderTexture && this.#gameContainer) {
-        this.#app.renderer.render(this.#gameContainer, {
-          renderTexture: this.#renderTexture,
+        this.#app.renderer.render({
+          container: this.#gameContainer,
+          target: this.#renderTexture,
         });
       }
     });
+  }
+
+  #setupRenderedProbeRendering() {
+    this.#app.stage.addChild(this.#starfield.getContainer());
+    this.#app.stage.addChild(this.#camera);
+
+    const handleResize = () => {
+      this.#controls.cursorScreen = {
+        x: this.#app.screen.width / 2,
+        y: this.#app.screen.height / 2,
+      };
+    };
+
+    window.addEventListener("resize", handleResize);
+    this.#app.renderer.on("resize", handleResize);
+    handleResize();
   }
 
   #checkAndUpdateRenderTexture() {
@@ -582,10 +934,7 @@ export class ClientEngine {
     const screenHeight = this.#app.screen.height;
 
     // Only update if dimensions actually changed
-    if (
-      screenWidth === this.#lastScreenWidth &&
-      screenHeight === this.#lastScreenHeight
-    ) {
+    if (screenWidth === this.#lastScreenWidth && screenHeight === this.#lastScreenHeight) {
       return;
     }
 
@@ -654,7 +1003,9 @@ export class ClientEngine {
     this.#services = {
       controls: this.#controls,
       snapshotBuffer: this.#snapshotBuffer,
+      eventBuffer: this.#eventBuffer,
       inputBuffer: this.#inputBuffer,
+      predictedShots: this.#predictedShots,
       cameraShake: this.#cameraShake,
       entityIndex: this.#entityIndex,
       stores: {
@@ -663,6 +1014,7 @@ export class ClientEngine {
         renderable: this.#renderableStore,
         shipControl: this.#shipControlStore,
         networkState: this.#networkStateStore,
+        presentationState: this.#presentationStateStore,
       },
       pixi: {
         app: this.#app,
@@ -702,7 +1054,23 @@ export class ClientEngine {
         sendInput: (input, options) => this.#sendInput(input, options),
         sendCameraBounds: (viewBounds) => this.#sendCameraBounds(viewBounds),
         predictedServerTime: () => this.#predictedServerTime(),
-        renderDelayMs: RENDER_DELAY_MS,
+        updatePresentationWindow: (observation) =>
+          self.#presentationTiming.updateWindow(observation),
+        get renderDelayMs() {
+          return self.#presentationTiming.renderDelayMs;
+        },
+        get simulationTickMs() {
+          return 1000 / self.#serverTps;
+        },
+        get streamHealth() {
+          return self.#presentationTiming.effectiveHealth;
+        },
+        get starvationDurationMs() {
+          return self.#presentationTiming.starvationDurationMs;
+        },
+        get latestSnapshotAgeMs() {
+          return self.#presentationTiming.latestSnapshotAgeMs;
+        },
       },
       debug: {
         get drawGrid() {
@@ -714,6 +1082,12 @@ export class ClientEngine {
         get drawColliders() {
           return self.#drawColliders;
         },
+        get disableInterpolation() {
+          return self.#disableInterpolation;
+        },
+        get disableReconciliation() {
+          return self.#disableReconciliation;
+        },
         setDrawGrid: (value) => {
           self.setDrawGrid(value);
         },
@@ -723,9 +1097,16 @@ export class ClientEngine {
         setDrawColliders: (value) => {
           self.setDrawColliders(value);
         },
+        setDisableInterpolation: (value) => {
+          self.setDisableInterpolation(value);
+        },
+        setDisableReconciliation: (value) => {
+          self.setDisableReconciliation(value);
+        },
       },
       world: {
         radius: 2000,
+        renderedSimTick: 0,
       },
       effectQueues,
       effects: {
@@ -739,6 +1120,7 @@ export class ClientEngine {
       audio: this.#audioEngine,
       audioSettings: audioSettings,
     };
+    this.#servicesReady = true;
   }
 
   #setupPipeline() {
@@ -752,6 +1134,8 @@ export class ClientEngine {
     this.#pipeline.register(InputSystem);
     this.#pipeline.register(InterpolationSystem);
     this.#pipeline.register(ReconciliationSystem);
+    this.#pipeline.register(PredictedShotSystem);
+    this.#pipeline.register(WorldEventSystem);
     this.#pipeline.register(RenderSystem);
     this.#pipeline.register(EffectSystem);
     this.#pipeline.register(ParticleSystem);
@@ -761,9 +1145,10 @@ export class ClientEngine {
     this.#pipeline.register(AudioSystem);
     const now = performance.now();
     this.#pipeline.init(now);
+    this.#pipelineReady = true;
     this.#fpsLastSampleTime = now;
 
-    this.#app.ticker.add((time) => {
+    this.#frameTicker.add((time) => {
       const dtSeconds = time.deltaMS / 1000;
       const nowTick = performance.now();
 
@@ -780,12 +1165,8 @@ export class ClientEngine {
         const cameraScale = this.#camera.scale.x;
 
         // Convert camera position from screen space to world space
-        const renderWidth = Math.floor(
-          this.#app.screen.width * this.#renderScale
-        );
-        const renderHeight = Math.floor(
-          this.#app.screen.height * this.#renderScale
-        );
+        const renderWidth = Math.floor(this.#app.screen.width * this.#renderScale);
+        const renderHeight = Math.floor(this.#app.screen.height * this.#renderScale);
         const screenCenterX = renderWidth / 2;
         const screenCenterY = renderHeight / 2;
         const worldCameraX = (screenCenterX - cameraX) / cameraScale;
@@ -846,7 +1227,7 @@ export class ClientEngine {
       if (leftTriggerAxis4 >= 0) {
         leftTriggerActive = leftTriggerAxis4 > TRIGGER_THRESHOLD;
       } else {
-        leftTriggerActive = leftTriggerAxis4 > (-1 + TRIGGER_THRESHOLD * 2);
+        leftTriggerActive = leftTriggerAxis4 > -1 + TRIGGER_THRESHOLD * 2;
       }
     }
     // Fallback to button 6 if axis 4 not available
@@ -862,7 +1243,7 @@ export class ClientEngine {
       if (rightTriggerAxis5 >= 0) {
         rightTriggerActive = rightTriggerAxis5 > TRIGGER_THRESHOLD;
       } else {
-        rightTriggerActive = rightTriggerAxis5 > (-1 + TRIGGER_THRESHOLD * 2);
+        rightTriggerActive = rightTriggerAxis5 > -1 + TRIGGER_THRESHOLD * 2;
       }
     }
     // Fallback to button 7 if axis 5 not available
@@ -900,9 +1281,9 @@ export class ClientEngine {
 
     // Initialize previous button states array if needed
     if (this.#controls.previousGamepadButtons.length < gamepad.buttons.length) {
-      this.#controls.previousGamepadButtons = new Array(
-        Math.max(gamepad.buttons.length, 10)
-      ).fill(false);
+      this.#controls.previousGamepadButtons = new Array(Math.max(gamepad.buttons.length, 10)).fill(
+        false,
+      );
     }
 
     // Only apply gamepad inputs when in gamepad mode
@@ -915,9 +1296,7 @@ export class ClientEngine {
       } else {
         // Stick is centered, keep last angle or use current ship angle
         if (this.#controls.gamepadAngle === null && this.#services?.player.entityId) {
-          const transform = this.#services.stores.transform.get(
-            this.#services.player.entityId
-          );
+          const transform = this.#services.stores.transform.get(this.#services.player.entityId);
           if (transform) {
             this.#controls.gamepadAngle = transform.angle;
           }
@@ -958,7 +1337,7 @@ export class ClientEngine {
         // Try to get player name from input field, or use default
         let playerName = "Player";
         const nameInput = document.querySelector(
-          'input[name="playerName"], .name-input'
+          'input[name="playerName"], .name-input',
         ) as HTMLInputElement;
         if (nameInput && nameInput.value.trim()) {
           playerName = nameInput.value.trim();
@@ -1015,7 +1394,8 @@ export class ClientEngine {
       }
 
       // Apply keyboard inputs when in keyboard mode or null (initial state)
-      const isKeyboardMode = this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
+      const isKeyboardMode =
+        this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
       if (isKeyboardMode) {
         if (e.code === "KeyW" || e.code === "ArrowUp") {
           this.#controls.thrust = true;
@@ -1039,7 +1419,8 @@ export class ClientEngine {
     });
     window.addEventListener("keyup", (e) => {
       // Apply keyboard inputs when in keyboard mode or null (initial state)
-      const isKeyboardMode = this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
+      const isKeyboardMode =
+        this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null;
       if (isKeyboardMode) {
         if (e.code === "KeyW" || e.code === "ArrowUp") {
           this.#controls.thrust = false;
@@ -1064,7 +1445,10 @@ export class ClientEngine {
       }
 
       // Apply mouse inputs when in keyboard mode or null (initial state)
-      if ((this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null) && e.button === 0) {
+      if (
+        (this.#controls.controlMode === "keyboard" || this.#controls.controlMode === null) &&
+        e.button === 0
+      ) {
         this.#controls.fire = true;
       }
     });
@@ -1107,6 +1491,8 @@ export class ClientEngine {
     });
   }
 
+  #lastRawWsMessageTimeMs: number | null = null;
+
   #connect() {
     if (this.#connectTimeout) {
       clearTimeout(this.#connectTimeout);
@@ -1125,15 +1511,14 @@ export class ClientEngine {
     const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
       window.location.host
     }/ws`;
-    console.log(
-      `[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`
-    );
+    console.log(`[net] Connecting to ${wsUrl} (attempt ${this.#connectionAttempts})`);
 
     this.#ws = new WebSocket(wsUrl);
 
     this.#ws.onopen = () => {
       console.log("[net] Connected successfully");
       this.#connectionAttempts = 0; // Reset on successful connection
+      this.#resetSnapshotTimingDebug();
       this.#statsGetter().setConnectionError(false);
       this.#statsGetter().setIsReconnecting(false);
       this.#pingTicker.start();
@@ -1152,10 +1537,25 @@ export class ClientEngine {
     };
 
     this.#ws.onmessage = async (eventMessage) => {
+      const now = performance.now();
+
+      if (this.#lastRawWsMessageTimeMs !== null) {
+        const intervalMs = now - this.#lastRawWsMessageTimeMs;
+        if (intervalMs > 80) {
+          console.warn(`[net] raw ws gap ${Math.round(intervalMs)}ms`);
+        }
+      }
+
+      this.#lastRawWsMessageTimeMs = now;
+
       this.#trackInboundBytes(eventMessage.data);
-      await this.#networkDecoder.process(eventMessage, (message) =>
-        this.#handleMessage(message)
-      );
+      const socket = this.#ws;
+      try {
+        await this.#networkDecoder.process(eventMessage, (message) => this.#handleMessage(message));
+      } catch (error) {
+        console.error("[net] invalid stream; reconnecting", error);
+        if (socket === this.#ws) socket?.close();
+      }
     };
   }
 
@@ -1176,6 +1576,8 @@ export class ClientEngine {
         this.#handlePong(message);
         break;
       case "server:player-initialize":
+        this.#timeSyncReadyAt = performance.now();
+        this.#serverTps = message.tps > 0 ? message.tps : this.#serverTps;
         if (this.#services) {
           this.#services.player.id = message.playerId;
           this.#services.world.radius = message.worldRadius;
@@ -1184,7 +1586,19 @@ export class ClientEngine {
         this.#statsGetter().setWorldRadius(message.worldRadius);
         break;
       case "server:state":
-        this.#snapshotBuffer.add(message);
+        if (!this.#snapshotBuffer.add(message)) break;
+        if (this.#services?.player.id) {
+          this.#predictedShots.reconcile(
+            this.#snapshotBuffer.getLatest()!,
+            message.shots ?? [],
+            this.#services.player.id,
+            this.#predictedServerTime(),
+            this.#services.world.radius,
+          );
+        }
+        this.#presentationTiming.observeSnapshot(message, performance.now());
+        this.#trackSnapshotArrivalTiming(message);
+        this.#eventBuffer.add(message.events);
         this.#statsGetter().setPlayers(message.players);
         this.#statsGetter().setTickDuration(message.tickDuration);
         if (message.state.type === "full") {
@@ -1194,10 +1608,8 @@ export class ClientEngine {
           this.#statsGetter().setObjectsCount(
             Math.max(
               0,
-              currentObjects +
-                message.state.updated.length -
-                message.state.removed.length
-            )
+              currentObjects + message.state.updated.length - message.state.removed.length,
+            ),
           );
         }
         if (message.radar) {
@@ -1207,115 +1619,19 @@ export class ClientEngine {
       case "server:respawn-denied":
         this.#statsGetter().setRespawnError(message.reason);
         break;
-      case "entity:damage":
-        if (!this.#services) break;
-        {
-          const entityId = this.#services.entityIndex.get(message.entityId);
-          if (entityId === undefined) {
-            break;
-          }
-
-          // Verify entity exists in world - check if it has transform
-          const transform = this.#services.stores.transform.get(entityId);
-          if (!transform) {
-            // Entity doesn't exist in world yet, skip sound
-            break;
-          }
-
-          const isHealing = message.amount < 0;
-
-          this.#services.effects.queueDamageText({
-            amount: message.amount,
-            x: message.x,
-            y: message.y,
-          });
-
-          // Skip sounds and explosions for healing
-          if (isHealing) {
-            break;
-          }
-
-          const networkState = this.#services.stores.networkState.get(entityId);
-
-          // Play damage sound only if entity exists in world
-          if (networkState?.state?.type === "ship") {
-            // Ship damage - use snd_hit for ships
-            this.#services.audio.playOneShot({
-              soundId: "snd_hit",
-              position: { x: message.x, y: message.y },
-            });
-            // Queue explosion visual effect (explode sound will play on entity:destroy)
-            this.#services.effects.queueExplosion({
-              x: message.x,
-              y: message.y,
-            });
-          } else if (networkState?.state) {
-            // Other entity damage (asteroids, etc.) - use snd_small_hit
-            // Only play if entity has network state (exists in world)
-            this.#services.audio.playOneShot({
-              soundId: "snd_small_hit",
-              position: { x: message.x, y: message.y },
-            });
-          }
-
-          // Check if this damage killed the local player
-          if (message.entityId === this.#services.player.id) {
-            const entityNetworkState = this.#services.stores.networkState.get(entityId);
-            if (entityNetworkState?.state?.type === "ship") {
-              const health = entityNetworkState.state.health ?? entityNetworkState.state.maxHealth ?? 1;
-              if (health <= message.amount) {
-                // Player will die from this damage
-                this.#services.audio.playOneShot({ soundId: "snd_death" });
-              }
-            }
-          }
-        }
-        break;
-      case "entity:destroy":
-        if (!this.#services) break;
-        {
-          // Verify entity existed in world before playing explode sound
-          const entityId = this.#services.entityIndex.get(message.entityId);
-          const hadTransform = entityId !== undefined &&
-            this.#services.stores.transform.has(entityId);
-
-          // Only play explode sound if entity existed in world
-          if (hadTransform) {
-            // Play explosion sound immediately when event comes in
-            this.#services.audio.playOneShot({
-              soundId: "snd_explode",
-              position: { x: message.x, y: message.y },
-            });
-          }
-
-          // Queue explosion effect for visual (always, even if entity wasn't in world)
-          this.#services.effects.queueExplosion({
-            x: message.x,
-            y: message.y,
-          });
-        }
-        break;
-      case "player:score":
-        if (!this.#services) break;
-        // Play fuel sound when player gains exp/score with randomized pitch
-        const pitch = 0.8 + Math.random() * 0.4; // Random pitch between 0.8 and 1.2
-        this.#services.audio.playOneShot({ soundId: "snd_fuel", pitch });
-        // Add floating score text
-        this.#statsGetter().addFloatingScoreText(message.delta);
-        break;
-      case "player:level-up":
-        if (!this.#services) break;
-        // Play pick energy sound when player levels up
-        this.#services.audio.playOneShot({ soundId: "snd_pick_energy" });
-        break;
     }
   }
 
   #handlePong(message: Extract<NetworkEvent, { type: "server:pong" }>) {
     const clientReceive = performance.now();
     const clientSend = message.clientTime;
+    if (clientSend < this.#timeSyncReadyAt) return;
     const serverSend = message.serverTime;
     const rttSample = clientReceive - clientSend;
+    this.#rttSamples.push(rttSample);
+    if (this.#rttSamples.length > 30) this.#rttSamples.shift();
+    const minRtt = Math.min(...this.#rttSamples);
+    if (rttSample > minRtt + Math.max(20, minRtt * 0.5)) return;
     const oneWay = rttSample / 2;
     const serverAtReceiveApprox = serverSend + oneWay;
     const offsetSample = serverAtReceiveApprox - clientReceive;
@@ -1334,12 +1650,74 @@ export class ClientEngine {
     }
   }
 
+  #trackSnapshotArrivalTiming(message: Extract<NetworkEvent, { type: "server:state" }>) {
+    if (!this.#snapshotTimingDebugEnabled) {
+      return;
+    }
+
+    const now = performance.now();
+    const previousArrivalTime = this.#lastSnapshotArrivalTimeMs;
+    this.#lastSnapshotArrivalTimeMs = now;
+
+    if (previousArrivalTime === null) {
+      return;
+    }
+
+    const intervalMs = now - previousArrivalTime;
+    const averageIntervalMs = this.#getAverageSnapshotArrivalIntervalMs();
+
+    if (
+      averageIntervalMs !== null &&
+      this.#isTooLongSnapshotInterval(intervalMs, averageIntervalMs)
+    ) {
+      const snapshotKind = message.state.type === "full" ? "full" : "delta";
+      console.warn(
+        `[net] слишком долгий ${snapshotKind} кадр - ${Math.round(
+          intervalMs,
+        )}мс (в среднем ${Math.round(averageIntervalMs)}мс)`,
+      );
+    }
+
+    this.#snapshotArrivalIntervalsMs.push(intervalMs);
+    if (this.#snapshotArrivalIntervalsMs.length > SNAPSHOT_TIMING_SAMPLE_SIZE) {
+      this.#snapshotArrivalIntervalsMs.shift();
+    }
+  }
+
+  #getAverageSnapshotArrivalIntervalMs() {
+    if (this.#snapshotArrivalIntervalsMs.length < SNAPSHOT_TIMING_MIN_SAMPLES) {
+      return null;
+    }
+
+    const total = this.#snapshotArrivalIntervalsMs.reduce((sum, intervalMs) => sum + intervalMs, 0);
+    return total / this.#snapshotArrivalIntervalsMs.length;
+  }
+
+  #isTooLongSnapshotInterval(intervalMs: number, averageIntervalMs: number) {
+    return (
+      intervalMs >= averageIntervalMs * SNAPSHOT_TIMING_WARN_FACTOR &&
+      intervalMs - averageIntervalMs >= SNAPSHOT_TIMING_WARN_MIN_DELTA_MS
+    );
+  }
+
+  #resetSnapshotTimingDebug() {
+    this.#snapshotArrivalIntervalsMs.length = 0;
+    this.#lastSnapshotArrivalTimeMs = null;
+  }
+
   #handleDisconnect() {
+    this.#networkDecoder.reset();
+    this.#timeSyncReadyAt = Infinity;
+    this.#rttSamples.length = 0;
     this.#pingTicker.stop();
     this.#networkStatsTicker.stop();
     this.#ws = null;
+    this.#resetSnapshotTimingDebug();
     this.#snapshotBuffer.clear();
+    this.#eventBuffer.clear();
     this.#inputBuffer.reset();
+    this.#predictedShots.clear();
+    this.#presentationTiming.reset();
     this.#entityIndex.clear();
     this.#entityManager.clear();
     const statsStore = this.#statsGetter();
@@ -1365,6 +1743,7 @@ export class ClientEngine {
     if (this.#services) {
       this.#services.player.entityId = null;
       this.#services.player.id = null;
+      this.#services.world.renderedSimTick = 0;
       this.#services.stores.renderable.forEach((renderable, _entity) => {
         if (renderable.ref) {
           this.#services?.pixi.camera.removeChild(renderable.ref);
@@ -1376,6 +1755,7 @@ export class ClientEngine {
       this.#services.stores.renderable.clear();
       this.#services.stores.shipControl.clear();
       this.#services.stores.networkState.clear();
+      this.#services.stores.presentationState.clear();
     }
     this.#camera.removeChildren();
 
@@ -1401,7 +1781,7 @@ export class ClientEngine {
     },
     options?: {
       fields?: Array<"thrust" | "angle" | "fire" | "firingCompensation" | "viewBounds">;
-    }
+    },
   ): ShipInputCommand | null {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return null;
     const command: ShipInputCommand = {
@@ -1410,8 +1790,13 @@ export class ClientEngine {
       angle: input.angle,
       fire: input.fire,
       timestamp: this.#predictedServerTime(),
+      firingCompensation: input.firingCompensation,
     };
     const includeFields = options?.fields ?? ["thrust", "angle", "fire"];
+    command.fire =
+      includeFields.includes("fire") &&
+      command.fire &&
+      this.#predictedShots.tryFire(performance.now(), 1000 / this.#serverTps);
     const payloadInput: PlayerInputEvent["input"] = {};
     if (includeFields.includes("thrust")) {
       payloadInput.thrust = command.thrust;
@@ -1421,17 +1806,37 @@ export class ClientEngine {
     }
     if (includeFields.includes("fire") && command.fire) {
       payloadInput.fire = command.fire;
+      payloadInput.shotId = command.sequence;
 
-      if (
-        includeFields.includes("firingCompensation") &&
-        input.firingCompensation !== undefined
-      ) {
+      if (includeFields.includes("firingCompensation") && input.firingCompensation !== undefined) {
         payloadInput.firingCompensation = input.firingCompensation;
       }
     }
 
     if (Object.keys(payloadInput).length === 0) {
       return null;
+    }
+    if (payloadInput.fire && this.#services?.player.id && this.#services.player.entityId !== null) {
+      const services = this.#services;
+      const entityId = services.player.entityId!;
+      const ship = this.#snapshotBuffer.getLatest()?.entities.get(services.player.id!);
+      const transform = services.stores.transform.get(entityId);
+      const velocity = services.stores.velocity.get(entityId);
+      if (
+        ship &&
+        transform &&
+        velocity &&
+        this.#predictedShots.availableEnergy(ship) >= SHIP_CONSTANTS.shotEnergy
+      ) {
+        this.#predictedShots.predict(
+          command.sequence,
+          services.player.id!,
+          { ...transform, ...velocity, angle: command.angle },
+          !!input.firingCompensation,
+          command.timestamp,
+        );
+        command.predictedFire = true;
+      }
     }
     const payload = event({
       type: "player:input",
@@ -1598,9 +2003,8 @@ export class ClientEngine {
   respawn(name: string) {
     if (!this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
 
-    // Reset input buffer and sequence
+    // Keep sequence/shot IDs unique for the connection, including surviving old-life bullets.
     this.#inputBuffer.reset();
-    this.#inputSequence = 0;
 
     // Clear death position and respawn error when respawning
     this.#statsGetter().setDeathPosition(null);

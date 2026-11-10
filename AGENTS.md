@@ -1,6 +1,6 @@
 # AGENTS
 
-This project has a lightweight agent-friendly test harness. Use it instead of ad-hoc manual runs whenever you need to debug gameplay, verify a feature, or compare optimization changes.
+This project has an agent-friendly test harness with two probe client modes: a fast lightweight mode and a rendered graphics mode. Use it instead of ad-hoc manual runs whenever you need to debug gameplay, verify a feature, or compare optimization changes.
 
 ## Setup
 
@@ -16,6 +16,8 @@ This project has a lightweight agent-friendly test harness. Use it instead of ad
   Use for browser-level regression checks with Playwright.
 - `bun run probe:agent`
   Use for short autonomous diagnostic runs that start the server, join the game, capture client/server metrics and logs, take a screenshot, and exit cleanly.
+- `bun run probe:agent --client-mode=rendered`
+  Use when you need the real graphics client to boot with Pixi, ECS, camera, and render systems active.
 
 ## Recommended Workflow
 
@@ -47,11 +49,31 @@ Default command:
 bun run probe:agent
 ```
 
+Rendered probe mode:
+
+```bash
+bun run probe:agent --client-mode=rendered
+```
+
+Shortcut:
+
+```bash
+bun run probe:agent:rendered
+```
+
+Optional headed run:
+
+```bash
+bun run probe:agent --client-mode=rendered --headed
+```
+
 CLI flags are also supported:
 
 ```powershell
 bun run probe:agent --duration=15000 --seed=42 --debug-performance
 bun run probe:agent --artifacts-dir=.artifacts/perf-baseline --name="Feature Check"
+bun run probe:agent --client-mode=rendered --capture-debug-trace --trace-interval=50
+bun run probe:agent --client-mode=rendered --sim-latency=40
 ```
 
 Useful environment overrides:
@@ -61,14 +83,22 @@ $env:PROBE_DURATION_MS = "15000"; bun run probe:agent
 $env:PROBE_SEED = "42"; $env:PROBE_ARTIFACTS_DIR = ".artifacts/perf-baseline"; bun run probe:agent
 $env:PROBE_NAME = "Feature Check"; bun run probe:agent
 $env:PROBE_DEBUG_PERFORMANCE = "1"; bun run probe:agent
+$env:PROBE_CLIENT_MODE = "rendered"; bun run probe:agent
+$env:PROBE_HEADED = "1"; $env:PROBE_CLIENT_MODE = "rendered"; bun run probe:agent
 ```
 
 What the probe does:
 
 - starts the Bun server in `--test-mode`
 - enables deterministic server-side randomness when `--seed` is set
-- opens the game in `agent-mode` with audio disabled
-- uses a lightweight headless client path that does not depend on Pixi/WebGL boot completing
+- when `--client-mode=lightweight` is used:
+  - opens the game in `agent-mode` with audio disabled
+  - uses a lightweight client path that does not depend on Pixi/WebGL boot completing
+- when `--client-mode=rendered` is used:
+  - builds the frontend bundle first and serves `dist/` from the same test server origin
+  - opens the game in `agent-rendered` mode with audio disabled
+  - boots the real graphics client with Pixi, ECS, camera, input, networking, and render systems active
+  - uses a probe-compatible direct-stage renderer instead of the normal retro render-to-texture post-processing path, because that path is less stable under automated Playwright runs
 - waits for the browser test API to become available
 - joins the game
 - briefly exercises movement/fire input
@@ -80,9 +110,16 @@ What the probe does:
   - `server.stderr.log`
   - `screenshot.png`
 
+## Probe Modes
+
+- `lightweight`
+  Best default for networking, spawning, connection flow, and fast reproducible metrics. It is faster and more robust than the rendered path, but it does not boot the visual Pixi gameplay pipeline.
+- `rendered`
+  Best for visual gameplay checks and debugging client rendering behavior. It boots a real graphics client, but it is intentionally not pixel-identical to the normal retro presentation path because the harness uses a more automation-stable renderer.
+
 ## Browser Test API
 
-When the page is opened with `?agent-mode=true`, the client exposes:
+When the page is opened with `?agent-mode=true` or `?agent-rendered=true`, the client exposes:
 
 ```ts
 window.__STARTAIL_TEST_API__
@@ -111,8 +148,9 @@ Use them to fetch authoritative server-side state after a run. This is especiall
 ## Good Defaults For Agents
 
 - Prefer `bun run probe:agent` over manual browser poking when you need logs and metrics.
+- Escalate to `bun run probe:agent --client-mode=rendered` when the issue depends on graphics, camera, animation, or visual smoothing behavior.
 - Prefer a fixed `--seed` when comparing behavior across runs.
-- Prefer `?agent-mode=true&audio=off` for any automated browser session.
+- Prefer `?agent-mode=true&audio=off` for lightweight automation and `?agent-rendered=true&audio=off` for rendered automation.
 - Prefer Playwright plus the test API for repeatable flows.
 - Save evidence in `.artifacts/...` before making large refactors.
 
@@ -125,5 +163,45 @@ Use them to fetch authoritative server-side state after a run. This is especiall
 ## Notes
 
 - The server currently seeds process-wide `Math.random()` in test mode when `--seed` is provided. Keep the seed stable for apples-to-apples comparisons.
-- Audio is intentionally disabled in agent mode to avoid headless-browser instability.
+- Audio is intentionally disabled in both probe modes to avoid browser-automation instability.
+- `rendered` probe mode automatically runs a frontend build before launching Playwright. You do not need to build manually before using `bun run probe:agent --client-mode=rendered`.
+- The rendered harness uses a probe-compatible direct-stage graphics path. That makes it suitable for automation and visual debugging, but if you need to validate the exact production retro post-processing path, also sanity-check with a manual `bun dev` run.
 - If a probe fails, check `summary.json` first; it is the fastest way to see whether the failure was in boot, connection, spawn, or runtime.
+
+## Network stress diagnostics
+
+`--server-stall-ms=180` injects one bounded event-loop stall after five seconds
+of a probe run via the test-only POST `/__test/stall` endpoint. Combine it with
+`--capture-debug-trace` and `--sim-latency=40` to exercise buffer starvation and
+catch-up. Set `PLAYWRIGHT_CHANNEL=msedge` to use installed Edge when Playwright's
+bundled Chromium is unavailable. See `OPTIMIZATION_CHECKLIST.md` for results.
+
+`--retro-rendering` with `--client-mode=rendered` verifies the normal retro render
+texture/filter path. The probe now requires a running Pixi application ticker;
+boot flags alone are insufficient evidence of rendered gameplay. Startup allows
+60 seconds for large world generation alongside software WebGL.
+
+`--sim-jitter-ms=120` varies artificial latency from the `--sim-latency` base
+by an additional 0–120ms using a seeded sequence every 50ms. This exercises
+irregular application-level delivery, not packet loss or bandwidth limits.
+Optimization comparisons and their reproducible scripts are documented in
+`OPTIMIZATION_RESULTS.md`; run CPU benchmarks sequentially to avoid contention.
+
+## Lazy world diagnostics
+
+See `LAZY_WORLD_IMPLEMENTATION.md` for RAM-only chunk storage, 50-pirate activity,
+last-player reset, measurements, and limitations. Run
+`bun scripts/benchmark-lazy-world.ts normal` and then `near-50` for isolated
+simulation scenarios. They write ignored artifacts under `.artifacts/lazy-world-review/`.
+The historical broad-phase benchmark extracts its pre-streaming fixture from git.
+
+`/__test/teleport` is a test-mode-only POST hook accepting `{id,x,y,targetId?,health?}`;
+`targetId` simulates player damage to establish pirate pursuit. Snapshot diagnostics
+include background pirate records and loading state. The E2E suite shares one world
+and runs serially to verify the final disconnect reset. Set `BUN_PATH` to the desired
+Bun executable for both E2E and probe servers; local node_modules may contain an older Bun.
+
+Test-only POST `/__test/damage` accepts `{id,amount}` and applies damage to an
+initialized living entity during the next simulation tick. This preserves event
+replication timing. The rendered seam test verifies damage text and explosions;
+Web Audio positioning is covered by unit tests because browser probes mute audio.

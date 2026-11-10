@@ -1,4 +1,6 @@
-export type EntityType = "ship" | "asteroid" | "bullet" | "exp";
+import type { ItemKind } from "../items";
+
+export type EntityType = "ship" | "asteroid" | "bullet" | "exp" | "pickup";
 
 export interface BaseEntityState {
   name: string;
@@ -21,6 +23,7 @@ export interface BaseEntityState {
 }
 
 export interface GenericNetEntityState extends BaseEntityState {
+  itemKind?: ItemKind;
   ownerId?: string;
   shotId?: number;
   life?: number;

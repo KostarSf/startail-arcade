@@ -36,6 +36,14 @@ export interface EntityDestroyWorldEvent extends ReplicatedWorldEventBase {
   score?: number;
 }
 
+export interface ItemPickupWorldEvent extends ReplicatedWorldEventBase {
+  kind: "item-pickup";
+  entityId: string;
+  shipId: string;
+  x: number;
+  y: number;
+}
+
 export interface PlayerScoreWorldEvent extends ReplicatedWorldEventBase {
   kind: "player-score";
   playerId: string;
@@ -52,6 +60,7 @@ export interface PlayerLevelUpWorldEvent extends ReplicatedWorldEventBase {
 }
 
 export type ReplicatedWorldEvent =
+  | ItemPickupWorldEvent
   | EntityDamageWorldEvent
   | EntityDestroyWorldEvent
   | PlayerScoreWorldEvent
@@ -128,7 +137,7 @@ export type ShotResult =
   | { shotId: number; status: "rejected" };
 
 export interface RadarData {
-  type: "player" | "ship" | "asteroid" | "pirate";
+  type: "player" | "ship" | "asteroid" | "pirate" | "repair-asteroid" | "repair";
   x: number;
   y: number;
 }

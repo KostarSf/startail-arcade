@@ -5,7 +5,11 @@ import { Asteroid } from "../../src/server/engine/entities/asteroid";
 import { Ship } from "../../src/server/engine/entities/ship";
 import { Bullet } from "../../src/server/engine/entities/bullet";
 import { PirateAI } from "../../src/server/engine/entities/ai/pirate-ai";
-import { createChunkManifest, generateChunk } from "../../src/server/engine/world/chunk-generator";
+import {
+  ASTEROID_RECORD_WIDTH,
+  createChunkManifest,
+  generateChunk,
+} from "../../src/server/engine/world/chunk-generator";
 import { wrappedDelta, wrappedDistance } from "../../src/shared/math/world-wrap";
 import { Random } from "../../src/shared/math/random";
 import { CollisionResolver } from "../../src/server/engine/world/collision-resolver";
@@ -127,7 +131,9 @@ test("independent chunk generation is deterministic, order-independent, and tota
   generate(4);
   generate(95);
   expect(generate(3)).toEqual(first);
-  expect(new Set([...first].filter((_, i) => i % 11 === 0)).size).toBe(first.length / 11);
+  expect(new Set([...first].filter((_, i) => i % ASTEROID_RECORD_WIDTH === 0)).size).toBe(
+    first.length / ASTEROID_RECORD_WIDTH,
+  );
 });
 
 test("compact eviction restores IDs, motion, health and rewards without resurrecting deleted bodies", () => {

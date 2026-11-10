@@ -4,14 +4,20 @@ import { Bullet } from "./bullet";
 import { Exp } from "./exp";
 import { LivingEntity } from "./living-entity";
 import { Ship } from "./ship";
+import { Pickup } from "./pickup";
+import { ITEM_CONFIG, type ItemKind } from "@/shared/game/items";
+import { Vector2 } from "@/shared/math/vector";
+import { wrapCoordinate } from "@/shared/math/world-wrap";
 
 export interface IAsteroid extends IBaseEntity {
+  itemKind?: ItemKind;
   health: number;
   maxHealth: number;
   earnablePoints: number;
 }
 
 export class Asteroid extends LivingEntity {
+  readonly itemKind?: ItemKind;
   /** Session-local numeric key for compact RAM storage, independent of residency. */
   streamingId?: number;
   override type = "asteroid" as const;
@@ -30,6 +36,7 @@ export class Asteroid extends LivingEntity {
     }
 
     super(asteroid);
+    this.itemKind = asteroid.itemKind;
 
     this.maxHealth = asteroid.maxHealth ?? 100;
     this.health = asteroid.health ?? this.maxHealth;
@@ -40,6 +47,7 @@ export class Asteroid extends LivingEntity {
   }
 
   protected override onDamage(world: World, amount: number, source?: BaseEntity): number {
+    if (this.itemKind && source instanceof Bullet && amount > 0) return this.health;
     if (source && source instanceof Bullet) {
       const relativeVelocity = source.velocity.sub(this.velocity);
       this.velocity = this.velocity.add(relativeVelocity.mul(0.04));
@@ -49,6 +57,27 @@ export class Asteroid extends LivingEntity {
   }
 
   protected override onDeath(world: World, source?: BaseEntity) {
+    if (this.itemKind) {
+      if (source instanceof Bullet || source instanceof Ship) {
+        let direction = world.displacement(source, this);
+        if (direction.length() < 1e-8) direction = source.velocity.sub(this.velocity);
+        if (direction.length() < 1e-8)
+          direction = new Vector2(Math.cos(source.angle), Math.sin(source.angle));
+        direction = direction.normalize();
+        const position = this.position.add(direction.mul(this.radius + ITEM_CONFIG.radius + 1));
+        const velocity = direction.mul(ITEM_CONFIG.launchSpeed);
+        world.spawn(
+          new Pickup({
+            itemKind: this.itemKind,
+            x: wrapCoordinate(position.x, world.borderRadius),
+            y: wrapCoordinate(position.y, world.borderRadius),
+            vx: velocity.x,
+            vy: velocity.y,
+          }),
+        );
+      }
+      return;
+    }
     if (this.earnablePoints <= 0) return;
 
     if (source && (source.type === "ship" || source.type === "bullet")) {
@@ -74,6 +103,12 @@ export class Asteroid extends LivingEntity {
   }
 
   override onCollisionStart(world: World, other: BaseEntity): void {
+    if (this.itemKind && other instanceof Ship && this.isAlive) {
+      const speed = other.velocity.sub(this.velocity).length();
+      const damage = Math.floor(Math.max(speed - 150, 0) * 0.5);
+      if (damage > 0) this.takeDamage(world, damage, other);
+      return;
+    }
     if (other instanceof Asteroid) {
       // Simple rigid body collision: exchange velocities based on mass (assume mass proportional to radius^2)
       const m1 = this.radius * this.radius;
@@ -117,6 +152,7 @@ export class Asteroid extends LivingEntity {
       ...super.toJSON(),
       health: this.health,
       maxHealth: this.maxHealth,
+      itemKind: this.itemKind,
     };
   }
 }

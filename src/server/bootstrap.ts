@@ -11,6 +11,8 @@ import { Engine } from "./engine/engine";
 import { Bullet } from "./engine/entities/bullet";
 import { PirateAI } from "./engine/entities/ai/pirate-ai";
 import { Ship } from "./engine/entities/ship";
+import { Asteroid } from "./engine/entities/asteroid";
+import { Pickup } from "./engine/entities/pickup";
 import { LivingEntity } from "./engine/entities/living-entity";
 
 export type GameServerOptions = {
@@ -254,6 +256,35 @@ export function createGameServer(options: GameServerOptions = {}) {
         seed: resolved.seed,
       });
     },
+    "/__test/repair-scene": async (req: Request) => {
+      if (!resolved.testMode) return new Response("Not found", { status: 404 });
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      const data = (await req.json().catch(() => null)) as { shipId?: string } | null;
+      const ship = data?.shipId ? engine.world.find(data.shipId) : null;
+      if (!(ship instanceof Ship) || !ship.initialized || !ship.isAlive)
+        return new Response("Ship not active", { status: 404 });
+      if (!engine.world.streaming.isReady({ x: ship.x, y: ship.y, radius: 500 }))
+        return new Response("Area loading", { status: 503 });
+      // Deterministic, isolated fixture; real bullets, collision, healing and replication still run.
+      for (const entity of engine.world.query(ship.position, 500).precise().array())
+        if (entity !== ship) entity.remove();
+      ship.vx = ship.vy = 0;
+      ship.angle = 0;
+      ship.thrust = false;
+      ship.maxHealth = 100;
+      ship.health = 40;
+      ship.markChanged();
+      const asteroid = new Asteroid({
+        x: ship.x + 100,
+        y: ship.y,
+        radius: 12,
+        maxHealth: 50,
+        itemKind: "repair",
+        earnablePoints: 0,
+      });
+      engine.world.spawn(asteroid);
+      return Response.json({ asteroidId: asteroid.id });
+    },
     "/__test/damage": async (req: Request) => {
       if (!resolved.testMode) return new Response("Not found", { status: 404 });
       if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -313,6 +344,11 @@ export function createGameServer(options: GameServerOptions = {}) {
         serverTimeMs: Math.round(engine.serverTime),
         players: engine.network.getPlayerSnapshots(),
         pirates: engine.world.pirates.getSnapshots(),
+        items: engine.world.entities
+          .filter(
+            (e) => !e.removed && (e instanceof Pickup || (e instanceof Asteroid && e.itemKind)),
+          )
+          .map((e) => e.toJSON()),
         entityCounts: engine.world.getEntityCountsByType(),
         activity: engine.world.getActivityStats(),
         seed: resolved.seed,

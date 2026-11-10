@@ -207,6 +207,38 @@ Press `Tab` to view detailed information:
 - Maximum speed
 - Active buffs (when applicable)
 
+### Repair pickups
+
+Gameplay tuning is in `src/shared/game/items.ts` (`ITEM_CONFIG`). By default,
+5% of generated/refilled medium asteroids contain repair. Their item textures
+and hollow green radar squares distinguish them from ordinary rocks; loose
+repairs use the repair sprite and a green radar cross. Item radar range is 1900
+world units and uses resident chunks, without generating the entire world.
+
+One bullet opens an item asteroid. A lethal ship collision also drops its item;
+a lethal asteroid collision or damage without a source does not. Ship impact
+uses the existing speed threshold (150) and damage multiplier (0.5), so gentle
+contact is harmless. Item asteroids drop a single repair instead of experience.
+Contents persist through chunk eviction and transfers.
+
+Repairs launch away from the impact at 225 units/s, quickly slow to a 12 units/s
+drift, bounce off asteroids, and receive bounded pushes from bullets (the bullet
+is consumed). They expire after 60 seconds of simulation. Contact heals 25% of
+maximum HP, capped at missing HP, for either a player or a pirate; their fractions
+can be tuned separately. Full-health ships leave repairs untouched. There is no
+pickup magnet, and each repair can be collected only once.
+
+Below 50% HP, pirates prefer a repair or item asteroid within 500 units, keep a
+stable repair target, shoot the rock, then intercept the item without firing.
+Their combat target is retained for after healing. Existing experience healing
+is unchanged.
+
+The deterministic rendered E2E uses test-only POST `/__test/repair-scene` with
+`{shipId}` to clear nearby interference and place one item asteroid. GET
+`/__test/snapshot` includes resident item states; the browser test API's debug
+snapshot includes rendered items and radar markers. These test routes are
+unavailable outside `--test-mode`.
+
 ## Project Structure
 
 ```

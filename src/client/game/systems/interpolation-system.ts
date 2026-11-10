@@ -61,7 +61,11 @@ export const ensureRenderable = (
 
       let texture: Texture<TextureSource<any>>;
 
-      if (radius > 15) {
+      if (snapshotEntity.itemKind) {
+        const variants = services.textures.asteroids.item;
+        texture =
+          variants[snapshotEntity.id.charCodeAt(snapshotEntity.id.length - 1) % variants.length]!;
+      } else if (radius > 15) {
         texture =
           services.textures.asteroids.large[
             Math.floor(Math.random() * services.textures.asteroids.large.length)
@@ -83,6 +87,10 @@ export const ensureRenderable = (
         anchor: 0.5,
       });
       sprite.tint = 0xa0a0a0;
+      break;
+    case "pickup":
+      sprite = new Sprite({ texture: services.textures.repair, anchor: 0.5 });
+      sprite.label = "repair-pickup";
       break;
     case "bullet":
       {
@@ -296,6 +304,7 @@ const getTailDurationMs = (entity: GenericNetEntityState, isPlayer: boolean) => 
     case "bullet":
       return 16;
     case "exp":
+    case "pickup":
       return 12;
     default:
       return 0;
@@ -310,6 +319,7 @@ const getCorrectionDurationMs = (entity: GenericNetEntityState, health: Snapshot
       return health === "degraded" ? 60 : health === "stressed" ? 80 : 110;
     case "bullet":
     case "exp":
+    case "pickup":
       return 55;
     default:
       return 80;
@@ -329,6 +339,7 @@ const shouldSnapCorrection = (
     case "bullet":
       return distance > 25;
     case "exp":
+    case "pickup":
       return distance > 18;
     case "ship":
       return distance > 150;

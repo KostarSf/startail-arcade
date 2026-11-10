@@ -11,7 +11,7 @@ test("live effects follow the nearest camera image without resetting age or text
   const services: any = {
     pixi: { camera, renderWidth: 1280, renderHeight: 720 },
     world: { radius: 50000 },
-    textures: { explosion: Texture.EMPTY },
+    textures: { explosion: Texture.EMPTY, pickup: Texture.EMPTY },
     effects: {},
     effectQueues: { damageTexts: [], explosions: [] },
   };
@@ -20,9 +20,12 @@ test("live effects follow the nearest camera image without resetting age or text
     EffectSystem.init!({ services } as any);
     services.effects.queueDamageText({ x: -49900, y: -49900, amount: 17 });
     services.effects.queueExplosion({ x: -49900, y: -49900 });
+    services.effects.queueExplosion({ x: -49900, y: -49900, kind: "pickup" });
     EffectSystem.tick({ services, dt: 0 } as any);
     const text = camera.children.find((c) => c.label === "world-damage-text")!;
     const explosion = camera.children.find((c) => c.label === "world-explosion")!;
+    const pickup = camera.children.find((c) => c.label === "world-pickup")!;
+    expect(pickup.x).toBe(50100);
     expect(text.x).toBe(50100);
     expect(text.y).toBe(50100);
     expect(explosion.x).toBe(50100);
@@ -38,6 +41,7 @@ test("live effects follow the nearest camera image without resetting age or text
     camera.position.set(640 - 49900, 360 - 49900);
     EffectSystem.tick({ services, dt: 0.31 } as any);
     expect(explosion.destroyed).toBeTrue();
+    expect(pickup.destroyed).toBeTrue();
     expect(text.x).toBe(50100);
     expect(text.y).toBeCloseTo(50100 - 0.51 * 18);
     EffectSystem.tick({ services, dt: 0.5 } as any);

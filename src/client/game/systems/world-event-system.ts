@@ -52,6 +52,13 @@ export const WorldEventSystem: System<ClientServices> = {
             }
           }
           break;
+        case "item-pickup":
+          services.effects.queueExplosion({ x: event.x, y: event.y, kind: "pickup" });
+          services.audio.playOneShot({
+            soundId: "snd_pick_energy",
+            position: { x: event.x, y: event.y },
+          });
+          break;
         case "entity-destroy":
           if (event.entityId === services.player.id) {
             services.audio.playOneShot({ soundId: "snd_death" });

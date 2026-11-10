@@ -1,3 +1,7 @@
+import repairTextureSrc from "../assets/images/items/repair.png";
+import pickupTextureSrc from "../assets/images/items/pickup.png";
+import asteroidItem1TextureSrc from "../assets/images/asteroids/item-01.png";
+import asteroidItem2TextureSrc from "../assets/images/asteroids/item-02.png";
 import {
   Application,
   extensions,
@@ -155,6 +159,7 @@ export class ClientEngine {
       small: Texture[];
       medium: Texture[];
       large: Texture[];
+      item: Texture[];
     };
     bullet: Texture | null;
     glare: Texture | null;
@@ -165,6 +170,8 @@ export class ClientEngine {
     exp1: Texture | null;
     exp2: Texture | null;
     exp3: Texture | null;
+    repair: Texture | null;
+    pickup: Texture | null;
   } = {
     player: null,
     playerDamaged1: null,
@@ -172,7 +179,7 @@ export class ClientEngine {
     pirate: null,
     pirateDamaged1: null,
     pirateDamaged2: null,
-    asteroids: { small: [], medium: [], large: [] },
+    asteroids: { small: [], medium: [], large: [], item: [] },
     bullet: null,
     glare: null,
     hint: null,
@@ -182,6 +189,8 @@ export class ClientEngine {
     exp1: null,
     exp2: null,
     exp3: null,
+    repair: null,
+    pickup: null,
   };
 
   #ws: WebSocket | null = null;
@@ -623,13 +632,26 @@ export class ClientEngine {
         renderedSimTick: services?.world.renderedSimTick ?? 0,
       },
       effects: this.#camera.children
-        .filter((ref) => ref.label === "world-damage-text" || ref.label === "world-explosion")
+        .filter(
+          (ref) =>
+            ref.label === "world-damage-text" ||
+            ref.label === "world-explosion" ||
+            ref.label === "world-pickup",
+        )
         .map((ref) => ({
           kind: ref.label,
           text: ref instanceof Text ? ref.text : null,
           screenX: round(ref.x * this.#camera.scale.x + this.#camera.x),
           screenY: round(ref.y * this.#camera.scale.y + this.#camera.y),
         })),
+      radar: this.#statsGetter().radarData,
+      items: [...(latestSnapshot?.entities.values() ?? [])]
+        .filter((s) => s.itemKind)
+        .map((s) => {
+          const id = services?.entityIndex.get(s.id);
+          const ref = id !== undefined ? services?.stores.renderable.get(id)?.ref : undefined;
+          return { ...s, rendered: !!ref };
+        }),
       ships: [...(latestSnapshot?.entities.values() ?? [])]
         .filter((s) => s.type === "ship")
         .map((s) => {
@@ -707,6 +729,8 @@ export class ClientEngine {
                       angle: round(latestServerState.angle, 4),
                       vx: round(latestServerState.vx),
                       vy: round(latestServerState.vy),
+                      health: latestServerState.health,
+                      maxHealth: latestServerState.maxHealth,
                       thrust: latestServerState.thrust ?? false,
                       lastInputSequence: latestServerState.lastInputSequence ?? -1,
                     }
@@ -1045,6 +1069,8 @@ export class ClientEngine {
         exp1: this.#textures.exp1!,
         exp2: this.#textures.exp2!,
         exp3: this.#textures.exp3!,
+        repair: this.#textures.repair!,
+        pickup: this.#textures.pickup!,
       },
       player: {
         id: null,
@@ -1904,6 +1930,17 @@ export class ClientEngine {
       Assets.load<Texture>(asteroidLarge1TextureSrc),
       Assets.load<Texture>(asteroidLarge2TextureSrc),
     ]);
+
+    const [repair, pickup, item1, item2] = await Promise.all([
+      Assets.load<Texture>(repairTextureSrc),
+      Assets.load<Texture>(pickupTextureSrc),
+      Assets.load<Texture>(asteroidItem1TextureSrc),
+      Assets.load<Texture>(asteroidItem2TextureSrc),
+    ]);
+    for (const texture of [repair, pickup, item1, item2]) texture.source.scaleMode = "nearest";
+    this.#textures.repair = repair;
+    this.#textures.pickup = pickup;
+    this.#textures.asteroids.item = [item1, item2];
 
     // Ensure all textures use nearest neighbor scaling
     player.source.scaleMode = "nearest";

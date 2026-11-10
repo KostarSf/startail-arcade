@@ -1,3 +1,4 @@
+import { ITEM_CONFIG } from "@/shared/game/items";
 import { Vector2 } from "@/shared/math/vector";
 import { wrappedDelta, wrappedDistance, wrapCoordinate } from "@/shared/math/world-wrap";
 import type { SerializableEvent } from "@/shared/network/utils";
@@ -8,6 +9,7 @@ import { Asteroid } from "../entities/asteroid";
 import type { BaseEntity } from "../entities/base-entity";
 import { Ship } from "../entities/ship";
 import { Bullet } from "../entities/bullet";
+import { Pickup } from "../entities/pickup";
 import { ChunkActivityManager } from "./chunk-activity-manager";
 import { CollisionResolver } from "./collision-resolver";
 import { UniformGrid } from "./uniform-grid";
@@ -171,7 +173,7 @@ export class World {
         { x: ship.x + ship.vx, y: ship.y + ship.vy, radius: 1000 },
       );
     for (const entity of this.#nonAsteroidEntities)
-      if (entity.type === "bullet" && !entity.removed) {
+      if ((entity.type === "bullet" || entity.type === "pickup") && !entity.removed) {
         // Cover the entire next-second corridor, including intermediate chunks.
         const distance = Math.hypot(entity.vx, entity.vy),
           steps = Math.max(1, Math.ceil(distance / 500));
@@ -197,7 +199,7 @@ export class World {
             ? 1900
             : 1000,
       });
-    if (entity.type === "bullet")
+    if (entity.type === "bullet" || entity.type === "pickup")
       return this.streaming.isReady({
         x: entity.x + entity.vx * 0.025,
         y: entity.y + entity.vy * 0.025,
@@ -351,6 +353,8 @@ export class World {
       va,
       radius,
       maxHealth: health,
+      itemKind:
+        radius === 12 && Math.random() < ITEM_CONFIG.mediumAsteroidChance ? "repair" : undefined,
     });
     this.spawn(asteroid);
 
@@ -380,7 +384,8 @@ export class World {
     this.#simulated.clear();
     for (const entity of this.#nonAsteroidEntities) {
       const canSimulate = this.#canSimulate(entity);
-      if (entity instanceof Bullet) entity.setSimulationPaused(!canSimulate);
+      if (entity instanceof Bullet || entity instanceof Pickup)
+        entity.setSimulationPaused(!canSimulate);
       if (canSimulate) this.#simulated.add(entity);
     }
     for (const entity of this.#chunkActivity.getActiveAsteroids()) this.#simulated.add(entity);

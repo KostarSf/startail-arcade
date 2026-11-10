@@ -22,6 +22,7 @@ interface EffectRuntimeState {
   damageTexts: DamageTextInstance[];
   explosions: ExplosionInstance[];
   explosionFrames: Texture[];
+  pickupFrames: Texture[];
 }
 
 const EFFECT_STATE_KEY = Symbol("effect-state");
@@ -86,11 +87,13 @@ const spawnExplosion = (
   services: ClientServices,
   payload: ExplosionRequest,
 ) => {
-  const sprite = new AnimatedSprite(runtime.explosionFrames);
-  sprite.label = "world-explosion";
+  const frames = payload.kind === "pickup" ? runtime.pickupFrames : runtime.explosionFrames;
+  const duration = payload.kind === "pickup" ? 4 / 12 : EXPLOSION_DURATION;
+  const sprite = new AnimatedSprite(frames);
+  sprite.label = payload.kind === "pickup" ? "world-pickup" : "world-explosion";
   sprite.anchor.set(0.5);
   sprite.loop = false;
-  const framesPerSecond = runtime.explosionFrames.length / EXPLOSION_DURATION;
+  const framesPerSecond = frames.length / duration;
   sprite.animationSpeed = framesPerSecond / 60;
   sprite.x = payload.x;
   sprite.y = payload.y;
@@ -100,7 +103,7 @@ const spawnExplosion = (
     sprite,
     position: { x: payload.x, y: payload.y },
     age: 0,
-    duration: EXPLOSION_DURATION,
+    duration,
   });
 };
 
@@ -166,7 +169,7 @@ export const EffectSystem: System<ClientServices> = {
         instance.sprite.destroy();
       }
       // Destroy explosion frame textures
-      for (const texture of existingRuntime.explosionFrames) {
+      for (const texture of [...existingRuntime.explosionFrames, ...existingRuntime.pickupFrames]) {
         texture.destroy(false); // Don't destroy the base texture
       }
     }
@@ -175,6 +178,7 @@ export const EffectSystem: System<ClientServices> = {
       damageTexts: [],
       explosions: [],
       explosionFrames: createExplosionFrames(services.textures.explosion),
+      pickupFrames: createExplosionFrames(services.textures.pickup),
     };
     (services as any)[EFFECT_STATE_KEY] = runtime;
 

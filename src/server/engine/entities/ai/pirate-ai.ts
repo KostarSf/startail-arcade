@@ -1,3 +1,5 @@
+import { ITEM_CONFIG } from "@/shared/game/items";
+import { Pickup } from "../pickup";
 import { angleDiff, angleLerp, inverseLerp } from "@/shared/math/utils";
 import { Vector2 } from "@/shared/math/vector";
 import { TPS } from "../../constants";
@@ -11,6 +13,8 @@ import { Ship } from "../ship";
 import { ShipAI } from "./ship-ai";
 
 export class PirateAI extends ShipAI {
+  #repairTarget: Pickup | Asteroid | null = null;
+  #restoreRepairId: string | null = null;
   #outOfPursuitSince: number | null = null;
   #restoreTargets: { current: string | null; memorized: string | null } | null = null;
   #lastCombatTick = -Infinity;
@@ -32,6 +36,7 @@ export class PirateAI extends ShipAI {
 
   captureState() {
     return {
+      repairTarget: this.#repairTarget?.id ?? null,
       level: this.#level,
       targetAngle: this.#targetAngle,
       current: this.#currentTarget?.id ?? null,
@@ -41,6 +46,7 @@ export class PirateAI extends ShipAI {
     };
   }
   restoreState(state: ReturnType<PirateAI["captureState"]>) {
+    this.#restoreRepairId = state.repairTarget;
     this.#level = state.level;
     this.#targetAngle = state.targetAngle;
     this.#restoreTargets = state;
@@ -56,7 +62,11 @@ export class PirateAI extends ShipAI {
       : null;
   }
   keepsActive(world: World) {
-    return this.pursuitTargetId !== null || world.engine.tick - this.#lastCombatTick < TPS * 5;
+    return (
+      !!(this.#repairTarget && !this.#repairTarget.removed) ||
+      this.pursuitTargetId !== null ||
+      world.engine.tick - this.#lastCombatTick < TPS * 5
+    );
   }
 
   constructor(level?: number) {
@@ -93,6 +103,11 @@ export class PirateAI extends ShipAI {
   }
 
   override update(ship: Ship, world: World, delta: number) {
+    if (this.#restoreRepairId) {
+      const target = world.find(this.#restoreRepairId);
+      this.#repairTarget = target instanceof Pickup || target instanceof Asteroid ? target : null;
+      this.#restoreRepairId = null;
+    }
     if (this.#restoreTargets) {
       const current = world.find(this.#restoreTargets.current ?? ""),
         memorized = world.find(this.#restoreTargets.memorized ?? "");
@@ -173,7 +188,7 @@ export class PirateAI extends ShipAI {
       if (!obstacle.isAlive) continue;
 
       // At low speeds (<60), don't avoid the current target - pirate needs to get close to aim
-      if (speed < 60 && obstacle === this.#currentTarget) {
+      if (speed < 60 && (obstacle === this.#currentTarget || obstacle === this.#repairTarget)) {
         continue;
       }
 
@@ -268,10 +283,64 @@ export class PirateAI extends ShipAI {
   override tick(ship: Ship, world: World, delta: number) {
     this.#updateTargets(ship, world, delta);
 
-    if (this.#currentTarget) {
+    const repair = this.#selectRepairTarget(ship, world);
+    if (repair) {
+      this.#seekRepair(ship, world, repair);
+    } else if (this.#currentTarget) {
       this.#chase(ship, world, delta);
     } else {
       this.#idle(ship, world, delta);
+    }
+  }
+
+  #selectRepairTarget(ship: Ship, world: World) {
+    if (ship.health / ship.maxHealth >= ITEM_CONFIG.pirateSeekHealthBelow) {
+      this.#repairTarget = null;
+      return null;
+    }
+    if (
+      this.#repairTarget &&
+      !this.#repairTarget.removed &&
+      world.distance(ship, this.#repairTarget) <= ITEM_CONFIG.pirateSearchRadius
+    )
+      return this.#repairTarget;
+    this.#repairTarget = null;
+    let bestCost = Infinity;
+    for (const entity of world
+      .query(ship.position, ITEM_CONFIG.pirateSearchRadius)
+      .precise()
+      .array()) {
+      if (
+        !(entity instanceof Pickup || (entity instanceof Asteroid && entity.itemKind === "repair"))
+      )
+        continue;
+      const cost = world.distance(ship, entity) / 150 + (entity instanceof Asteroid ? 1 : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        this.#repairTarget = entity;
+      }
+    }
+    return this.#repairTarget;
+  }
+
+  #seekRepair(ship: Ship, world: World, target: Pickup | Asteroid) {
+    const offset = world.displacement(ship, target);
+    const distance = offset.length();
+    if (target instanceof Pickup) {
+      // Steer toward a bounded intercept velocity; brake before passing the collectible.
+      const desired =
+        distance > 0
+          ? offset.mul(Math.min(150, distance * 2) / distance).add(target.velocity)
+          : target.velocity;
+      const steering = desired.sub(ship.velocity);
+      this.#targetAngle = steering.length() > 1 ? steering.angle() : ship.angle;
+      ship.thrust =
+        steering.length() > 5 && Math.abs(angleDiff(ship.angle, this.#targetAngle)) < 0.6;
+    } else {
+      this.#targetAngle = offset.angle();
+      ship.thrust = distance > 120;
+      if (distance <= 300 && Math.abs(angleDiff(ship.angle, this.#targetAngle)) < 0.12)
+        ship.fire(true);
     }
   }
 

@@ -1,3 +1,6 @@
+import { Asteroid } from "./entities/asteroid";
+import { ITEM_CONFIG } from "@/shared/game/items";
+import { Pickup } from "./entities/pickup";
 import { level as levelUtils } from "@/shared/game/entities/player";
 import { Vector2 } from "@/shared/math/vector";
 import { wrappedDistance } from "@/shared/math/world-wrap";
@@ -771,6 +774,21 @@ export class ServerNetwork {
       }
 
       playerRadarData.push(...asteroidRadarData);
+      if (player.ship) {
+        const world = this.engine.world;
+        for (const entity of world
+          .query(player.ship.position, ITEM_CONFIG.radarRadius)
+          .precise()
+          .array()) {
+          const type =
+            entity instanceof Pickup
+              ? "repair"
+              : entity instanceof Asteroid && entity.itemKind === "repair"
+                ? "repair-asteroid"
+                : null;
+          if (type) playerRadarData.push({ type, x: entity.x, y: entity.y });
+        }
+      }
 
       radarData.set(player.id, playerRadarData);
     }

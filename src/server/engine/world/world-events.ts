@@ -1,4 +1,5 @@
 import type {
+  ItemPickupWorldEvent,
   EntityDamageWorldEvent,
   EntityDestroyWorldEvent,
   PlayerLevelUpWorldEvent,
@@ -37,7 +38,11 @@ export type WorldPlayerLevelUpEvent = Omit<
 > &
   WorldEventMetadata;
 
+export type WorldItemPickupEvent = Omit<ItemPickupWorldEvent, "simTick" | "tickEventIndex"> &
+  WorldEventMetadata;
+
 export type WorldEvent =
+  | WorldItemPickupEvent
   | WorldEntityDamageEvent
   | WorldEntityDestroyEvent
   | WorldPlayerScoreEvent

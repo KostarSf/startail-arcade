@@ -32,6 +32,7 @@ export interface DamageTextRequest {
 }
 
 export interface ExplosionRequest {
+  kind?: "pickup";
   x: number;
   y: number;
 }
@@ -90,6 +91,7 @@ export interface ClientServices extends Record<string, unknown> {
       small: import("pixi.js").Texture[];
       medium: import("pixi.js").Texture[];
       large: import("pixi.js").Texture[];
+      item: import("pixi.js").Texture[];
     };
     bullet: import("pixi.js").Texture;
     glare: import("pixi.js").Texture;
@@ -100,6 +102,8 @@ export interface ClientServices extends Record<string, unknown> {
     exp1: import("pixi.js").Texture;
     exp2: import("pixi.js").Texture;
     exp3: import("pixi.js").Texture;
+    repair: import("pixi.js").Texture;
+    pickup: import("pixi.js").Texture;
   };
   player: {
     id: string | null;

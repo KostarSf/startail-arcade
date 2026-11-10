@@ -225,6 +225,7 @@ export class WorldStreaming {
       health: data[o + 8],
       maxHealth: data[o + 9],
       earnablePoints: data[o + 10],
+      itemKind: data[o + 11] === 1 ? "repair" : undefined,
     });
     a.streamingId = key;
     return a;
@@ -245,6 +246,7 @@ export class WorldStreaming {
           a.health,
           a.maxHealth,
           a.earnablePoints,
+          a.itemKind === "repair" ? 1 : 0,
         ],
         i * WIDTH,
       ),

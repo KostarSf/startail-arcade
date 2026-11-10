@@ -363,9 +363,12 @@ function Radar() {
     const ships: typeof stats.radarData = [];
     const asteroids: typeof stats.radarData = [];
     const pirates: typeof stats.radarData = [];
+    const repairs: typeof stats.radarData = [];
 
     for (const point of stats.radarData) {
-      if (point.type === "player") {
+      if (point.type === "repair" || point.type === "repair-asteroid") {
+        repairs.push(point);
+      } else if (point.type === "player") {
         players.push(point);
       } else if (point.type === "pirate") {
         pirates.push(point);
@@ -389,6 +392,20 @@ function Radar() {
         ctx.beginPath();
         ctx.arc(radarX, radarY, 1, 0, Math.PI * 2);
         ctx.fill();
+      }
+    }
+
+    // Repair rocks are hollow squares; loose repairs are bright crosses.
+    ctx.shadowBlur = 0;
+    for (const point of repairs) {
+      const x = ((point.x + worldRadius) / (2 * worldRadius)) * radarSize;
+      const y = ((point.y + worldRadius) / (2 * worldRadius)) * radarSize;
+      ctx.strokeStyle = "#59d98e";
+      ctx.fillStyle = "#8dffb5";
+      if (point.type === "repair-asteroid") ctx.strokeRect(x - 2, y - 2, 4, 4);
+      else {
+        ctx.fillRect(x - 2, y - 0.5, 4, 1);
+        ctx.fillRect(x - 0.5, y - 2, 1, 4);
       }
     }
 

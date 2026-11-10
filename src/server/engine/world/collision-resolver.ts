@@ -1,6 +1,8 @@
 import { Vector2 } from "@/shared/math/vector";
 import { Asteroid } from "../entities/asteroid";
 import { Bullet } from "../entities/bullet";
+import { Pickup } from "../entities/pickup";
+import { Ship } from "../entities/ship";
 import type { BaseEntity } from "../entities/base-entity";
 import type { World } from "./world";
 
@@ -254,6 +256,13 @@ export class CollisionResolver {
 
   #canCollide(world: World, a: BaseEntity, b: BaseEntity) {
     if (a.removed || b.removed) return false;
+    if (a instanceof Pickup || b instanceof Pickup) {
+      const other = a instanceof Pickup ? b : a;
+      if (!(other instanceof Asteroid || other instanceof Bullet || other instanceof Ship))
+        return false;
+      if (other instanceof Ship && (!other.isAlive || other.health >= other.maxHealth))
+        return false;
+    }
     if ((a instanceof Bullet && a.owner === b) || (b instanceof Bullet && b.owner === a))
       return false;
     if (world.chunkActivity.isEntitySleeping(a)) {

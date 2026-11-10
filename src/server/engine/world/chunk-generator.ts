@@ -1,8 +1,9 @@
+import { ITEM_CONFIG } from "@/shared/game/items";
 import { Random } from "@/shared/math/random";
 import { worldDensity } from "./utils/fbm-domain-warp-world-generator";
 
-// id, x, y, angle, vx, vy, va, radius, health, maxHealth, earnablePoints.
-export const ASTEROID_RECORD_WIDTH = 11;
+// id, x, y, angle, vx, vy, va, radius, health, maxHealth, earnablePoints, itemKind (0=none, 1=repair).
+export const ASTEROID_RECORD_WIDTH = 12;
 export type ChunkManifest = { counts: Uint32Array; offsets: Uint32Array };
 
 /** Exact logical population; small metadata only, no entity generation at startup. */
@@ -47,8 +48,10 @@ export function* generateChunk(
   seed: number,
   index: number,
   manifest: ChunkManifest,
+  itemChance: number = ITEM_CONFIG.mediumAsteroidChance,
 ): Generator<void, Float64Array> {
   const axis = Math.ceil((radius * 2) / size);
+  const itemRandom = new Random((seed ^ Math.imul(index + 1, 0x85ebca6b)) >>> 0);
   const random = new Random((seed ^ Math.imul(index + 1, 0x9e3779b1)) >>> 0);
   const count = manifest.counts[index]!;
   const data = new Float64Array(count * ASTEROID_RECORD_WIDTH);
@@ -81,6 +84,7 @@ export function* generateChunk(
         health,
         health,
         Math.floor(r * 1.25 * (0.8 + random.next() * 0.5)),
+        kind === 1 && itemRandom.next() < itemChance ? 1 : 0,
       ],
       i * ASTEROID_RECORD_WIDTH,
     );

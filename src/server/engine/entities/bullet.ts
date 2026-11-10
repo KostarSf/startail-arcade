@@ -2,6 +2,7 @@ import { SHIP_CONSTANTS } from "@/shared/game/entities/ship";
 import type { World } from "../world/world";
 import { BaseEntity, type IBaseEntity } from "./base-entity";
 import { LivingEntity } from "./living-entity";
+import { Pickup } from "./pickup";
 
 export interface IBullet extends IBaseEntity {
   shotId?: number;
@@ -86,7 +87,14 @@ export class Bullet extends BaseEntity {
   }
 
   override onCollisionStart(world: World, other: BaseEntity): void {
+    if (this.removed || other.removed) return;
     if (other === this.#owner) return;
+
+    if (other instanceof Pickup) {
+      other.push(this.velocity.sub(other.velocity));
+      this.remove();
+      return;
+    }
 
     if (other instanceof LivingEntity) {
       const speedFactor = Math.max(
